@@ -15,8 +15,8 @@ Luna follows a modular architecture to ensure performance and maintainability.
 * **NNUE Inference**: Efficient evaluation using quantized neural network weights.
 * **Transposition Table**: Highly optimized cache for search results with aging support.
 
-##License
-"Luna is licensed under the GPLv3. While I welcome contributions and improvements to the engine, I retain the copyright and the right to define the project's direction. Please refer to the LICENSE file for full details."
+## License
+Luna is licensed under the GPLv3. While I welcome contributions and improvements to the engine, I retain the copyright and the right to define the project's direction. Please refer to the LICENSE file for full details.
 
 ## Getting Started
 To build the engine from source, you will need the Rust toolchain installed.
