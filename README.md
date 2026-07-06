@@ -18,11 +18,10 @@ Luna follows a modular architecture to ensure performance and maintainability.
 ## License
 Luna is licensed under the GPLv3. While I welcome contributions and improvements to the engine, I retain the copyright and the right to define the project's direction. Please refer to the LICENSE file for full details.
 
-## Getting Started
-To build the engine from source, you will need the Rust toolchain installed.
-
 Luna is developed by Daniele Marpino, with special thanks to my son Alessandro Marpino for his invaluable help in stress-testing and refining the engine.
 
+## Getting Started
+To build the engine from source, you will need the Rust toolchain installed.
 
 ```bash
 # Clone the repository
