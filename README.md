@@ -21,6 +21,9 @@ Luna is licensed under the GPLv3. While I welcome contributions and improvements
 ## Getting Started
 To build the engine from source, you will need the Rust toolchain installed.
 
+Luna is developed by Daniele Marpino, with special thanks to my son Alessandro Marpino for his invaluable help in stress-testing and refining the engine.
+
+
 ```bash
 # Clone the repository
 git clone [https://github.com/Spunc595/Luna-Chess-Engine.git](https://github.com/Spunc595/luna-engine.git)
