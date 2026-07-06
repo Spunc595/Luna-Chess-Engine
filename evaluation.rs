@@ -1,431 +1,174 @@
-use crate::board::{Scacchiera, Pezzo, Colore, Casella};
+use crate::board::{Scacchiera, Colore, Pezzo};
 
-pub fn valuta_posizione(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    // 1. VALORE MATERIALE
-    valore += valuta_materiale(scacchiera);
-    
-    // 2. SVILUPPO PEZZI
-    valore += valuta_sviluppo(scacchiera);
-    
-    // 3. CONTROLLO CENTRO
-    valore += valuta_controllo_centro(scacchiera);
-    
-    // 4. SICUREZZA DEL RE
-    valore += valuta_sicurezza_re(scacchiera);
-    
-    // 5. STRUTTURA PEDONI
-    valore += valuta_struttura_pedoni(scacchiera);
-    
-    // 6. MOBILITÀ PEZZI
-    valore += valuta_mobilita(scacchiera);
-    
-    // 7. ARROCCO COMPLETATO
-    valore += valuta_arrocco(scacchiera);
-    
-    // Regola del colore attivo
-    match scacchiera.colore_attivo() {
-        Colore::Bianco => valore,
-        Colore::Nero => -valore,
-    }
-}
+// --- 1. MATERIAL VALUES ---
+// Base values expressed in centipawns (100 points = 1 pawn)[cite: 4].
+const MG_PAWN: i32 = 100;
+const MG_KNIGHT: i32 = 320;
+const MG_BISHOP: i32 = 330;
+const MG_ROOK: i32 = 500;
+const MG_QUEEN: i32 = 900;
 
-fn valuta_materiale(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
+// --- 2. PIECE-SQUARE TABLES (PST) ---
+// 64-element arrays mapping the positional value of each piece[cite: 4].
+// Oriented from White's perspective (from rank 1 to rank 8)[cite: 4].
+
+#[rustfmt::skip]
+const PAWN_PST: [i32; 64] = [
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0
+];
+
+#[rustfmt::skip]
+const KNIGHT_PST: [i32; 64] = [
+    -50,-40,-30,-30,-30,-30,-40,-50,
+    -40,-20,  0,  0,  0,  0,-20,-40,
+    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 15, 20, 20, 15,  5,-30,
+    -30,  0, 15, 20, 20, 15,  0,-30,
+    -30,  5, 10, 15, 15, 10,  5,-30,
+    -40,-20,  0,  5,  5,  0,-20,-40,
+    -50,-40,-30,-30,-30,-30,-40,-50
+];
+
+#[rustfmt::skip]
+const BISHOP_PST: [i32; 64] = [
+    -20,-10,-10,-10,-10,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5, 10, 10,  5,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  5,  0,  0,  0,  0,  5,-10,
+    -20,-10,-10,-10,-10,-10,-10,-20
+];
+
+#[rustfmt::skip]
+const ROOK_PST: [i32; 64] = [
+     0,  0,  0,  0,  0,  0,  0,  0,
+     5, 10, 10, 10, 10, 10, 10,  5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+     0,  0,  0,  5,  5,  0,  0,  0
+];
+
+#[rustfmt::skip]
+const QUEEN_PST: [i32; 64] = [
+    -20,-10,-10, -5, -5,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+     -5,  0,  5,  5,  5,  5,  0, -5,
+      0,  0,  5,  5,  5,  5,  0, -5,
+    -10,  5,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  0,  0,-10,
+    -20,-10,-10, -5, -5,-10,-10,-20
+];
+
+#[rustfmt::skip]
+const KING_PST: [i32; 64] = [
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -20,-30,-30,-40,-40,-30,-30,-20,
+    -10,-20,-20,-20,-20,-20,-20,-10,
+     20, 20,  0,  0,  0,  0, 20, 20,
+     20, 30, 10,  0,  0, 10, 30, 20
+];
+
+// --- MAIN FUNCTION ---
+
+/// Statically evaluates the current position on the board[cite: 4].
+/// Calculates the material score aggregated with the positional score (PST)[cite: 4].
+/// Applies bonuses for advanced pawns and endgame heuristics (Mop-Up)[cite: 4].
+/// The final score is normalized for Negamax search (positive for the active player)[cite: 4].
+pub fn evaluate(board: &Scacchiera) -> i32 {
+    let mut score = 0;
     
-    for riga in 0..8 {
-        for colonna in 0..8 {
-            if let Some(casella) = Casella::nuova(colonna as u8, riga as u8) {
-                if let Some((pezzo, colore)) = scacchiera.ottieni_pezzo(casella) {
-                    let valore_pezzo = match pezzo {
-                        Pezzo::Pedone => 100,
-                        Pezzo::Cavallo => 320,
-                        Pezzo::Alfiere => 330,
-                        Pezzo::Torre => 500,
-                        Pezzo::Regina => 900,
-                        Pezzo::Re => 20000,
-                    };
+    // Variables to track the Kings' positions during the single iteration of the squares[cite: 4].
+    let mut white_king_sq: i32 = -1;
+    let mut black_king_sq: i32 = -1;
+
+    // Sequential scan of the 64 squares[cite: 4].
+    for sq in 0..64 {
+        if let Some((colore, pezzo)) = board.pezzo_e_colore_in(sq) {
+            let is_white = colore == Colore::Bianco;
+            let sq_idx = sq as usize;
+
+            // Vertically mirrors the index if the piece is Black for symmetry relative to White[cite: 4].
+            let pst_idx = if is_white { sq_idx } else { sq_idx ^ 56 };
+            let mut val = 0;
+
+            match pezzo {
+                Pezzo::Pedone => {
+                    val = MG_PAWN + PAWN_PST[pst_idx];
                     
-                    let segno = match colore {
-                        Colore::Bianco => 1,
-                        Colore::Nero => -1,
-                    };
+                    // --- ADVANCED PAWN BONUS ---
+                    let rank = sq_idx / 8; 
+                    let advancement = if is_white { rank } else { 7 - rank };
                     
-                    valore += valore_pezzo * segno;
+                    // Applies a geometric incremental reward if the pawn crosses the middle of the board[cite: 4].
+                    if advancement >= 4 {
+                        val += (advancement as i32).pow(2) * 5; 
+                    }
+                },
+                Pezzo::Cavallo => { val = MG_KNIGHT + KNIGHT_PST[pst_idx]; },
+                Pezzo::Alfiere => { val = MG_BISHOP + BISHOP_PST[pst_idx]; },
+                Pezzo::Torre   => { val = MG_ROOK   + ROOK_PST[pst_idx]; },
+                Pezzo::Regina  => { val = MG_QUEEN  + QUEEN_PST[pst_idx]; },
+                Pezzo::Re => {
+                    if is_white { white_king_sq = sq as i32; } 
+                    else { black_king_sq = sq as i32; }
                     
-                    // Valori posizionali
-                    valore += valuta_posizione_pezzo(pezzo, colore, riga, colonna) * segno;
-                }
-            }
-        }
-    }
-    
-    valore
-}
-
-fn valuta_posizione_pezzo(pezzo: Pezzo, colore: Colore, riga: usize, colonna: usize) -> i32 {
-    // Determina se siamo in fase iniziale (semplificato)
-    let fase_iniziale = true; // Per ora sempre fase iniziale
-    
-    match pezzo {
-        Pezzo::Pedone => {
-            // I pedoni valgono di più man mano che avanzano
-            let progresso = match colore {
-                Colore::Bianco => riga as i32,
-                Colore::Nero => (7 - riga) as i32,
+                    val = KING_PST[pst_idx]; 
+                },
             };
-            
-            // Bonus per pedoni centrali
-            let bonus_centro = if colonna >= 2 && colonna <= 5 {
-                10
-            } else {
-                0
-            };
-            
-            progresso * 15 + bonus_centro
-        }
-        Pezzo::Cavallo => {
-            // I cavalli sono migliori al centro
-            let centro = (3 - (riga as i32 - 3).abs()) + (3 - (colonna as i32 - 3).abs());
-            
-            // Penalità per cavalli sul bordo
-            let penalita_bordo = if riga == 0 || riga == 7 || colonna == 0 || colonna == 7 {
-                -20
-            } else {
-                0
-            };
-            
-            centro * 10 + penalita_bordo
-        }
-        Pezzo::Alfiere => {
-            // Gli alfieri sono migliori su diagonali lunghe
-            let bonus_diagonale = if riga == colonna || riga + colonna == 7 {
-                15
-            } else {
-                0
-            };
-            
-            bonus_diagonale
-        }
-        Pezzo::Torre => {
-            // Le torre sono migliori su colonne aperte/semi-aperte
-            let bonus_colonna = if riga >= 2 && riga <= 5 {
-                10
-            } else {
-                0
-            };
-            
-            // Bonus per torre sulla 7a traversa (per il bianco)
-            let bonus_settima = match colore {
-                Colore::Bianco if riga == 6 => 25,
-                Colore::Nero if riga == 1 => 25,
-                _ => 0,
-            };
-            
-            bonus_colonna + bonus_settima
-        }
-        Pezzo::Regina => {
-            // La regina è più forte al centro
-            let distanza_dal_centro = (riga as i32 - 3).abs() + (colonna as i32 - 3).abs();
-            -distanza_dal_centro * 3
-        }
-        Pezzo::Re => {
-            // Distanza dal centro
-            let distanza_dal_centro = (riga as i32 - 3).abs() + (colonna as i32 - 3).abs();
-            
-            if fase_iniziale {
-                // Bonus per essere nella casella di arrocco
-                if (colore == Colore::Bianco && riga == 0 && (colonna == 6 || colonna == 2)) ||
-                   (colore == Colore::Nero && riga == 7 && (colonna == 6 || colonna == 2)) {
-                    30
-                } else {
-                    -distanza_dal_centro * 5
-                }
-            } else {
-                // Fase finale: il re va al centro
-                -distanza_dal_centro * 10
-            }
+
+            // Algebraic sum: White's values increase the score, Black's decrease it[cite: 4].
+            if is_white { score += val; } else { score -= val; }
         }
     }
-}
 
-fn valuta_sviluppo(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    // Bonus per sviluppo nei primi 10 movimenti
-    if scacchiera.numero_mossa() < 10 {
-        // Conta pezzi sviluppati (fuori dalla traversa iniziale)
-        let pezzi_bianchi_sviluppati = conta_pezzi_sviluppati(scacchiera, Colore::Bianco);
-        let pezzi_neri_sviluppati = conta_pezzi_sviluppati(scacchiera, Colore::Nero);
-        
-        valore += (pezzi_bianchi_sviluppati - pezzi_neri_sviluppati) * 15;
-        
-        // Penalità per muovere la stessa pedina due volte nelle prime mosse
-        valore -= conta_mosse_pedone_doppie(scacchiera) * 10;
-        
-        // Bonus per arrocco
-        let diritti = scacchiera.diritti_arrocco();
-        if diritti.bianco_lato_re && diritti.bianco_lato_regina {
-            // Non ha ancora arroccato
-            valore -= 20;
-        }
-        if diritti.nero_lato_re && diritti.nero_lato_regina {
-            valore += 20;
+    // --- 3. MOP-UP HEURISTIC ---
+    // Triggers the logic of pushing the enemy king towards the edges in conditions of clear advantage[cite: 4].
+    if white_king_sq != -1 && black_king_sq != -1 {
+        if score > 300 {
+            score += evaluate_mop_up(white_king_sq, black_king_sq);
+        } 
+        else if score < -300 {
+            score -= evaluate_mop_up(black_king_sq, white_king_sq);
         }
     }
-    
-    valore
+
+    // Adaptation to the Negamax paradigm: inverts the sign if the current turn belongs to Black[cite: 4].
+    if board.turno == Colore::Bianco { score } else { -score }
 }
 
-fn conta_pezzi_sviluppati(scacchiera: &Scacchiera, colore: Colore) -> i32 {
-    let mut count = 0;
-    
-    // Cavalli e alfieri fuori dalla traversa iniziale
-    let traversa_iniziale = match colore {
-        Colore::Bianco => 0,
-        Colore::Nero => 7,
-    };
-    
-    for riga in 0..8 {
-        for colonna in 0..8 {
-            if let Some(casella) = Casella::nuova(colonna as u8, riga as u8) {
-                if let Some((pezzo, colore_pezzo)) = scacchiera.ottieni_pezzo(casella) {
-                    if colore_pezzo == colore {
-                        match pezzo {
-                            Pezzo::Cavallo | Pezzo::Alfiere => {
-                                if riga != traversa_iniziale {
-                                    count += 1;
-                                }
-                            }
-                            Pezzo::Torre | Pezzo::Regina => {
-                                // Torri e regina considerate sviluppate se non sulla colonna iniziale
-                                if (colonna != 0 && colonna != 7) || riga != traversa_iniziale {
-                                    count += 1;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    count
-}
+/// Calculates the Mop-Up bonus to force the disadvantaged King towards the corner and 
+/// bring one's own King closer to assist in the checkmate[cite: 4].
+fn evaluate_mop_up(winner_king_sq: i32, loser_king_sq: i32) -> i32 {
+    let mut bonus = 0;
 
-fn conta_mosse_pedone_doppie(_scacchiera: &Scacchiera) -> i32 {
-    // Semplificato: implementazione vuota per ora
-    0
-}
+    let l_rank = loser_king_sq / 8;
+    let l_file = loser_king_sq % 8;
+    let w_rank = winner_king_sq / 8;
+    let w_file = winner_king_sq % 8;
 
-fn valuta_controllo_centro(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    // Caselle centrali: d4, e4, d5, e5
-    let caselle_centro = [
-        Casella::nuova(3, 3), // d4
-        Casella::nuova(4, 3), // e4
-        Casella::nuova(3, 4), // d5
-        Casella::nuova(4, 4), // e5
-    ];
-    
-    for casella_opt in &caselle_centro {
-        if let Some(casella) = casella_opt {
-            if scacchiera.casella_attaccata(*casella, Colore::Bianco) {
-                valore += 10;
-            }
-            if scacchiera.casella_attaccata(*casella, Colore::Nero) {
-                valore -= 10;
-            }
-            
-            // Controllo con pedoni
-            if let Some((pezzo, colore)) = scacchiera.ottieni_pezzo(*casella) {
-                if pezzo == Pezzo::Pedone {
-                    valore += match colore {
-                        Colore::Bianco => 30,
-                        Colore::Nero => -30,
-                    };
-                }
-            }
-        }
-    }
-    
-    valore
-}
+    // 1. Pushing the losing King towards the perimeter (Manhattan distance relative to the geometric center)[cite: 4].
+    let center_dist = (2 * l_rank - 7).abs() + (2 * l_file - 7).abs();
+    bonus += center_dist * 25; 
 
-fn valuta_sicurezza_re(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    // Penalità per re esposto
-    for colore in [Colore::Bianco, Colore::Nero].iter() {
-        if let Some(pos_re) = scacchiera.bitboard_pezzo(Pezzo::Re, *colore).lsb() {
-            let casella_re = Casella::da_indice(pos_re).unwrap();
-            
-            // Conta pedoni che proteggono il re
-            let pedoni_protettori = conta_pedoni_protettori(scacchiera, casella_re, *colore);
-            
-            // Conta attacchi vicino al re
-            let attacchi_vicini = conta_attacchi_vicini(scacchiera, casella_re, colore.opposto());
-            
-            let segno = match colore {
-                Colore::Bianco => 1,
-                Colore::Nero => -1,
-            };
-            
-            valore += (pedoni_protettori * 10 - attacchi_vicini * 15) * segno;
-        }
-    }
-    
-    valore
-}
+    // 2. Cohesion between the Kings: rewards the approach of the dominant King[cite: 4].
+    let dist_kings = (w_rank - l_rank).abs() + (w_file - l_file).abs();
+    bonus += (14 - dist_kings) * 20;
 
-fn conta_pedoni_protettori(scacchiera: &Scacchiera, casella_re: Casella, colore: Colore) -> i32 {
-    let mut count = 0;
-    
-    // Caselle adiacenti al re
-    for dx in -1..=1 {
-        for dy in -1..=1 {
-            if dx == 0 && dy == 0 {
-                continue;
-            }
-            
-            if let Some(casella) = casella_re.offset(dx, dy) {
-                if let Some((pezzo, colore_pezzo)) = scacchiera.ottieni_pezzo(casella) {
-                    if pezzo == Pezzo::Pedone && colore_pezzo == colore {
-                        count += 1;
-                    }
-                }
-            }
-        }
-    }
-    
-    count
-}
-
-fn conta_attacchi_vicini(scacchiera: &Scacchiera, casella_re: Casella, colore_attaccante: Colore) -> i32 {
-    let mut count = 0;
-    
-    // Controlla attacchi nelle caselle vicine al re
-    for dx in -2..=2 {
-        for dy in -2..=2 {
-            if let Some(casella) = casella_re.offset(dx, dy) {
-                if scacchiera.casella_attaccata(casella, colore_attaccante) {
-                    count += 1;
-                }
-            }
-        }
-    }
-    
-    count
-}
-
-fn valuta_struttura_pedoni(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    // Bonus per pedoni collegati
-    valore += valuta_pedoni_collegati(scacchiera, Colore::Bianco);
-    valore -= valuta_pedoni_collegati(scacchiera, Colore::Nero);
-    
-    // Penalità per pedoni isolati
-    valore -= valuta_pedoni_isolati(scacchiera, Colore::Bianco);
-    valore += valuta_pedoni_isolati(scacchiera, Colore::Nero);
-    
-    valore
-}
-
-fn valuta_pedoni_collegati(scacchiera: &Scacchiera, colore: Colore) -> i32 {
-    let pedoni = scacchiera.bitboard_pezzo(Pezzo::Pedone, colore);
-    let mut count = 0;
-    
-    let mut temp = pedoni;
-    while let Some(square) = temp.pop_lsb() {
-        let file = square % 8;
-        
-        // Controlla pedoni nelle colonne adiacenti
-        if file > 0 {
-            if pedoni.contiene_casella(square - 1) {
-                count += 1;
-            }
-        }
-        if file < 7 {
-            if pedoni.contiene_casella(square + 1) {
-                count += 1;
-            }
-        }
-    }
-    
-    count * 10
-}
-
-fn valuta_pedoni_isolati(scacchiera: &Scacchiera, colore: Colore) -> i32 {
-    let pedoni = scacchiera.bitboard_pezzo(Pezzo::Pedone, colore);
-    let mut count = 0;
-    
-    for file in 0..8 {
-        let mut has_pawn = false;
-        let mut has_adjacent_pawn = false;
-        
-        for rank in 0..8 {
-            let square = rank * 8 + file;
-            if pedoni.contiene_casella(square as u8) {
-                has_pawn = true;
-                
-                // Controlla colonne adiacenti
-                if file > 0 {
-                    for r in 0..8 {
-                        let adj_square = r * 8 + (file - 1);
-                        if pedoni.contiene_casella(adj_square as u8) {
-                            has_adjacent_pawn = true;
-                            break;
-                        }
-                    }
-                }
-                if file < 7 && !has_adjacent_pawn {
-                    for r in 0..8 {
-                        let adj_square = r * 8 + (file + 1);
-                        if pedoni.contiene_casella(adj_square as u8) {
-                            has_adjacent_pawn = true;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        
-        if has_pawn && !has_adjacent_pawn {
-            count += 1;
-        }
-    }
-    
-    count * 20
-}
-
-fn valuta_mobilita(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    // Stima basata sul numero di pezzi
-    let pezzi_bianchi = scacchiera.bitboard_colore(Colore::Bianco).conta_bit() as i32;
-    let pezzi_neri = scacchiera.bitboard_colore(Colore::Nero).conta_bit() as i32;
-    
-    valore += (pezzi_bianchi - pezzi_neri) * 5;
-    
-    valore
-}
-
-fn valuta_arrocco(scacchiera: &Scacchiera) -> i32 {
-    let mut valore = 0;
-    
-    let diritti = scacchiera.diritti_arrocco();
-    
-    // Se ha già arroccato, bonus
-    if !diritti.bianco_lato_re && !diritti.bianco_lato_regina {
-        valore += 30;
-    }
-    if !diritti.nero_lato_re && !diritti.nero_lato_regina {
-        valore -= 30;
-    }
-    
-    valore
+    bonus
 }

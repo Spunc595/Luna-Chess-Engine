@@ -1,172 +1,312 @@
-use crate::board::{Scacchiera, Pezzo, Colore};
-use crate::movegen::{genera_mosse, Mossa};
-use crate::evaluation::valuta_posizione;
-use crate::opening_book::OpeningBook;
+use crate::board::{Scacchiera, Mossa};
+use crate::tt::{TranspositionTable, Bound};
+use crate::zobrist::ZobristKeys;
+use crate::nnue::LunaNNUE;
+use std::time::Instant;
 
-#[derive(Debug, Clone, Copy)]
-pub struct RisultatoRicerca {
-    pub valore: i32,
-    pub mossa: Option<Mossa>,
-    pub nodi_visitati: u64,
+const MAX_PLY: usize = 64;
+
+/// Represents the Principal Variation (PV).
+/// Uses a fixed-size array to avoid dynamic memory allocations (heap) 
+/// during search, maximizing performance.[cite: 10]
+#[derive(Clone)]
+pub struct PvLine {
+    pub moves: [Mossa; MAX_PLY],
+    pub len: usize,
 }
 
-pub struct SearchEngine {
-    opening_book: OpeningBook,
+impl PvLine {
+    pub fn new() -> Self {
+        PvLine {
+            moves: [Mossa::null(); MAX_PLY],
+            len: 0,
+        }
+    }
 }
 
-impl SearchEngine {
-    pub fn nuova() -> Self {
-        SearchEngine {
-            opening_book: OpeningBook::nuova(),
+/// Contains information about the current search state.[cite: 10]
+pub struct SearchInfo {
+    pub start_time: Instant,
+    pub hard_limit: u128,
+    pub soft_limit: u128,
+    pub depth_limit: i32,
+    pub nodes: u64,
+    pub stopped: bool,
+    /// Two-dimensional array for Killer Moves. 
+    /// Stores up to two moves that caused a cutoff for each ply of the tree.[cite: 10]
+    pub killer_moves: [[Mossa; 2]; MAX_PLY],
+}
+
+impl SearchInfo {
+    pub fn new(time_limit: u128, depth_limit: i32) -> Self {
+        let soft = if time_limit > 500 { time_limit * 60 / 100 } else { time_limit };
+        SearchInfo {
+            start_time: Instant::now(),
+            hard_limit: time_limit,
+            soft_limit: soft,
+            depth_limit,
+            nodes: 0,
+            stopped: false,
+            // Initialize all killer moves to a null move[cite: 10]
+            killer_moves: [[Mossa::null(); 2]; MAX_PLY],
         }
     }
-    
-    pub fn ricerca_miglior_mossa(&self, scacchiera: &Scacchiera, profondita: i32) -> RisultatoRicerca {
-        // Prima controlla il libro delle aperture
-        if let Some(mossa_libro) = self.opening_book.cerca_mossa(scacchiera) {
-            println!("info string Mossa dal libro delle aperture");
-            return RisultatoRicerca {
-                valore: 0,
-                mossa: Some(mossa_libro),
-                nodi_visitati: 1,
-            };
+
+    /// Periodically checks (every 2048 nodes) if the available time has run out.[cite: 10]
+    #[inline(always)]
+    pub fn check_time(&mut self) -> bool {
+        if (self.nodes & 2047) == 0 {
+            let elapsed = self.start_time.elapsed().as_millis();
+            if elapsed >= self.hard_limit {
+                self.stopped = true;
+            }
         }
-        
-        // Altrimenti usa l'algoritmo di ricerca
-        self.negamax(scacchiera, profondita, -100000, 100000)
+        self.stopped
     }
-    
-    fn negamax(&self, scacchiera: &Scacchiera, profondita: i32, alfa: i32, beta: i32) -> RisultatoRicerca {
-        if profondita == 0 {
-            return RisultatoRicerca {
-                valore: valuta_posizione(scacchiera),
-                mossa: None,
-                nodi_visitati: 1,
-            };
-        }
+}
+
+/// Main entry point for the search.
+/// Uses Iterative Deepening to explore the tree progressively.[cite: 10]
+pub fn iterative_deepening(
+    board: &mut Scacchiera, 
+    info: &mut SearchInfo, 
+    tt: &mut TranspositionTable,
+    z: &ZobristKeys,
+    nnue: Option<&LunaNNUE>
+) -> (Mossa, i32) {
+    let mut best_move = Mossa::null();
+    let mut score = 0;
+    let mut last_best_move = Mossa::null();
+    let mut stability_counter = 0;
+
+    // Initialize search window (Aspiration Window)[cite: 10]
+    let mut alpha = -50000;
+    let mut beta = 50000;
+
+    for depth in 1..=info.depth_limit {
+        let mut pv_line = PvLine::new();
         
-        let mosse = genera_mosse(scacchiera);
-        if mosse.is_empty() {
-            // Scacco matto o stallo
-            if scacchiera.re_in_scacco(scacchiera.colore_attivo()) {
-                // Scacco matto
-                return RisultatoRicerca {
-                    valore: -100000 + (profondita as i32),
-                    mossa: None,
-                    nodi_visitati: 1,
-                };
+        // Loop for Aspiration Window: if the score goes out of bounds, 
+        // widen the bounds and repeat the search at the same depth.[cite: 10]
+        loop {
+            score = negamax(board, depth, 0, alpha, beta, info, tt, z, nnue, true, &mut pv_line);
+            
+            if info.stopped { break; }
+
+            // Bound check for the aspiration window[cite: 10]
+            if score <= alpha || score >= beta {
+                alpha = -50000;
+                beta = 50000;
+                continue; // Window failed, retry with infinite bounds
+            }
+            
+            // Exact window: prepare narrow bounds for the next depth[cite: 10]
+            alpha = score - 50;
+            beta = score + 50;
+            break; 
+        }
+
+        if info.stopped && depth > 1 { break; }
+
+        // Handle output and time stability logic[cite: 10]
+        if pv_line.len > 0 {
+            best_move = pv_line.moves[0];
+            let elapsed = info.start_time.elapsed().as_millis();
+            
+            if best_move.data == last_best_move.data {
+                stability_counter += 1;
             } else {
-                // Stallo
-                return RisultatoRicerca {
-                    valore: 0,
-                    mossa: None,
-                    nodi_visitati: 1,
-                };
+                last_best_move = best_move;
+                stability_counter = 0;
             }
+
+            // Flexible time management: stop if the best move is stable[cite: 10]
+            if elapsed > info.soft_limit && (stability_counter >= 3 || depth > 8) {
+                info.stopped = true;
+            }
+
+            let nps = if elapsed > 0 { info.nodes as u128 * 1000 / elapsed } else { 0 };
+            
+            print!("info depth {} score cp {} nodes {} nps {} time {} pv", 
+                depth, score, info.nodes, nps, elapsed);
+            for i in 0..pv_line.len { 
+                print!(" {}", pv_line.moves[i].to_uci()); 
+            }
+            println!();
         }
         
-        // Ordina le mosse per euristica
-        let mosse_ordinate = self.ordina_mosse(&mosse, scacchiera);
-        
-        let mut miglior_valore = -100000;
-        let mut miglior_mossa = None;
-        let mut nodi_totali = 0;
-        let mut alfa_locale = alfa;
-        
-        for mossa in mosse_ordinate {
-            let mut nuova_scacchiera = scacchiera.clone();
-            crate::movegen::esegui_mossa_completa(&mut nuova_scacchiera, &mossa);
-            
-            let risultato = self.negamax(&nuova_scacchiera, profondita - 1, -beta, -alfa_locale);
-            let valore = -risultato.valore;
-            
-            nodi_totali += risultato.nodi_visitati;
-            
-            if valore > miglior_valore {
-                miglior_valore = valore;
-                miglior_mossa = Some(mossa);
-            }
-            
-            if valore > alfa_locale {
-                alfa_locale = valore;
-                if alfa_locale >= beta {
-                    // Taglio beta
-                    break;
-                }
-            }
-        }
-        
-        RisultatoRicerca {
-            valore: miglior_valore,
-            mossa: miglior_mossa,
-            nodi_visitati: nodi_totali,
-        }
+        if info.stopped { break; }
+    }
+
+    // Safety fallback: if nothing is found, return the first legal move[cite: 10]
+    if best_move.is_null() {
+        let legali = board.genera_mosse_legali(z);
+        if !legali.is_empty() { best_move = legali[0]; }
+    }
+
+    (best_move, score)
+}
+
+/// Recursive Negamax algorithm with Alpha-Beta pruning and Principal Variation Search (PVS).[cite: 10]
+fn negamax(
+    board: &mut Scacchiera, 
+    depth: i32,
+    ply: usize, 
+    mut alpha: i32, 
+    mut beta: i32, 
+    info: &mut SearchInfo,
+    tt: &mut TranspositionTable,
+    z: &ZobristKeys,
+    nnue: Option<&LunaNNUE>,
+    allow_null: bool,
+    pv_line: &mut PvLine
+) -> i32 {
+    pv_line.len = 0;
+
+    if info.check_time() { return 0; }
+    info.nodes += 1;
+
+    let pv_node = beta - alpha > 1; 
+
+    // Draw conditions[cite: 10]
+    if board.ply > 0 && (board.is_repetition() || board.rule_50 >= 100) {
+        return 0;
+    }
+
+    // Query Transposition Table (TT)[cite: 10]
+    if let Some(entry) = tt.probe(board.hash, depth, alpha, beta) {
+        if !pv_node { return entry; }
     }
     
-    fn ordina_mosse(&self, mosse: &[Mossa], scacchiera: &Scacchiera) -> Vec<Mossa> {
-        let mut mosse_con_valore: Vec<(i32, Mossa)> = Vec::new();
-        
-        for &mossa in mosse {
-            let mut valore = 0;
-            
-            // Bonus per catture
-            if let Some((pezzo_catturato, _)) = scacchiera.ottieni_pezzo(mossa.a) {
-                valore += match pezzo_catturato {
-                    Pezzo::Pedone => 100,
-                    Pezzo::Cavallo => 320,
-                    Pezzo::Alfiere => 330,
-                    Pezzo::Torre => 500,
-                    Pezzo::Regina => 900,
-                    Pezzo::Re => 20000,
-                };
-            }
-            
-            // Bonus per sviluppo nei primi movimenti
-            if scacchiera.numero_mossa() < 10 {
-                if let Some((pezzo, _)) = scacchiera.ottieni_pezzo(mossa.da) {
-                    match pezzo {
-                        Pezzo::Cavallo | Pezzo::Alfiere => {
-                            // Bonus per sviluppare cavalli e alfieri
-                            if mossa.da.rank() == 0 || mossa.da.rank() == 7 {
-                                valore += 50;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                
-                // Bonus per arrocco
-                if let Some((pezzo, _)) = scacchiera.ottieni_pezzo(mossa.da) {
-                    if pezzo == Pezzo::Re {
-                        // Arrocco corto bianco
-                        if mossa.da.file() == 4 && mossa.da.rank() == 0 && 
-                           mossa.a.file() == 6 && mossa.a.rank() == 0 {
-                            valore += 200;
-                        }
-                        // Arrocco lungo bianco
-                        if mossa.da.file() == 4 && mossa.da.rank() == 0 && 
-                           mossa.a.file() == 2 && mossa.a.rank() == 0 {
-                            valore += 200;
-                        }
-                        // Arrocco corto nero
-                        if mossa.da.file() == 4 && mossa.da.rank() == 7 && 
-                           mossa.a.file() == 6 && mossa.a.rank() == 7 {
-                            valore += 200;
-                        }
-                        // Arrocco lungo nero
-                        if mossa.da.file() == 4 && mossa.da.rank() == 7 && 
-                           mossa.a.file() == 2 && mossa.a.rank() == 7 {
-                            valore += 200;
-                        }
-                    }
-                }
-            }
-            
-            mosse_con_valore.push((valore, mossa));
-        }
-        
-        // Ordina in ordine decrescente di valore
-        mosse_con_valore.sort_by(|a, b| b.0.cmp(&a.0));
-        mosse_con_valore.into_iter().map(|(_, mossa)| mossa).collect()
+    let tt_move = tt.get_move(board.hash);
+    let in_check = board.in_scacco();
+    let new_depth = if in_check { depth + 1 } else { depth }; // Check Extension[cite: 10]
+
+    // If we reach the depth limit, proceed to Quiescence Search[cite: 10]
+    if new_depth <= 0 {
+        return quiescence(board, alpha, beta, info, z, nnue);
     }
+
+    // Null Move Pruning[cite: 10]
+    if allow_null && !pv_node && new_depth >= 3 && !in_check {
+        let static_eval = crate::evaluation::evaluate(board);
+        if static_eval >= beta {
+            let undo = board.fai_mossa_nulla(z);
+            let mut null_pv = PvLine::new(); 
+            let null_val = -negamax(board, new_depth - 4, ply + 1, -beta, -beta + 1, info, tt, z, nnue, false, &mut null_pv);
+            board.annulla_mossa_nulla(undo, z);
+            if null_val >= beta { return beta; }
+        }
+    }
+
+    let mut legal_moves = board.genera_mosse_legali(z);
+    
+    // Checkmate or Stalemate[cite: 10]
+    if legal_moves.is_empty() {
+        return if in_check { -49000 + (board.ply as i32) } else { 0 };
+    }
+
+    // Safety limit for killer move indexing[cite: 10]
+    let safe_ply = if ply < MAX_PLY { ply } else { MAX_PLY - 1 };
+    
+    // Move ordering to maximize pruning efficiency[cite: 10]
+    crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply]);
+
+    let mut best_val = -50000;
+    let mut flag = Bound::Alpha;
+    let mut moves_searched = 0;
+    let mut child_pv = PvLine::new();
+
+    for m in legal_moves {
+        if board.esegui_mossa(&m, z) {
+            moves_searched += 1;
+            let mut val;
+
+            // Principal Variation Search (PVS)[cite: 10]
+            if moves_searched == 1 {
+                // Full window search for the first move (assumed best)[cite: 10]
+                val = -negamax(board, new_depth - 1, ply + 1, -beta, -alpha, info, tt, z, nnue, true, &mut child_pv);
+            } else {
+                // Zero Window Search to prove other moves are worse[cite: 10]
+                val = -negamax(board, new_depth - 1, ply + 1, -alpha - 1, -alpha, info, tt, z, nnue, true, &mut child_pv);
+                
+                // If the move turns out better than expected, search with full window[cite: 10]
+                if val > alpha && val < beta {
+                    val = -negamax(board, new_depth - 1, ply + 1, -beta, -alpha, info, tt, z, nnue, true, &mut child_pv);
+                }
+            }
+
+            board.annulla_mossa(&m, z);
+
+            if info.stopped { return 0; }
+
+            if val > best_val {
+                best_val = val;
+                
+                // Efficient PV Line update[cite: 10]
+                pv_line.moves[0] = m;
+                pv_line.moves[1..child_pv.len + 1].copy_from_slice(&child_pv.moves[0..child_pv.len]);
+                pv_line.len = child_pv.len + 1;
+            }
+
+            if val > alpha {
+                alpha = val;
+                flag = Bound::Exact;
+            }
+
+            // Beta Cutoff (Pruning)[cite: 10]
+            if alpha >= beta {
+                // Save Killer Move (if not a capture/promotion)[cite: 10]
+                if !m.is_cattura() && !m.is_promozione() && safe_ply < MAX_PLY {
+                    if info.killer_moves[safe_ply][0].data != m.data {
+                        info.killer_moves[safe_ply][1] = info.killer_moves[safe_ply][0];
+                        info.killer_moves[safe_ply][0] = m;
+                    }
+                }
+
+                tt.store(board.hash, depth, beta, Bound::Beta, m);
+                return beta;
+            }
+        }
+    }
+
+    let best_move_to_store = if pv_line.len > 0 { pv_line.moves[0] } else { Mossa::null() };
+    tt.store(board.hash, depth, best_val, flag, best_move_to_store);
+    
+    best_val
+}
+
+/// Quiescence Search: explores only forcing moves (captures/promotions) 
+/// to avoid the horizon effect and stabilize evaluation.[cite: 10]
+fn quiescence(
+    board: &mut Scacchiera, 
+    mut alpha: i32, 
+    beta: i32, 
+    info: &mut SearchInfo, 
+    z: &ZobristKeys, 
+    nnue: Option<&LunaNNUE>
+) -> i32 {
+    info.nodes += 1;
+    
+    // Stand Pat: static evaluation before trying any move[cite: 10]
+    let stand_pat = crate::evaluation::evaluate(board);
+    if stand_pat >= beta { return beta; }
+    if stand_pat > alpha { alpha = stand_pat; }
+
+    let mut moves = board.genera_mosse_legali(z);
+    moves.retain(|m| m.is_cattura() || m.is_promozione()); 
+    
+    // In Q-Search pass empty arrays for killer moves (not used here)[cite: 10]
+    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2]);
+
+    for m in moves {
+        if board.esegui_mossa(&m, z) {
+            let score = -quiescence(board, -beta, -alpha, info, z, nnue);
+            board.annulla_mossa(&m, z);
+            
+            if score >= beta { return beta; }
+            if score > alpha { alpha = score; }
+        }
+    }
+    alpha
 }

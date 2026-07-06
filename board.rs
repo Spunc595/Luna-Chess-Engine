@@ -1,721 +1,598 @@
 use std::fmt;
-use std::ops::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
+use crate::zobrist::ZobristKeys;
 
-// ==================== BITBOARD IMPLEMENTATION ====================
+// --- BASE TYPES ---
 
-#[derive(Copy, Clone, PartialEq, Debug, Default)]
-pub struct Bitboard(pub u64);
+/// Base definition for the chessboard. 
+/// A u64 has exactly 64 bits, perfect for mapping each square (0-63).
+pub type Bitboard = u64;
 
-impl Bitboard {
-    pub const EMPTY: Bitboard = Bitboard(0);
-    pub const FULL: Bitboard = Bitboard(0xFFFFFFFFFFFFFFFF);
-    
-    pub fn nuova() -> Self {
-        Bitboard(0)
-    }
-    
-    pub fn da_casella(casella: u8) -> Self {
-        Bitboard(1u64 << casella)
-    }
-    
-    pub fn da_coordinate(file: u8, rank: u8) -> Option<Self> {
-        if file < 8 && rank < 8 {
-            Some(Bitboard(1u64 << (rank * 8 + file)))
-        } else {
-            None
-        }
-    }
-    
-    pub fn imposta_casella(&mut self, casella: u8) {
-        self.0 |= 1u64 << casella;
-    }
-    
-    pub fn rimuovi_casella(&mut self, casella: u8) {
-        self.0 &= !(1u64 << casella);
-    }
-    
-    pub fn contiene_casella(&self, casella: u8) -> bool {
-        (self.0 & (1u64 << casella)) != 0
-    }
-    
-    pub fn conta_bit(&self) -> u32 {
-        self.0.count_ones()
-    }
-    
-    pub fn is_vuota(&self) -> bool {
-        self.0 == 0
-    }
-    
-    pub fn lsb(&self) -> Option<u8> {
-        if self.0 == 0 {
-            None
-        } else {
-            Some(self.0.trailing_zeros() as u8)
-        }
-    }
-    
-    pub fn pop_lsb(&mut self) -> Option<u8> {
-        if self.0 == 0 {
-            None
-        } else {
-            let lsb = self.0.trailing_zeros() as u8;
-            self.0 &= self.0 - 1;
-            Some(lsb)
-        }
-    }
-    
-    pub fn stampa(&self) {
-        for rank in (0..8).rev() {
-            for file in 0..8 {
-                let square = rank * 8 + file;
-                if (self.0 >> square) & 1 != 0 {
-                    print!("1 ");
-                } else {
-                    print!(". ");
-                }
-            }
-            println!();
-        }
-        println!("Valore: 0x{:016X}", self.0);
-    }
-    
-    // Operazioni di shift con gestione dei bordi
-    pub fn nord(&self) -> Bitboard {
-        Bitboard(self.0 << 8)
-    }
-    
-    pub fn sud(&self) -> Bitboard {
-        Bitboard(self.0 >> 8)
-    }
-    
-    pub fn est(&self) -> Bitboard {
-        Bitboard((self.0 << 1) & !FILE_A.0)
-    }
-    
-    pub fn ovest(&self) -> Bitboard {
-        Bitboard((self.0 >> 1) & !FILE_H.0)
-    }
-    
-    pub fn nord_est(&self) -> Bitboard {
-        Bitboard((self.0 << 9) & !FILE_A.0)
-    }
-    
-    pub fn nord_ovest(&self) -> Bitboard {
-        Bitboard((self.0 << 7) & !FILE_H.0)
-    }
-    
-    pub fn sud_est(&self) -> Bitboard {
-        Bitboard((self.0 >> 7) & !FILE_A.0)
-    }
-    
-    pub fn sud_ovest(&self) -> Bitboard {
-        Bitboard((self.0 >> 9) & !FILE_H.0)
-    }
-}
-
-// Implementazioni di operatori per Bitboard
-impl BitAnd for Bitboard {
-    type Output = Bitboard;
-    fn bitand(self, rhs: Self) -> Self::Output {
-        Bitboard(self.0 & rhs.0)
-    }
-}
-
-impl BitOr for Bitboard {
-    type Output = Bitboard;
-    fn bitor(self, rhs: Self) -> Self::Output {
-        Bitboard(self.0 | rhs.0)
-    }
-}
-
-impl BitXor for Bitboard {
-    type Output = Bitboard;
-    fn bitxor(self, rhs: Self) -> Self::Output {
-        Bitboard(self.0 ^ rhs.0)
-    }
-}
-
-impl Not for Bitboard {
-    type Output = Bitboard;
-    fn not(self) -> Self::Output {
-        Bitboard(!self.0)
-    }
-}
-
-impl Shl<u8> for Bitboard {
-    type Output = Bitboard;
-    fn shl(self, rhs: u8) -> Self::Output {
-        Bitboard(self.0 << rhs)
-    }
-}
-
-impl Shr<u8> for Bitboard {
-    type Output = Bitboard;
-    fn shr(self, rhs: u8) -> Self::Output {
-        Bitboard(self.0 >> rhs)
-    }
-}
-
-// Costanti precalcolate per le bitboard
-pub const FILE_A: Bitboard = Bitboard(0x0101010101010101);
-pub const FILE_B: Bitboard = Bitboard(0x0202020202020202);
-pub const FILE_C: Bitboard = Bitboard(0x0404040404040404);
-pub const FILE_D: Bitboard = Bitboard(0x0808080808080808);
-pub const FILE_E: Bitboard = Bitboard(0x1010101010101010);
-pub const FILE_F: Bitboard = Bitboard(0x2020202020202020);
-pub const FILE_G: Bitboard = Bitboard(0x4040404040404040);
-pub const FILE_H: Bitboard = Bitboard(0x8080808080808080);
-
-pub const RANK_1: Bitboard = Bitboard(0x00000000000000FF);
-pub const RANK_2: Bitboard = Bitboard(0x000000000000FF00);
-pub const RANK_3: Bitboard = Bitboard(0x0000000000FF0000);
-pub const RANK_4: Bitboard = Bitboard(0x00000000FF000000);
-pub const RANK_5: Bitboard = Bitboard(0x000000FF00000000);
-pub const RANK_6: Bitboard = Bitboard(0x0000FF0000000000);
-pub const RANK_7: Bitboard = Bitboard(0x00FF000000000000);
-pub const RANK_8: Bitboard = Bitboard(0xFF00000000000000);
-
-// ==================== ENUM E STRUCTURE BASE ====================
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum Pezzo {
-    Pedone,
-    Cavallo,
-    Alfiere,
-    Torre,
-    Regina,
-    Re,
-}
-
-impl Pezzo {
-    pub fn indice(&self) -> usize {
-        match self {
-            Pezzo::Pedone => 0,
-            Pezzo::Cavallo => 1,
-            Pezzo::Alfiere => 2,
-            Pezzo::Torre => 3,
-            Pezzo::Regina => 4,
-            Pezzo::Re => 5,
-        }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum Colore {
-    Bianco,
-    Nero,
+/// Represents the color of the piece or the turn.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Colore { 
+    Bianco = 0, 
+    Nero = 1 
 }
 
 impl Colore {
-    pub fn opposto(&self) -> Colore {
-        match self {
-            Colore::Bianco => Colore::Nero,
-            Colore::Nero => Colore::Bianco,
+    /// Returns the opposite color.
+    #[inline(always)] 
+    pub fn opposto(&self) -> Colore { 
+        match self { 
+            Colore::Bianco => Colore::Nero, 
+            Colore::Nero => Colore::Bianco 
+        } 
+    }
+    
+    /// Converts the color into a numeric index (useful for arrays).
+    #[inline(always)] 
+    pub fn indice(&self) -> usize { *self as usize }
+
+    /// Creates a color from an index (0 = White, 1 = Black).
+    pub fn from_index(i: usize) -> Self { 
+        if i == 0 { Colore::Bianco } else { Colore::Nero } 
+    }
+}
+
+/// Represents the types of pieces on the chessboard.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Pezzo { 
+    Pedone = 0, 
+    Cavallo = 1, 
+    Alfiere = 2, 
+    Torre = 3, 
+    Regina = 4, 
+    Re = 5 
+}
+
+impl Pezzo {
+    #[inline(always)] 
+    pub fn indice(&self) -> usize { *self as usize }
+    
+    /// Returns the base value in centipawns for material evaluation.
+    #[inline(always)] 
+    pub fn valore(&self) -> i32 {
+        match self { 
+            Pezzo::Pedone => 100, 
+            Pezzo::Cavallo => 320, 
+            Pezzo::Alfiere => 330, 
+            Pezzo::Torre => 500, 
+            Pezzo::Regina => 900, 
+            Pezzo::Re => 20000 
         }
     }
     
-    pub fn indice(&self) -> usize {
-        match self {
-            Colore::Bianco => 0,
-            Colore::Nero => 1,
+    pub fn from_index(i: usize) -> Pezzo {
+        match i {
+            0 => Pezzo::Pedone, 1 => Pezzo::Cavallo, 2 => Pezzo::Alfiere,
+            3 => Pezzo::Torre, 4 => Pezzo::Regina, 5 => Pezzo::Re,
+            _ => Pezzo::Pedone
         }
     }
     
-    pub fn direzione_pedone(&self) -> i8 {
-        match self {
-            Colore::Bianco => 1,
-            Colore::Nero => -1,
+    /// Decodes a piece starting from a standard FEN character.
+    pub fn from_char(c: char) -> Option<(Colore, Pezzo)> {
+        match c {
+            'P' => Some((Colore::Bianco, Pezzo::Pedone)),
+            'N' => Some((Colore::Bianco, Pezzo::Cavallo)),
+            'B' => Some((Colore::Bianco, Pezzo::Alfiere)),
+            'R' => Some((Colore::Bianco, Pezzo::Torre)),
+            'Q' => Some((Colore::Bianco, Pezzo::Regina)),
+            'K' => Some((Colore::Bianco, Pezzo::Re)),
+            'p' => Some((Colore::Nero, Pezzo::Pedone)),
+            'n' => Some((Colore::Nero, Pezzo::Cavallo)),
+            'b' => Some((Colore::Nero, Pezzo::Alfiere)),
+            'r' => Some((Colore::Nero, Pezzo::Torre)),
+            'q' => Some((Colore::Nero, Pezzo::Regina)),
+            'k' => Some((Colore::Nero, Pezzo::Re)),
+            _ => None
         }
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub struct Casella(u8);
+/// Special labels (Flags) to categorize the move type.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum MoveFlag { 
+    None = 0, EnPassant = 1, Castle = 2, Promotion = 3, 
+    Capture = 4, DoublePawnPush = 5, PromotionCapture = 6
+}
 
-impl Casella {
-    pub fn nuova(file: u8, rank: u8) -> Option<Self> {
-        if file < 8 && rank < 8 {
-            Some(Casella(rank * 8 + file))
-        } else {
-            None
+impl MoveFlag { 
+    #[inline(always)] 
+    pub fn is_capture(&self) -> bool { 
+        matches!(self, MoveFlag::Capture | MoveFlag::EnPassant | MoveFlag::PromotionCapture) 
+    } 
+    
+    #[inline(always)] 
+    pub fn is_promotion(&self) -> bool {
+        matches!(self, MoveFlag::Promotion | MoveFlag::PromotionCapture)
+    }
+}
+
+// --- MOVE DATA STRUCTURES ---
+
+/// Represents a chess move encoded to occupy very little memory.
+/// Uses a 16-bit integer (data) for:
+/// - bits 0-5: starting square (0-63)
+/// - bits 6-11: destination square (0-63)
+/// - bits 12-15: move flag (e.g., capture, castling, etc.)
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub struct Mossa { 
+    pub data: u16,
+    pub promozione: u8, 
+}
+
+impl Mossa {
+    /// Creates a new move from the provided parameters.
+    pub fn new(from: usize, to: usize, flag: MoveFlag, promo_piece: Option<Pezzo>) -> Self {
+        let promo_val = promo_piece.map(|p| p.indice() as u8).unwrap_or(6);
+        Mossa { 
+            data: (from as u16) | ((to as u16) << 6) | ((flag as u8 as u16) << 12),
+            promozione: promo_val,
         }
     }
     
-    pub fn da_indice(indice: u8) -> Option<Self> {
-        if indice < 64 {
-            Some(Casella(indice))
-        } else {
-            None
+    #[inline(always)] pub fn da(&self) -> usize { (self.data & 0x3F) as usize }
+    #[inline(always)] pub fn a(&self) -> usize { ((self.data >> 6) & 0x3F) as usize }
+    #[inline(always)] pub fn move_flag(&self) -> MoveFlag {
+        match (self.data >> 12) as u8 { 
+            1 => MoveFlag::EnPassant, 2 => MoveFlag::Castle, 3 => MoveFlag::Promotion, 
+            4 => MoveFlag::Capture, 5 => MoveFlag::DoublePawnPush, 6 => MoveFlag::PromotionCapture,
+            _ => MoveFlag::None
         }
     }
+
+    #[inline(always)] pub fn is_cattura(&self) -> bool { self.move_flag().is_capture() }
+    #[inline(always)] pub fn is_promozione(&self) -> bool { self.move_flag().is_promotion() }
     
-    pub fn da_bitboard(bb: Bitboard) -> Option<Self> {
-        if bb.is_vuota() {
-            None
-        } else {
-            Casella::da_indice(bb.lsb()?)
-        }
+    pub fn pezzo_promosso(&self) -> Option<Pezzo> {
+        if self.promozione < 6 { Some(Pezzo::from_index(self.promozione as usize)) } else { None }
     }
-    
-    pub fn indice(&self) -> u8 {
-        self.0
-    }
-    
-    pub fn file(&self) -> u8 {
-        self.0 % 8
-    }
-    
-    pub fn rank(&self) -> u8 {
-        self.0 / 8
-    }
-    
-    // Metodi legacy per compatibilità
-    pub fn numero(&self) -> u8 {
-        self.rank()
-    }
-    
-    pub fn lettera(&self) -> u8 {
-        self.file()
-    }
-    
-    pub fn to_bitboard(&self) -> Bitboard {
-        Bitboard::da_casella(self.0)
-    }
-    
-    pub fn offset(&self, delta_file: i8, delta_rank: i8) -> Option<Casella> {
-        let new_file = self.file() as i8 + delta_file;
-        let new_rank = self.rank() as i8 + delta_rank;
+
+    /// Converts the move to standard UCI notation (e.g., "e2e4").
+    pub fn to_uci(&self) -> String {
+        if self.is_null() { return "0000".to_string(); }
+        let from = self.da(); let to = self.a();
+        let mut s = format!("{}{}{}{}", 
+            (b'a' + (from % 8) as u8) as char, (b'1' + (from / 8) as u8) as char,
+            (b'a' + (to % 8) as u8) as char, (b'1' + (to / 8) as u8) as char);
         
-        if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
-            Casella::nuova(new_file as u8, new_rank as u8)
-        } else {
-            None
+        if let Some(p) = self.pezzo_promosso() {
+            s.push(match p { 
+                Pezzo::Cavallo => 'n', Pezzo::Alfiere => 'b', Pezzo::Torre => 'r', _ => 'q' 
+            });
         }
+        s
     }
+
+    /// Constructors for a null move.
+    pub fn null() -> Self { Mossa { data: 0, promozione: 6 } }
+    pub fn is_null(&self) -> bool { self.data == 0 }
+    pub fn from_data(data: u16) -> Self { Mossa { data, promozione: 6 } }
 }
 
-impl fmt::Display for Casella {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let file = (b'a' + self.file()) as char;
-        let rank = self.rank() + 1;
-        write!(f, "{}{}", file, rank)
-    }
+/// Structure to store the irreversible state prior to a move.
+/// Essential for the unmake_move function.
+#[derive(Clone, Debug)]
+pub struct UndoData {
+    pub hash: u64,
+    pub ep_square: Option<usize>,
+    pub diritti_arrocco: u8,
+    pub mezze_mosse: u32,
+    pub cattura_p: Option<usize>,
 }
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub struct DirittiArrocco {
-    pub bianco_lato_re: bool,
-    pub bianco_lato_regina: bool,
-    pub nero_lato_re: bool,
-    pub nero_lato_regina: bool,
-}
+/// Constant to quickly update castling rights by moving king and rooks.
+const CASTLING_RIGHTS_UPDATE: [u8; 64] = [
+    13, 15, 15, 15, 12, 15, 15, 14, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 15, 15, 15, 15, 15, 15, 15,  7, 15, 15, 15,  3, 15, 15, 11,
+];
 
-impl DirittiArrocco {
-    pub fn tutti() -> Self {
-        Self {
-            bianco_lato_re: true,
-            bianco_lato_regina: true,
-            nero_lato_re: true,
-            nero_lato_regina: true,
-        }
-    }
-    
-    pub fn nessuno() -> Self {
-        Self {
-            bianco_lato_re: false,
-            bianco_lato_regina: false,
-            nero_lato_re: false,
-            nero_lato_regina: false,
-        }
-    }
-}
+// --- BOARD STRUCTURE ---
 
-// ==================== STRUTTURA SCACCHIERA CON BITBOARD ====================
-
-#[derive(Clone)]
+/// The core structure representing a position on the chessboard.
+#[derive(Clone, Debug)]
 pub struct Scacchiera {
-    // Rappresentazione array per compatibilità
-    pub pezzi: [[Option<(Pezzo, Colore)>; 8]; 8],
-    
-    // Bitboard per ogni tipo di pezzo per ogni colore
-    bitboards: [[Bitboard; 6]; 2], // [colore][pezzo]
-    
-    // Bitboard aggregate
-    occupazione_colore: [Bitboard; 2], // [colore]
-    occupazione_tipo: [Bitboard; 6],   // [pezzo]
-    
-    // Stato della partita
-    colore_attivo: Colore,
-    diritti_arrocco: DirittiArrocco,
-    en_passant: Option<Casella>,
-    contatore_semimosse: u32,
-    numero_mossa: u32,
-    
-    // Cache per accesso rapido
-    occupazione_totale: Bitboard,
-    caselle_vuote: Bitboard,
+    /// 6 bitboards, one for each piece type
+    pub pezzi: [Bitboard; 6],
+    /// 2 bitboards: one for white pieces and one for black
+    pub colori: [Bitboard; 2],
+    pub turno: Colore,
+    pub ep_square: Option<usize>,
+    pub diritti_arrocco: u8,
+    pub hash: u64,
+    pub mezze_mosse: u32,
+    /// History stack to handle 'undos' and check for repetitions
+    pub history: Vec<UndoData>,
+    pub ply: u32,
+    pub pst_val: i32,
+    pub rule_50: u32,
 }
 
 impl Scacchiera {
-    pub fn nuova() -> Self {
-        Scacchiera::da_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").unwrap()
-    }
-    
-    pub fn da_fen(fen: &str) -> Result<Self, &'static str> {
-        let mut scacchiera = Scacchiera {
-            pezzi: [[None; 8]; 8],
-            bitboards: [[Bitboard::EMPTY; 6]; 2],
-            occupazione_colore: [Bitboard::EMPTY; 2],
-            occupazione_tipo: [Bitboard::EMPTY; 6],
-            colore_attivo: Colore::Bianco,
-            diritti_arrocco: DirittiArrocco::nessuno(),
-            en_passant: None,
-            contatore_semimosse: 0,
-            numero_mossa: 1,
-            occupazione_totale: Bitboard::EMPTY,
-            caselle_vuote: Bitboard::FULL,
+    /// Initializes a chessboard from a FEN notation string.
+    pub fn from_fen(fen: &str, z: &ZobristKeys) -> Self {
+        let mut pezzi = [0; 6];
+        let mut colori = [0; 2];
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        
+        let mut rank = 7; let mut file = 0;
+        let mut pst_val = 0;
+        
+        for c in parts[0].chars() {
+            if c == '/' { rank -= 1; file = 0; }
+            else if let Some(d) = c.to_digit(10) { file += d as usize; }
+            else if let Some((col, p)) = Pezzo::from_char(c) {
+                let sq = rank * 8 + file;
+                pezzi[p.indice()] |= 1 << sq;
+                colori[col.indice()] |= 1 << sq;
+                let val = p.valore();
+                pst_val += if col == Colore::Bianco { val } else { -val };
+                file += 1;
+            }
+        }
+        
+        let turno = if parts.len() > 1 && parts[1] == "b" { Colore::Nero } else { Colore::Bianco };
+        let mut diritti = 0;
+        if parts.len() > 2 && parts[2] != "-" {
+            if parts[2].contains('K') { diritti |= 1; }
+            if parts[2].contains('Q') { diritti |= 2; }
+            if parts[2].contains('k') { diritti |= 4; }
+            if parts[2].contains('q') { diritti |= 8; }
+        }
+
+        let ep_square = if parts.len() > 3 && parts[3] != "-" {
+            let b = parts[3].as_bytes();
+            Some(((b[1] - b'1') * 8 + (b[0] - b'a')) as usize)
+        } else { None };
+
+        let mezze_mosse = if parts.len() > 4 {
+            parts[4].parse::<u32>().unwrap_or(0)
+        } else { 0 };
+
+        let mut board = Scacchiera {
+            pezzi, colori, turno, ep_square, diritti_arrocco: diritti,
+            hash: 0, mezze_mosse, history: Vec::with_capacity(256), ply: 0, pst_val,
+            rule_50: mezze_mosse,
         };
-        
-        let parti: Vec<&str> = fen.split_whitespace().collect();
-        if parti.len() < 4 {
-            return Err("Stringa FEN troppo corta");
+        board.hash = board.get_hash(z);
+        board
+    }
+
+    /// Creates the standard initial chess position.
+    pub fn new_iniziale(z: &ZobristKeys) -> Self {
+        Self::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", z)
+    }
+
+    /// Checks if the current position has already occurred in the game history.
+    pub fn is_repetition(&self) -> bool {
+        let mut count = 0;
+        for undo in self.history.iter().rev() {
+            if undo.hash == self.hash { count += 1; }
+            if count >= 1 { return true; } 
         }
-        
-        // Analizza posizione pezzi
-        let traverse: Vec<&str> = parti[0].split('/').collect();
-        if traverse.len() != 8 {
-            return Err("Numero di traverse non valido in FEN");
-        }
-        
-        for (indice_rank, str_rank) in traverse.iter().enumerate() {
-            let rank = 7 - indice_rank; // FEN inizia dalla traversa 8
-            let mut file = 0;
-            
-            for c in str_rank.chars() {
-                if file >= 8 {
-                    return Err("Troppi pezzi nella traversa");
-                }
-                
-                if let Some(cifra) = c.to_digit(10) {
-                    file += cifra as usize;
-                } else {
-                    let pezzo = match c.to_ascii_lowercase() {
-                        'p' => Pezzo::Pedone,
-                        'n' => Pezzo::Cavallo,
-                        'b' => Pezzo::Alfiere,
-                        'r' => Pezzo::Torre,
-                        'q' => Pezzo::Regina,
-                        'k' => Pezzo::Re,
-                        _ => return Err("Carattere pezzo non valido"),
-                    };
-                    
-                    let colore = if c.is_uppercase() { Colore::Bianco } else { Colore::Nero };
-                    
-                    // Aggiorna array pezzi
-                    scacchiera.pezzi[rank][file] = Some((pezzo, colore));
-                    
-                    // Aggiorna bitboard
-                    let casella_idx = (rank * 8 + file) as u8;
-                    scacchiera.bitboards[colore.indice()][pezzo.indice()].imposta_casella(casella_idx);
-                    scacchiera.occupazione_colore[colore.indice()].imposta_casella(casella_idx);
-                    scacchiera.occupazione_tipo[pezzo.indice()].imposta_casella(casella_idx);
-                    
-                    file += 1;
-                }
-            }
-        }
-        
-        // Ricalcola cache
-        scacchiera.occupazione_totale = scacchiera.occupazione_colore[0] | scacchiera.occupazione_colore[1];
-        scacchiera.caselle_vuote = !scacchiera.occupazione_totale;
-        
-        // Analizza colore attivo
-        scacchiera.colore_attivo = match parti[1] {
-            "w" => Colore::Bianco,
-            "b" => Colore::Nero,
-            _ => return Err("Colore attivo non valido"),
-        };
-        
-        // Analizza diritti di arrocco
-        if parti[2] != "-" {
-            for c in parti[2].chars() {
-                match c {
-                    'K' => scacchiera.diritti_arrocco.bianco_lato_re = true,
-                    'Q' => scacchiera.diritti_arrocco.bianco_lato_regina = true,
-                    'k' => scacchiera.diritti_arrocco.nero_lato_re = true,
-                    'q' => scacchiera.diritti_arrocco.nero_lato_regina = true,
-                    _ => return Err("Diritto di arrocco non valido"),
-                }
-            }
-        }
-        
-        // Analizza en passant
-        if parti[3] != "-" {
-            let caratteri: Vec<char> = parti[3].chars().collect();
-            if caratteri.len() == 2 {
-                let file = (caratteri[0] as u8) - b'a';
-                let rank = (caratteri[1] as u8) - b'1';
-                scacchiera.en_passant = Casella::nuova(file, rank);
-            }
-        }
-        
-        // Analizza contatore semimosse e numero mossa
-        if parti.len() >= 5 {
-            scacchiera.contatore_semimosse = parti[4].parse().unwrap_or(0);
-        }
-        if parti.len() >= 6 {
-            scacchiera.numero_mossa = parti[5].parse().unwrap_or(1);
-        }
-        
-        Ok(scacchiera)
-    }
-    
-    // ==================== METODI GETTER ====================
-    
-    pub fn ottieni_pezzo(&self, casella: Casella) -> Option<(Pezzo, Colore)> {
-        let rank = casella.rank() as usize;
-        let file = casella.file() as usize;
-        self.pezzi[rank][file]
-    }
-    
-    pub fn ottieni_pezzo_da_bitboard(&self, casella: Casella) -> Option<(Pezzo, Colore)> {
-        let mask = casella.to_bitboard();
-        
-        for colore_idx in 0..2 {
-            for pezzo_idx in 0..6 {
-                if !(self.bitboards[colore_idx][pezzo_idx] & mask).is_vuota() {
-                    let colore = if colore_idx == 0 { Colore::Bianco } else { Colore::Nero };
-                    let pezzo = match pezzo_idx {
-                        0 => Pezzo::Pedone,
-                        1 => Pezzo::Cavallo,
-                        2 => Pezzo::Alfiere,
-                        3 => Pezzo::Torre,
-                        4 => Pezzo::Regina,
-                        5 => Pezzo::Re,
-                        _ => unreachable!(),
-                    };
-                    return Some((pezzo, colore));
-                }
-            }
-        }
-        None
-    }
-    
-    pub fn casella_occupata(&self, casella: Casella) -> bool {
-        !(self.caselle_vuote & casella.to_bitboard()).is_vuota()
-    }
-    
-    pub fn casella_occupata_da_colore(&self, casella: Casella, colore: Colore) -> bool {
-        !(self.occupazione_colore[colore.indice()] & casella.to_bitboard()).is_vuota()
-    }
-    
-    pub fn colore_attivo(&self) -> Colore {
-        self.colore_attivo
-    }
-    
-    pub fn diritti_arrocco(&self) -> DirittiArrocco {
-        self.diritti_arrocco
-    }
-    
-    pub fn en_passant(&self) -> Option<Casella> {
-        self.en_passant
-    }
-    
-    pub fn contatore_semimosse(&self) -> u32 {
-        self.contatore_semimosse
-    }
-    
-    pub fn numero_mossa(&self) -> u32 {
-        self.numero_mossa
-    }
-    
-    // Metodi per accedere alle bitboard
-    pub fn bitboard_pezzo(&self, pezzo: Pezzo, colore: Colore) -> Bitboard {
-        self.bitboards[colore.indice()][pezzo.indice()]
-    }
-    
-    pub fn bitboard_colore(&self, colore: Colore) -> Bitboard {
-        self.occupazione_colore[colore.indice()]
-    }
-    
-    pub fn bitboard_tipo(&self, pezzo: Pezzo) -> Bitboard {
-        self.occupazione_tipo[pezzo.indice()]
-    }
-    
-    pub fn occupazione_totale(&self) -> Bitboard {
-        self.occupazione_totale
-    }
-    
-    pub fn caselle_vuote(&self) -> Bitboard {
-        self.caselle_vuote
-    }
-    
-    // ==================== METODI SETTER ====================
-    
-    pub fn imposta_pezzo(&mut self, casella: Casella, pezzo_info: Option<(Pezzo, Colore)>) {
-        let rank = casella.rank() as usize;
-        let file = casella.file() as usize;
-        let mask = casella.to_bitboard();
-        
-        // Rimuovi pezzo esistente se presente
-        if let Some((pezzo_vecchio, colore_vecchio)) = self.pezzi[rank][file] {
-            self.bitboards[colore_vecchio.indice()][pezzo_vecchio.indice()].rimuovi_casella(casella.indice());
-            self.occupazione_colore[colore_vecchio.indice()].rimuovi_casella(casella.indice());
-            self.occupazione_tipo[pezzo_vecchio.indice()].rimuovi_casella(casella.indice());
-        }
-        
-        // Imposta nuovo pezzo se specificato
-        if let Some((pezzo, colore)) = pezzo_info {
-            self.pezzi[rank][file] = Some((pezzo, colore));
-            self.bitboards[colore.indice()][pezzo.indice()].imposta_casella(casella.indice());
-            self.occupazione_colore[colore.indice()].imposta_casella(casella.indice());
-            self.occupazione_tipo[pezzo.indice()].imposta_casella(casella.indice());
-        } else {
-            self.pezzi[rank][file] = None;
-        }
-        
-        // Aggiorna cache
-        self.occupazione_totale = self.occupazione_colore[0] | self.occupazione_colore[1];
-        self.caselle_vuote = !self.occupazione_totale;
-    }
-    
-    pub fn imposta_colore_attivo(&mut self, colore: Colore) {
-        self.colore_attivo = colore;
-    }
-    
-    pub fn imposta_diritti_arrocco(&mut self, diritti: DirittiArrocco) {
-        self.diritti_arrocco = diritti;
-    }
-    
-    pub fn imposta_en_passant(&mut self, casella: Option<Casella>) {
-        self.en_passant = casella;
-    }
-    
-    pub fn imposta_contatore_semimosse(&mut self, contatore: u32) {
-        self.contatore_semimosse = contatore;
-    }
-    
-    pub fn imposta_numero_mossa(&mut self, numero: u32) {
-        self.numero_mossa = numero;
-    }
-    
-    // ==================== METODI DI UTILITY ====================
-    
-    pub fn esegui_mossa(&mut self, mossa: &crate::movegen::Mossa) -> bool {
-        // Usa la funzione completa da movegen
-        crate::movegen::esegui_mossa_completa(self, mossa)
-    }
-    
-    pub fn casella_attaccata(&self, casella: Casella, da_colore: Colore) -> bool {
-        let _mask = casella.to_bitboard(); // Per evitare warning
-        let _avversario = da_colore.opposto(); // Per evitare warning
-        
-        // Controlla attacchi di pedone
-        let pedoni = self.bitboard_pezzo(Pezzo::Pedone, da_colore);
-        if !pedoni.is_vuota() {
-            let attacchi = if da_colore == Colore::Bianco {
-                pedoni.nord_est() | pedoni.nord_ovest()
-            } else {
-                pedoni.sud_est() | pedoni.sud_ovest()
-            };
-            
-            if !(attacchi & casella.to_bitboard()).is_vuota() {
-                return true;
-            }
-        }
-        
-        // Controlla attacchi di cavallo
-        let cavalli = self.bitboard_pezzo(Pezzo::Cavallo, da_colore);
-        if !cavalli.is_vuota() {
-            let mut temp = cavalli;
-            while let Some(cas) = temp.pop_lsb() {
-                let attacchi = crate::movegen::BitboardTables::mosse_cavallo(cas);
-                if !(attacchi & casella.to_bitboard()).is_vuota() {
-                    return true;
-                }
-            }
-        }
-        
-        // Controlla attacchi di re
-        let re = self.bitboard_pezzo(Pezzo::Re, da_colore);
-        if !re.is_vuota() {
-            let cas_re = re.lsb().unwrap();
-            let attacchi = crate::movegen::BitboardTables::mosse_re(cas_re);
-            if !(attacchi & casella.to_bitboard()).is_vuota() {
-                return true;
-            }
-        }
-        
-        // Controlla attacchi di pezzi scorrevoli (torre, alfiere, regina)
-        let torri = self.bitboard_pezzo(Pezzo::Torre, da_colore) | self.bitboard_pezzo(Pezzo::Regina, da_colore);
-        let alfieri = self.bitboard_pezzo(Pezzo::Alfiere, da_colore) | self.bitboard_pezzo(Pezzo::Regina, da_colore);
-        
-        if !torri.is_vuota() {
-            let mut temp = torri;
-            while let Some(cas) = temp.pop_lsb() {
-                let attacchi = crate::movegen::BitboardTables::attacchi_torre(cas, self.occupazione_totale);
-                if !(attacchi & casella.to_bitboard()).is_vuota() {
-                    return true;
-                }
-            }
-        }
-        
-        if !alfieri.is_vuota() {
-            let mut temp = alfieri;
-            while let Some(cas) = temp.pop_lsb() {
-                let attacchi = crate::movegen::BitboardTables::attacchi_alfiere(cas, self.occupazione_totale);
-                if !(attacchi & casella.to_bitboard()).is_vuota() {
-                    return true;
-                }
-            }
-        }
-        
         false
     }
-    
-    pub fn re_in_scacco(&self, colore: Colore) -> bool {
-        if let Some(pos_re) = self.bitboard_pezzo(Pezzo::Re, colore).lsb() {
-            let casella = Casella::da_indice(pos_re).unwrap();
-            self.casella_attaccata(casella, colore.opposto())
-        } else {
-            false // Non dovrebbe mai succedere
+
+    /// Returns a bitboard with all occupied squares.
+    #[inline(always)] pub fn occupazione(&self) -> Bitboard { self.colori[0] | self.colori[1] }
+
+    /// Counts the total number of pieces on the chessboard.
+    pub fn conta_pezzi(&self) -> u32 {
+        let mut count = 0;
+        for piece_bb in self.pezzi.iter() {
+            count += piece_bb.count_ones();
         }
+        count
     }
-    
-    pub fn stampa(&self) {
-        println!("  a b c d e f g h");
-        for rank in (0..8).rev() {
-            print!("{} ", rank + 1);
-            for file in 0..8 {
-                if let Some((pezzo, colore)) = self.pezzi[rank][file] {
-                    let simbolo = match (pezzo, colore) {
-                        (Pezzo::Pedone, Colore::Bianco) => 'P',
-                        (Pezzo::Cavallo, Colore::Bianco) => 'N',
-                        (Pezzo::Alfiere, Colore::Bianco) => 'B',
-                        (Pezzo::Torre, Colore::Bianco) => 'R',
-                        (Pezzo::Regina, Colore::Bianco) => 'Q',
-                        (Pezzo::Re, Colore::Bianco) => 'K',
-                        (Pezzo::Pedone, Colore::Nero) => 'p',
-                        (Pezzo::Cavallo, Colore::Nero) => 'n',
-                        (Pezzo::Alfiere, Colore::Nero) => 'b',
-                        (Pezzo::Torre, Colore::Nero) => 'r',
-                        (Pezzo::Regina, Colore::Nero) => 'q',
-                        (Pezzo::Re, Colore::Nero) => 'k',
-                    };
-                    print!("{} ", simbolo);
-                } else {
-                    print!(". ");
+
+    /// Calculates the Zobrist hash key for the current position from scratch.
+    pub fn get_hash(&self, z: &ZobristKeys) -> u64 {
+        let mut h = 0;
+        for c in 0..2 {
+            for p in 0..6 {
+                let mut bb = self.pezzi[p] & self.colori[c];
+                while bb != 0 {
+                    let sq = bb.trailing_zeros() as usize;
+                    h ^= z.pezzi[c][p][sq];
+                    bb &= bb - 1;
                 }
             }
-            println!("{}", rank + 1);
         }
-        println!("  a b c d e f g h");
+        if self.turno == Colore::Nero { h ^= z.turno; }
+        h ^= z.arrocco_completo[self.diritti_arrocco as usize];
+        if let Some(sq) = self.ep_square { h ^= z.ep_file[sq % 8]; }
+        h
+    }
+
+    // --- BOARD QUERY FUNCTIONS ---
+
+    #[inline(always)]
+    pub fn pezzo_in(&self, sq: usize) -> Option<usize> {
+        let mask = 1 << sq;
+        if (self.occupazione() & mask) == 0 { return None; }
+        for p in 0..6 { if (self.pezzi[p] & mask) != 0 { return Some(p); } }
+        None
+    }
+
+    #[inline(always)]
+    pub fn colore_in(&self, sq: usize) -> Option<Colore> {
+        if (self.colori[0] & (1 << sq)) != 0 { Some(Colore::Bianco) }
+        else if (self.colori[1] & (1 << sq)) != 0 { Some(Colore::Nero) }
+        else { None }
+    }
+    
+    #[inline(always)]
+    pub fn pezzo_e_colore_in(&self, sq: usize) -> Option<(Colore, Pezzo)> {
+        if let (Some(colore), Some(p_idx)) = (self.colore_in(sq), self.pezzo_in(sq)) {
+            Some((colore, Pezzo::from_index(p_idx)))
+        } else { None }
+    }
+
+    pub fn in_scacco(&self) -> bool {
+        self.re_in_scacco(self.turno)
+    }
+
+    pub fn re_in_scacco(&self, c: Colore) -> bool {
+        let king_bb = self.pezzi[5] & self.colori[c.indice()];
+        if king_bb == 0 { return false; }
+        crate::attacks::square_attacked(self, king_bb.trailing_zeros() as usize, c.opposto())
+    }
+
+    // --- MOVE EXECUTION AND UNMAKE LOGIC ---
+
+    /// Executes a move on the chessboard. 
+    /// Returns true if the move is legal (the King is not in check at the end of the turn), false otherwise.
+    pub fn esegui_mossa(&mut self, m: &Mossa, z: &ZobristKeys) -> bool {
+        let from = m.da(); let to = m.a();
+        let flag = m.move_flag();
+        let us = self.turno.indice(); let them = 1 - us;
+        let moved_p = self.pezzo_in(from).unwrap_or(0);
         
-        let colore_str = match self.colore_attivo {
-            Colore::Bianco => "Bianco",
-            Colore::Nero => "Nero",
+        let undo = UndoData {
+            hash: self.hash, ep_square: self.ep_square,
+            diritti_arrocco: self.diritti_arrocco, mezze_mosse: self.mezze_mosse,
+            cattura_p: self.pezzo_in(to),
         };
-        println!("Turno: {}", colore_str);
-        println!("Mossa: {}", self.numero_mossa);
+
+        self.pezzi[moved_p] &= !(1 << from);
+        self.colori[us] &= !(1 << from);
+        self.hash ^= z.pezzi[us][moved_p][from];
+
+        if flag == MoveFlag::EnPassant {
+            let cap_sq = if us == 0 { to - 8 } else { to + 8 };
+            self.pezzi[0] &= !(1 << cap_sq);
+            self.colori[them] &= !(1 << cap_sq);
+            self.hash ^= z.pezzi[them][0][cap_sq];
+        } else if let Some(cap_p) = undo.cattura_p {
+            self.pezzi[cap_p] &= !(1 << to);
+            self.colori[them] &= !(1 << to);
+            self.hash ^= z.pezzi[them][cap_p][to];
+            self.mezze_mosse = 0;
+        }
+
+        let mut final_p = moved_p;
+        if flag.is_promotion() { final_p = m.pezzo_promosso().unwrap().indice(); }
+        self.pezzi[final_p] |= 1 << to;
+        self.colori[us] |= 1 << to;
+        self.hash ^= z.pezzi[us][final_p][to];
+
+        if flag == MoveFlag::Castle {
+            let (rf, rt) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0,0) };
+            self.pezzi[3] ^= (1 << rf) | (1 << rt);
+            self.colori[us] ^= (1 << rf) | (1 << rt);
+            self.hash ^= z.pezzi[us][3][rf] ^ z.pezzi[us][3][rt];
+        }
+
+        if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
+        self.ep_square = if flag == MoveFlag::DoublePawnPush { Some(if us == 0 { to - 8 } else { to + 8 }) } else { None };
+        if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
+
+        self.hash ^= z.arrocco_completo[self.diritti_arrocco as usize];
+        self.diritti_arrocco &= CASTLING_RIGHTS_UPDATE[from] & CASTLING_RIGHTS_UPDATE[to];
+        self.hash ^= z.arrocco_completo[self.diritti_arrocco as usize];
+
+        self.hash ^= z.turno;
+        self.turno = self.turno.opposto();
+        
+        if moved_p == 0 || flag.is_capture() { 
+            self.mezze_mosse = 0; 
+        } else { 
+            self.mezze_mosse += 1; 
+        }
+        self.rule_50 = self.mezze_mosse; 
+        
+        // Legality check
+        if self.re_in_scacco(Colore::from_index(us)) {
+            self.annulla_mossa_veloce(m, &undo, z, us, moved_p);
+            return false;
+        }
+
+        self.history.push(undo);
+        self.ply += 1;
+        true
+    }
+
+    /// Alternative method for immediate undo if the move is illegal during execute_move.
+    fn annulla_mossa_veloce(&mut self, m: &Mossa, u: &UndoData, _z: &ZobristKeys, us: usize, moved_p: usize) {
+        let from = m.da(); let to = m.a();
+        let them = 1 - us;
+        let flag = m.move_flag();
+        let final_p = if flag.is_promotion() { m.pezzo_promosso().unwrap().indice() } else { moved_p };
+
+        self.pezzi[final_p] &= !(1 << to);
+        self.colori[us] &= !(1 << to);
+        self.pezzi[moved_p] |= 1 << from;
+        self.colori[us] |= 1 << from;
+
+        if flag == MoveFlag::EnPassant {
+            let cap_sq = if us == 0 { to - 8 } else { to + 8 };
+            self.pezzi[0] |= 1 << cap_sq;
+            self.colori[them] |= 1 << cap_sq;
+        } else if let Some(cp) = u.cattura_p {
+            self.pezzi[cp] |= 1 << to;
+            self.colori[them] |= 1 << to;
+        }
+
+        if flag == MoveFlag::Castle {
+            let (rf, rt) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0,0) };
+            self.pezzi[3] ^= (1 << rf) | (1 << rt);
+            self.colori[us] ^= (1 << rf) | (1 << rt);
+        }
+
+        self.turno = Colore::from_index(us);
+        self.hash = u.hash;
+        self.ep_square = u.ep_square;
+        self.diritti_arrocco = u.diritti_arrocco;
+        self.mezze_mosse = u.mezze_mosse;
+        self.rule_50 = u.mezze_mosse; 
+    }
+
+    /// Officially undoes a move (used extensively in search.rs).
+    pub fn annulla_mossa(&mut self, m: &Mossa, _z: &ZobristKeys) {
+        let u = self.history.pop().expect("Critical error: empty history during unmake_move");
+        
+        self.ply -= 1;
+        self.turno = self.turno.opposto();
+        
+        let us = self.turno.indice();
+        let them = 1 - us;
+        let from = m.da(); 
+        let to = m.a();
+        let flag = m.move_flag();
+
+        let final_p = if flag.is_promotion() { 
+            m.pezzo_promosso().unwrap().indice() 
+        } else { 
+            self.pezzo_in(to).unwrap_or(0) 
+        };
+        
+        let moved_p = if flag.is_promotion() { 0 } else { final_p }; 
+
+        self.pezzi[final_p] &= !(1 << to);
+        self.colori[us] &= !(1 << to);
+        self.pezzi[moved_p] |= 1 << from;
+        self.colori[us] |= 1 << from;
+
+        if flag == MoveFlag::EnPassant {
+            let cap_sq = if us == 0 { to - 8 } else { to + 8 };
+            self.pezzi[0] |= 1 << cap_sq;
+            self.colori[them] |= 1 << cap_sq;
+        } else if let Some(cp) = u.cattura_p {
+            self.pezzi[cp] |= 1 << to;
+            self.colori[them] |= 1 << to;
+        }
+
+        if flag == MoveFlag::Castle {
+            let (rf, rt) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0,0) };
+            self.pezzi[3] ^= (1 << rf) | (1 << rt);
+            self.colori[us] ^= (1 << rf) | (1 << rt);
+        }
+
+        self.hash = u.hash;
+        self.ep_square = u.ep_square;
+        self.diritti_arrocco = u.diritti_arrocco;
+        self.mezze_mosse = u.mezze_mosse;
+        self.rule_50 = u.mezze_mosse;
+    }
+
+    /// Executes a virtual "null move" (forced turn skip).
+    /// Used for heuristic search (Null Move Pruning).
+    pub fn fai_mossa_nulla(&mut self, z: &ZobristKeys) -> UndoData {
+        let undo = UndoData {
+            hash: self.hash,
+            ep_square: self.ep_square,
+            diritti_arrocco: self.diritti_arrocco,
+            mezze_mosse: self.mezze_mosse,
+            cattura_p: None,
+        };
+
+        if let Some(sq) = self.ep_square {
+            self.hash ^= z.ep_file[sq % 8];
+            self.ep_square = None;
+        }
+
+        self.hash ^= z.turno;
+        self.turno = self.turno.opposto();
+        self.ply += 1;
+        self.history.push(undo.clone()); 
+        undo
+    }
+
+    /// Undoes the null move.
+    pub fn annulla_mossa_nulla(&mut self, undo: UndoData, _z: &ZobristKeys) {
+        self.ply -= 1;
+        self.turno = self.turno.opposto();
+        self.hash = undo.hash;
+        self.ep_square = undo.ep_square;
+        self.diritti_arrocco = undo.diritti_arrocco;
+        self.mezze_mosse = undo.mezze_mosse;
+        self.history.pop();
+    }
+    
+    /// Generates pseudo-legal moves (not necessarily legal, useful for quick sorting).
+    pub fn genera_mosse(&self) -> Vec<Mossa> {
+        crate::movegen::genera_mosse(self)
+    }
+
+    /// Generates strictly legal moves avoiding multiple allocations (uses make/unmake).
+    pub fn genera_mosse_legali(&mut self, z: &ZobristKeys) -> Vec<Mossa> {
+        let mosse = crate::movegen::genera_mosse(self);
+        let mut legali = Vec::with_capacity(mosse.len());
+        
+        for m in mosse {
+            if self.esegui_mossa(&m, z) {
+                self.annulla_mossa(&m, z);
+                legali.push(m);
+            }
+        }
+        legali
+    }
+
+    /// Returns the FEN string corresponding to the current position.
+    pub fn to_fen(&self) -> String {
+        let mut fen = String::new();
+        for rank in (0..8).rev() {
+            let mut empty = 0;
+            for file in 0..8 {
+                let sq = rank * 8 + file;
+                if let Some((colore, pezzo)) = self.pezzo_e_colore_in(sq) {
+                    if empty > 0 { fen.push_str(&empty.to_string()); empty = 0; }
+                    let mut c = match pezzo {
+                        Pezzo::Pedone => 'p', Pezzo::Cavallo => 'n', Pezzo::Alfiere => 'b',
+                        Pezzo::Torre => 'r', Pezzo::Regina => 'q', Pezzo::Re => 'k',
+                    };
+                    if colore == Colore::Bianco { c = c.to_ascii_uppercase(); }
+                    fen.push(c);
+                } else { empty += 1; }
+            }
+            if empty > 0 { fen.push_str(&empty.to_string()); }
+            if rank > 0 { fen.push('/'); }
+        }
+        fen.push(' ');
+        fen.push(if self.turno == Colore::Bianco { 'w' } else { 'b' });
+        fen.push(' ');
+        if self.diritti_arrocco == 0 { fen.push('-'); } else {
+            if (self.diritti_arrocco & 1) != 0 { fen.push('K'); }
+            if (self.diritti_arrocco & 2) != 0 { fen.push('Q'); }
+            if (self.diritti_arrocco & 4) != 0 { fen.push('k'); }
+            if (self.diritti_arrocco & 8) != 0 { fen.push('q'); }
+        }
+        fen.push(' ');
+        if let Some(sq) = self.ep_square {
+            let f = (sq % 8) as u8; let r = (sq / 8) as u8;
+            fen.push((b'a' + f) as char); fen.push((b'1' + r) as char);
+        } else { fen.push('-'); }
+        fen.push_str(&format!(" {} {}", self.mezze_mosse, self.ply / 2 + 1));
+        fen
+    }
+}
+
+impl fmt::Display for Scacchiera {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_fen())
     }
 }

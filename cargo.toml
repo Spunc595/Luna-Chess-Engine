@@ -1,7 +1,23 @@
 [package]
-name = "motore-scacchi-rust"
-version = "1.0.0"
+name = "luna"
+version = "0.6.0"
+authors = ["Daniele & Alessandro"]
 edition = "2021"
 
 [dependencies]
 rand = "0.8"
+rand_chacha = "0.3"  # Aggiungi questa
+log = "0.4"          # Aggiungi questa
+env_logger = "0.11"  # Aggiungi questa (solo per debug)
+
+[features]
+default = []
+simd = []
+nnue = []
+embedded_nnue = []
+evaluation = []  # Feature flag per evaluation
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

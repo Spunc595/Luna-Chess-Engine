@@ -1,728 +1,292 @@
-use crate::board::{Bitboard, Scacchiera, Pezzo, Colore, Casella};
+use crate::board::{Scacchiera, Mossa, Pezzo, MoveFlag, Colore};
 
-#[derive(Debug, Clone, Copy)]
-pub struct Mossa {
-    pub da: Casella,
-    pub a: Casella,
-    pub promozione: Option<Pezzo>,
-}
+// --- SORTING TABLES (PST - Piece-Square Tables) ---
+// Assigns a positional score based on the occupied square.
+// The values are oriented for White (from rank 1 to rank 8).
+// For Black, the square index is reflected horizontally (XOR 56).
 
-impl Mossa {
-    pub fn nuova(da: Casella, a: Casella) -> Self {
-        Self {
-            da,
-            a,
-            promozione: None,
-        }
-    }
+/// PST for Pawns: incentivizes advancement and central control.
+const PST_PAWN: [i32; 64] = [
+     0,  0,  0,  0,  0,  0,  0,  0,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    10, 10, 20, 30, 30, 20, 10, 10,
+     5,  5, 10, 25, 25, 10,  5,  5,
+     0,  0,  0, 20, 20,  0,  0,  0,
+     5, -5,-10,  0,  0,-10, -5,  5,
+     5, 10, 10,-20,-20, 10, 10,  5,
+     0,  0,  0,  0,  0,  0,  0,  0
+];
+
+/// PST for Knights: strongly penalizes edges and corners, rewards the center.
+const PST_KNIGHT: [i32; 64] = [
+    -50,-40,-30,-30,-30,-30,-40,-50,
+    -40,-20,  0,  0,  0,  0,-20,-40,
+    -30,  0, 10, 15, 15, 10,  0,-30,
+    -30,  5, 15, 20, 20, 15,  5,-30,
+    -30,  0, 15, 20, 20, 15,  0,-30,
+    -30,  5, 10, 15, 15, 10,  5,-30,
+    -40,-20,  0,  5,  5,  0,-20,-40,
+    -50,-40,-30,-30,-30,-30,-40,-50
+];
+
+/// PST for Bishops: incentivizes placement on long diagonals.
+const PST_BISHOP: [i32; 64] = [
+    -20,-10,-10,-10,-10,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5, 10, 10,  5,  0,-10,
+    -10,  5,  5, 10, 10,  5,  5,-10,
+    -10,  0, 10, 10, 10, 10,  0,-10,
+    -10, 10, 10, 10, 10, 10, 10,-10,
+    -10,  5,  0,  0,  0,  0,  5,-10,
+    -20,-10,-10,-10,-10,-10,-10,-20
+];
+
+/// PST for Rooks: rewards development on the seventh rank and central control.
+const PST_ROOK: [i32; 64] = [
+     0,  0,  0,  0,  0,  0,  0,  0,
+     5, 10, 10, 10, 10, 10, 10,  5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+    -5,  0,  0,  0,  0,  0,  0, -5,
+     0,  0,  0,  5,  5,  0,  0,  0
+];
+
+/// PST for Queens: slight penalty if developed too early or placed on the edges.
+const PST_QUEEN: [i32; 64] = [
+    -20,-10,-10, -5, -5,-10,-10,-20,
+    -10,  0,  0,  0,  0,  0,  0,-10,
+    -10,  0,  5,  5,  5,  5,  0,-10,
+     -5,  0,  5,  5,  5,  5,  0, -5,
+      0,  0,  5,  5,  5,  5,  0, -5,
+    -10,  5,  5,  5,  5,  5,  0,-10,
+    -10,  0,  5,  0,  0,  0,  0,-10,
+    -20,-10,-10, -5, -5,-10,-10,-20
+];
+
+/// PST for the King (Middlegame phase): strongly encourages the King to remain protected and castled.
+const PST_KING: [i32; 64] = [
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -30,-40,-40,-50,-50,-40,-40,-30,
+    -20,-30,-30,-40,-40,-30,-30,-20,
+    -10,-20,-20,-20,-20,-20,-20,-10,
+     20, 20,  0,  0,  0,  0, 20, 20,
+     20, 30, 10,  0,  0, 10, 30, 20
+];
+
+// --- MOVE GENERATION ---
+
+/// Generates all pseudo-legal moves for the current position.
+/// Generated moves include both quiet moves and captures, but are not
+/// yet verified for absolute legality (the King might be in check).
+pub fn genera_mosse(s: &Scacchiera) -> Vec<Mossa> {
+    let mut mosse = Vec::with_capacity(64);
+    let us = s.turno;
+    let them = us.opposto();
     
-    pub fn nuova_con_promozione(da: Casella, a: Casella, promozione: Pezzo) -> Self {
-        Self {
-            da,
-            a,
-            promozione: Some(promozione),
+    let our_pieces = s.colori[us.indice()];
+    let their_pieces = s.colori[them.indice()];
+    let all_pieces = our_pieces | their_pieces;
+
+    // --- 1. PAWNS ---
+    let pawns = s.pezzi[Pezzo::Pedone.indice()] & our_pieces;
+    let (start_rank, prom_rank) = if us == Colore::Bianco { (1, 7) } else { (6, 0) };
+
+    let mut temp_pawns = pawns;
+    while temp_pawns != 0 {
+        let sq = temp_pawns.trailing_zeros() as usize;
+        temp_pawns &= temp_pawns - 1;
+        
+        // Single push
+        let to_sq = if us == Colore::Bianco { sq + 8 } else { sq - 8 };
+        if to_sq < 64 && (all_pieces & (1 << to_sq)) == 0 {
+            add_pawn_move(sq, to_sq, prom_rank, &mut mosse);
+            
+            // Double push (only possible if the previous square was empty)
+            let double_sq = if us == Colore::Bianco { sq + 16 } else { sq - 16 };
+            if (sq / 8) == start_rank && (all_pieces & (1 << double_sq)) == 0 {
+                mosse.push(Mossa::new(sq, double_sq, MoveFlag::DoublePawnPush, None));
+            }
+        }
+        
+        // Pawn captures
+        let attacks = crate::attacks::pawn_attacks(sq, us);
+        let mut victims = attacks & their_pieces;
+        while victims != 0 {
+            let v_sq = victims.trailing_zeros() as usize;
+            victims &= victims - 1;
+            add_capture_move(sq, v_sq, prom_rank, &mut mosse);
+        }
+        
+        // En Passant capture
+        if let Some(ep_sq) = s.ep_square {
+            if (attacks & (1 << ep_sq)) != 0 {
+                 mosse.push(Mossa::new(sq, ep_sq, MoveFlag::EnPassant, None));
+            }
         }
     }
-}
 
-impl fmt::Display for Mossa {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}{}", self.da, self.a)?;
-        if let Some(pezzo) = self.promozione {
-            let promozione_char = match pezzo {
-                Pezzo::Regina => 'q',
-                Pezzo::Torre => 'r',
-                Pezzo::Alfiere => 'b',
-                Pezzo::Cavallo => 'n',
-                _ => 'q', // Default
+    // --- 2. KNIGHTS, BISHOPS, ROOKS, QUEENS, KINGS ---
+    for p_type in [Pezzo::Cavallo, Pezzo::Alfiere, Pezzo::Torre, Pezzo::Regina, Pezzo::Re] {
+        let mut pieces = s.pezzi[p_type.indice()] & our_pieces;
+        while pieces != 0 {
+            let sq = pieces.trailing_zeros() as usize;
+            pieces &= pieces - 1;
+            
+            // Generate bitboard with all squares attacked by the current piece
+            let attacks = match p_type {
+                Pezzo::Cavallo => crate::attacks::knight_attacks(sq),
+                Pezzo::Alfiere => crate::attacks::bishop_attacks(sq, all_pieces),
+                Pezzo::Torre => crate::attacks::rook_attacks(sq, all_pieces),
+                Pezzo::Regina => crate::attacks::queen_attacks(sq, all_pieces),
+                Pezzo::Re => crate::attacks::king_attacks(sq),
+                _ => 0,
             };
-            write!(f, "{}", promozione_char)?;
-        }
-        Ok(())
-    }
-}
 
-use std::fmt;
+            // Extract quiet moves (no captures)
+            let mut quiet = attacks & !all_pieces;
+            while quiet != 0 {
+                let to = quiet.trailing_zeros() as usize;
+                quiet &= quiet - 1;
+                mosse.push(Mossa::new(sq, to, MoveFlag::None, None));
+            }
 
-// ==================== TABELLE PRECALCOLATE PER BITBOARD ====================
-
-pub struct BitboardTables {
-    mosse_cavallo: [Bitboard; 64],
-    mosse_re: [Bitboard; 64],
-    attacchi_pedone: [[Bitboard; 64]; 2],
-    mask_torre: [Bitboard; 64],
-    mask_alfiere: [Bitboard; 64],
-}
-
-impl BitboardTables {
-    // Singleton per evitare ricreazioni multiple
-    pub fn global() -> &'static BitboardTables {
-        static INSTANCE: std::sync::OnceLock<BitboardTables> = std::sync::OnceLock::new();
-        INSTANCE.get_or_init(|| BitboardTables::nuova())
-    }
-    
-    pub fn nuova() -> Self {
-        let mut tables = BitboardTables {
-            mosse_cavallo: [Bitboard::EMPTY; 64],
-            mosse_re: [Bitboard::EMPTY; 64],
-            attacchi_pedone: [[Bitboard::EMPTY; 64]; 2],
-            mask_torre: [Bitboard::EMPTY; 64],
-            mask_alfiere: [Bitboard::EMPTY; 64],
-        };
-        
-        tables.precalcola_tutto();
-        tables
-    }
-    
-    fn precalcola_tutto(&mut self) {
-        for square in 0..64 {
-            let square_u8 = square as u8;
-            self.mosse_cavallo[square] = self.calcola_mosse_cavallo(square_u8);
-            self.mosse_re[square] = self.calcola_mosse_re(square_u8);
-            self.attacchi_pedone[0][square] = self.calcola_attacchi_pedone(square_u8, Colore::Bianco);
-            self.attacchi_pedone[1][square] = self.calcola_attacchi_pedone(square_u8, Colore::Nero);
-            self.mask_torre[square] = self.calcola_mask_torre(square_u8);
-            self.mask_alfiere[square] = self.calcola_mask_alfiere(square_u8);
-        }
-    }
-    
-    fn calcola_mosse_cavallo(&self, square: u8) -> Bitboard {
-        let mut bb = Bitboard::nuova();
-        let file = (square % 8) as i8;
-        let rank = (square / 8) as i8;
-        
-        let mosse = [
-            (2, 1), (2, -1), (-2, 1), (-2, -1),
-            (1, 2), (1, -2), (-1, 2), (-1, -2),
-        ];
-        
-        for (dx, dy) in mosse {
-            let new_file = file + dx;
-            let new_rank = rank + dy;
-            
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
-                let new_square = (new_rank * 8 + new_file) as u8;
-                bb.imposta_casella(new_square);
+            // Extract capture moves
+            let mut captures = attacks & their_pieces;
+            while captures != 0 {
+                let to = captures.trailing_zeros() as usize;
+                captures &= captures - 1;
+                mosse.push(Mossa::new(sq, to, MoveFlag::Capture, None));
             }
         }
-        bb
     }
-    
-    fn calcola_mosse_re(&self, square: u8) -> Bitboard {
-        let mut bb = Bitboard::nuova();
-        let file = (square % 8) as i8;
-        let rank = (square / 8) as i8;
-        
-        for dx in -1..=1 {
-            for dy in -1..=1 {
-                if dx == 0 && dy == 0 {
-                    continue;
-                }
-                
-                let new_file = file + dx;
-                let new_rank = rank + dy;
-                
-                if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
-                    let new_square = (new_rank * 8 + new_file) as u8;
-                    bb.imposta_casella(new_square);
-                }
-            }
-        }
-        bb
-    }
-    
-    fn calcola_attacchi_pedone(&self, square: u8, colore: Colore) -> Bitboard {
-        let mut bb = Bitboard::nuova();
-        let file = (square % 8) as i8;
-        let rank = (square / 8) as i8;
-        
-        let direzione = match colore {
-            Colore::Bianco => 1,
-            Colore::Nero => -1,
-        };
-        
-        // Attacchi in diagonale
-        for dx in [-1, 1] {
-            let new_file = file + dx;
-            let new_rank = rank + direzione;
-            
-            if new_file >= 0 && new_file < 8 && new_rank >= 0 && new_rank < 8 {
-                let new_square = (new_rank * 8 + new_file) as u8;
-                bb.imposta_casella(new_square);
-            }
-        }
-        bb
-    }
-    
-    fn calcola_mask_torre(&self, square: u8) -> Bitboard {
-        let mut bb = Bitboard::nuova();
-        let file = square % 8;
-        let rank = square / 8;
-        
-        // Tutte le caselle sulla stessa traversa, esclusi i bordi
-        for r in 1..7 {
-            if r != rank {
-                bb.imposta_casella(r * 8 + file);
-            }
-        }
-        
-        // Tutte le caselle sulla stessa colonna, esclusi i bordi
-        for f in 1..7 {
-            if f != file {
-                bb.imposta_casella(rank * 8 + f);
-            }
-        }
-        
-        bb
-    }
-    
-    fn calcola_mask_alfiere(&self, square: u8) -> Bitboard {
-        let mut bb = Bitboard::nuova();
-        let file = square % 8;
-        let rank = square / 8;
-        
-        // Diagonale principale (↘)
-        let mut f = file as i8 + 1;
-        let mut r = rank as i8 + 1;
-        while f < 7 && r < 7 {
-            bb.imposta_casella((r * 8 + f) as u8);
-            f += 1;
-            r += 1;
-        }
-        
-        // Diagonale secondaria (↙)
-        let mut f = file as i8 - 1;
-        let mut r = rank as i8 + 1;
-        while f > 0 && r < 7 {
-            bb.imposta_casella((r * 8 + f) as u8);
-            f -= 1;
-            r += 1;
-        }
-        
-        // Diagonale principale inversa (↖)
-        let mut f = file as i8 - 1;
-        let mut r = rank as i8 - 1;
-        while f > 0 && r > 0 {
-            bb.imposta_casella((r * 8 + f) as u8);
-            f -= 1;
-            r -= 1;
-        }
-        
-        // Diagonale secondaria inversa (↗)
-        let mut f = file as i8 + 1;
-        let mut r = rank as i8 - 1;
-        while f < 7 && r > 0 {
-            bb.imposta_casella((r * 8 + f) as u8);
-            f += 1;
-            r -= 1;
-        }
-        
-        bb
-    }
-    
-    // Metodi pubblici per accedere alle tabelle
-    pub fn mosse_cavallo(square: u8) -> Bitboard {
-        Self::global().mosse_cavallo[square as usize]
-    }
-    
-    pub fn mosse_re(square: u8) -> Bitboard {
-        Self::global().mosse_re[square as usize]
-    }
-    
-    pub fn attacchi_pedone(square: u8, colore: Colore) -> Bitboard {
-        Self::global().attacchi_pedone[colore.indice()][square as usize]
-    }
-    
-    pub fn attacchi_torre(square: u8, occupazione: Bitboard) -> Bitboard {
-        let _tables = Self::global(); // Per evitare warning
-        Self::attacchi_scorrevoli(square, occupazione, true)
-    }
-    
-    pub fn attacchi_alfiere(square: u8, occupazione: Bitboard) -> Bitboard {
-        let _tables = Self::global(); // Per evitare warning
-        Self::attacchi_scorrevoli(square, occupazione, false)
-    }
-    
-    pub fn attacchi_regina(square: u8, occupazione: Bitboard) -> Bitboard {
-        Self::attacchi_torre(square, occupazione) | Self::attacchi_alfiere(square, occupazione)
-    }
-    
-    fn attacchi_scorrevoli(square: u8, occupazione: Bitboard, is_torre: bool) -> Bitboard {
-        let mut attacks = Bitboard::EMPTY;
-        let directions = if is_torre {
-            [(1, 0), (-1, 0), (0, 1), (0, -1)]
-        } else {
-            [(1, 1), (1, -1), (-1, 1), (-1, -1)]
-        };
-        
-        for (dx, dy) in directions {
-            let mut current = square;
-            loop {
-                let file = (current % 8) as i8 + dx;
-                let rank = (current / 8) as i8 + dy;
-                
-                if file < 0 || file >= 8 || rank < 0 || rank >= 8 {
-                    break;
-                }
-                
-                let next_square = (rank * 8 + file) as u8;
-                attacks.imposta_casella(next_square);
-                
-                // Se c'è un pezzo in questa casella, fermati
-                if occupazione.contiene_casella(next_square) {
-                    break;
-                }
-                
-                current = next_square;
-            }
-        }
-        
-        attacks
-    }
-}
 
-// ==================== GENERAZIONE MOSSE CON BITBOARD ====================
-
-pub fn genera_mosse(scacchiera: &Scacchiera) -> Vec<Mossa> {
-    let mut mosse = Vec::new();
-    let colore = scacchiera.colore_attivo();
-    let avversario = colore.opposto();
-    
-    let occupazione_totale = scacchiera.occupazione_totale();
-    let occupazione_colore = scacchiera.bitboard_colore(colore);
-    let occupazione_avversario = scacchiera.bitboard_colore(avversario);
-    let caselle_vuote = scacchiera.caselle_vuote();
-    
-    // Genera mosse per ogni tipo di pezzo usando bitboard
-    genera_mosse_pedone_bitboard(scacchiera, colore, caselle_vuote, occupazione_avversario, &mut mosse);
-    genera_mosse_cavallo_bitboard(scacchiera, colore, occupazione_colore, &mut mosse);
-    genera_mosse_alfiere_bitboard(scacchiera, colore, occupazione_totale, occupazione_colore, &mut mosse);
-    genera_mosse_torre_bitboard(scacchiera, colore, occupazione_totale, occupazione_colore, &mut mosse);
-    genera_mosse_regina_bitboard(scacchiera, colore, occupazione_totale, occupazione_colore, &mut mosse);
-    genera_mosse_re_bitboard(scacchiera, colore, occupazione_colore, &mut mosse);
+    // --- 3. CASTLING ---
+    genera_arrocco(s, &mut mosse, all_pieces);
     
     mosse
 }
 
-fn genera_mosse_pedone_bitboard(scacchiera: &Scacchiera, colore: Colore, caselle_vuote: Bitboard, 
-                                occupazione_avversario: Bitboard, mosse: &mut Vec<Mossa>) {
-    let pedoni = scacchiera.bitboard_pezzo(Pezzo::Pedone, colore);
-    if pedoni.is_vuota() {
-        return;
-    }
+/// Generates castling moves, validating remaining rights, clear paths,
+/// and ensuring the King's transit squares are not attacked.
+fn genera_arrocco(s: &Scacchiera, mosse: &mut Vec<Mossa>, all: u64) {
+    let us = s.turno;
     
-    let direzione = colore.direzione_pedone();
-    let rank_iniziale = if colore == Colore::Bianco { 1 } else { 6 };
-    let rank_promozione = if colore == Colore::Bianco { 7 } else { 0 };
-    
-    let mut pedoni_temp = pedoni;
-    while let Some(square) = pedoni_temp.pop_lsb() {
-        let casella_da = Casella::da_indice(square).unwrap();
-        let _file = square % 8;
-        let rank = square / 8;
-        
-        // Mossa avanti di una casella
-        let target_square = (square as i16 + (direzione * 8) as i16) as u8;
-        if target_square < 64 {
-            let target_casella = Casella::da_indice(target_square).unwrap();
-            let target_bitboard = Bitboard::da_casella(target_square);
-            
-            if (caselle_vuote & target_bitboard).is_vuota() {
-                // Casella libera
-                if rank + (direzione as u8) == rank_promozione {
-                    // Promozione
-                    for pezzo in &[Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
-                        mosse.push(Mossa::nuova_con_promozione(casella_da, target_casella, *pezzo));
-                    }
-                } else {
-                    mosse.push(Mossa::nuova(casella_da, target_casella));
-                    
-                    // Mossa avanti di due caselle dalla posizione iniziale
-                    if rank == rank_iniziale {
-                        let double_square = (square as i16 + (direzione * 16) as i16) as u8;
-                        if double_square < 64 {
-                            let double_casella = Casella::da_indice(double_square).unwrap();
-                            let double_bitboard = Bitboard::da_casella(double_square);
-                            let intermediate_square = target_square;
-                            let intermediate_bitboard = Bitboard::da_casella(intermediate_square);
-                            
-                            if (caselle_vuote & double_bitboard).is_vuota() && 
-                               (caselle_vuote & intermediate_bitboard).is_vuota() {
-                                mosse.push(Mossa::nuova(casella_da, double_casella));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Catture
-        let attacchi = BitboardTables::attacchi_pedone(square, colore);
-        let catture = attacchi & occupazione_avversario;
-        
-        let mut catture_temp = catture;
-        while let Some(capture_square) = catture_temp.pop_lsb() {
-            let target_casella = Casella::da_indice(capture_square).unwrap();
-            
-            if rank + (direzione as u8) == rank_promozione {
-                // Promozione con cattura
-                for pezzo in &[Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
-                    mosse.push(Mossa::nuova_con_promozione(casella_da, target_casella, *pezzo));
-                }
-            } else {
-                mosse.push(Mossa::nuova(casella_da, target_casella));
-            }
-        }
-        
-        // En passant
-        if let Some(en_passant_sq) = scacchiera.en_passant() {
-            let en_passant_bitboard = en_passant_sq.to_bitboard();
-            let en_passant_attacks = attacchi & en_passant_bitboard;
-            
-            if !en_passant_attacks.is_vuota() {
-                mosse.push(Mossa::nuova(casella_da, en_passant_sq));
-            }
-        }
-    }
-}
+    // Cannot castle if the king is already in check
+    if s.in_scacco() { return; } 
 
-fn genera_mosse_cavallo_bitboard(scacchiera: &Scacchiera, colore: Colore, occupazione_colore: Bitboard, 
-                                 mosse: &mut Vec<Mossa>) {
-    let cavalli = scacchiera.bitboard_pezzo(Pezzo::Cavallo, colore);
-    if cavalli.is_vuota() {
-        return;
-    }
-    
-    let mut cavalli_temp = cavalli;
-    while let Some(square) = cavalli_temp.pop_lsb() {
-        let casella_da = Casella::da_indice(square).unwrap();
-        let mosse_possibili = BitboardTables::mosse_cavallo(square);
-        let mosse_valide = mosse_possibili & !occupazione_colore;
-        
-        let mut mosse_temp = mosse_valide;
-        while let Some(target_square) = mosse_temp.pop_lsb() {
-            let target_casella = Casella::da_indice(target_square).unwrap();
-            mosse.push(Mossa::nuova(casella_da, target_casella));
-        }
-    }
-}
-
-fn genera_mosse_alfiere_bitboard(scacchiera: &Scacchiera, colore: Colore, occupazione_totale: Bitboard, 
-                                 occupazione_colore: Bitboard, mosse: &mut Vec<Mossa>) {
-    let alfieri = scacchiera.bitboard_pezzo(Pezzo::Alfiere, colore) | 
-                  scacchiera.bitboard_pezzo(Pezzo::Regina, colore);
-    
-    if alfieri.is_vuota() {
-        return;
-    }
-    
-    let mut alfieri_temp = alfieri;
-    while let Some(square) = alfieri_temp.pop_lsb() {
-        let casella_da = Casella::da_indice(square).unwrap();
-        let attacchi = BitboardTables::attacchi_alfiere(square, occupazione_totale);
-        let mosse_valide = attacchi & !occupazione_colore;
-        
-        let mut mosse_temp = mosse_valide;
-        while let Some(target_square) = mosse_temp.pop_lsb() {
-            let target_casella = Casella::da_indice(target_square).unwrap();
-            mosse.push(Mossa::nuova(casella_da, target_casella));
-        }
-    }
-}
-
-fn genera_mosse_torre_bitboard(scacchiera: &Scacchiera, colore: Colore, occupazione_totale: Bitboard, 
-                               occupazione_colore: Bitboard, mosse: &mut Vec<Mossa>) {
-    let torri = scacchiera.bitboard_pezzo(Pezzo::Torre, colore) | 
-                scacchiera.bitboard_pezzo(Pezzo::Regina, colore);
-    
-    if torri.is_vuota() {
-        return;
-    }
-    
-    let mut torri_temp = torri;
-    while let Some(square) = torri_temp.pop_lsb() {
-        let casella_da = Casella::da_indice(square).unwrap();
-        let attacchi = BitboardTables::attacchi_torre(square, occupazione_totale);
-        let mosse_valide = attacchi & !occupazione_colore;
-        
-        let mut mosse_temp = mosse_valide;
-        while let Some(target_square) = mosse_temp.pop_lsb() {
-            let target_casella = Casella::da_indice(target_square).unwrap();
-            mosse.push(Mossa::nuova(casella_da, target_casella));
-        }
-    }
-}
-
-fn genera_mosse_regina_bitboard(scacchiera: &Scacchiera, colore: Colore, occupazione_totale: Bitboard, 
-                                occupazione_colore: Bitboard, mosse: &mut Vec<Mossa>) {
-    // Le mosse della regina sono già gestite in alfieri e torri
-    // Questa funzione è per completezza
-    let regine = scacchiera.bitboard_pezzo(Pezzo::Regina, colore);
-    
-    if regine.is_vuota() {
-        return;
-    }
-    
-    let mut regine_temp = regine;
-    while let Some(square) = regine_temp.pop_lsb() {
-        let casella_da = Casella::da_indice(square).unwrap();
-        let attacchi = BitboardTables::attacchi_regina(square, occupazione_totale);
-        let mosse_valide = attacchi & !occupazione_colore;
-        
-        let mut mosse_temp = mosse_valide;
-        while let Some(target_square) = mosse_temp.pop_lsb() {
-            let target_casella = Casella::da_indice(target_square).unwrap();
-            mosse.push(Mossa::nuova(casella_da, target_casella));
-        }
-    }
-}
-
-fn genera_mosse_re_bitboard(scacchiera: &Scacchiera, colore: Colore, occupazione_colore: Bitboard, 
-                            mosse: &mut Vec<Mossa>) {
-    let re = scacchiera.bitboard_pezzo(Pezzo::Re, colore);
-    if re.is_vuota() {
-        return;
-    }
-    
-    let square = re.lsb().unwrap();
-    let casella_da = Casella::da_indice(square).unwrap();
-    let mosse_possibili = BitboardTables::mosse_re(square);
-    let mosse_valide = mosse_possibili & !occupazione_colore;
-    
-    let mut mosse_temp = mosse_valide;
-    while let Some(target_square) = mosse_temp.pop_lsb() {
-        let target_casella = Casella::da_indice(target_square).unwrap();
-        mosse.push(Mossa::nuova(casella_da, target_casella));
-    }
-    
-    // Arrocco
-    genera_arrocco_bitboard(scacchiera, colore, square, mosse);
-}
-
-fn genera_arrocco_bitboard(scacchiera: &Scacchiera, colore: Colore, re_square: u8, mosse: &mut Vec<Mossa>) {
-    if scacchiera.re_in_scacco(colore) {
-        return;
-    }
-    
-    let diritti = scacchiera.diritti_arrocco();
-    let rank = re_square / 8;
-    let occupazione_totale = scacchiera.occupazione_totale();
-    
-    match colore {
-        Colore::Bianco if rank == 0 => {
-            // Arrocco corto (O-O)
-            if diritti.bianco_lato_re {
-                let caselle_libere = Bitboard::da_casella(5) | Bitboard::da_casella(6); // f1, g1
-                let _caselle_sicure = Bitboard::da_casella(5) | Bitboard::da_casella(6); // f1, g1
-                
-                if (occupazione_totale & caselle_libere).is_vuota() &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(5).unwrap(), Colore::Nero) &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(6).unwrap(), Colore::Nero) {
-                    if let Some(target) = Casella::da_indice(6) {
-                        mosse.push(Mossa::nuova(Casella::da_indice(4).unwrap(), target));
-                    }
-                }
-            }
-            
-            // Arrocco lungo (O-O-O)
-            if diritti.bianco_lato_regina {
-                let caselle_libere = Bitboard::da_casella(1) | Bitboard::da_casella(2) | Bitboard::da_casella(3); // b1, c1, d1
-                let _caselle_sicure = Bitboard::da_casella(2) | Bitboard::da_casella(3); // c1, d1
-                
-                if (occupazione_totale & caselle_libere).is_vuota() &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(2).unwrap(), Colore::Nero) &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(3).unwrap(), Colore::Nero) {
-                    if let Some(target) = Casella::da_indice(2) {
-                        mosse.push(Mossa::nuova(Casella::da_indice(4).unwrap(), target));
-                    }
-                }
+    if us == Colore::Bianco {
+        // White short castling (Kingside)
+        if (s.diritti_arrocco & 1) != 0 && (all & 0x60) == 0 {
+            if !crate::attacks::square_attacked(s, 5, Colore::Nero) && 
+               !crate::attacks::square_attacked(s, 6, Colore::Nero) {
+                mosse.push(Mossa::new(4, 6, MoveFlag::Castle, None));
             }
         }
-        Colore::Nero if rank == 7 => {
-            // Arrocco corto (O-O)
-            if diritti.nero_lato_re {
-                let caselle_libere = Bitboard::da_casella(61) | Bitboard::da_casella(62); // f8, g8
-                let _caselle_sicure = Bitboard::da_casella(61) | Bitboard::da_casella(62); // f8, g8
-                
-                if (occupazione_totale & caselle_libere).is_vuota() &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(61).unwrap(), Colore::Bianco) &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(62).unwrap(), Colore::Bianco) {
-                    if let Some(target) = Casella::da_indice(62) {
-                        mosse.push(Mossa::nuova(Casella::da_indice(60).unwrap(), target));
-                    }
-                }
-            }
-            
-            // Arrocco lungo (O-O-O)
-            if diritti.nero_lato_regina {
-                let caselle_libere = Bitboard::da_casella(57) | Bitboard::da_casella(58) | Bitboard::da_casella(59); // b8, c8, d8
-                let _caselle_sicure = Bitboard::da_casella(58) | Bitboard::da_casella(59); // c8, d8
-                
-                if (occupazione_totale & caselle_libere).is_vuota() &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(58).unwrap(), Colore::Bianco) &&
-                   !scacchiera.casella_attaccata(Casella::da_indice(59).unwrap(), Colore::Bianco) {
-                    if let Some(target) = Casella::da_indice(58) {
-                        mosse.push(Mossa::nuova(Casella::da_indice(60).unwrap(), target));
-                    }
-                }
+        // White long castling (Queenside)
+        if (s.diritti_arrocco & 2) != 0 && (all & 0xE) == 0 {
+            if !crate::attacks::square_attacked(s, 3, Colore::Nero) && 
+               !crate::attacks::square_attacked(s, 2, Colore::Nero) {
+                mosse.push(Mossa::new(4, 2, MoveFlag::Castle, None));
             }
         }
-        _ => {}
-    }
-}
-
-// ==================== ESECUZIONE MOSSE CON BITBOARD ====================
-
-pub fn esegui_mossa_completa(scacchiera: &mut Scacchiera, mossa: &Mossa) -> bool {
-    let pezzo_partenza = scacchiera.ottieni_pezzo(mossa.da);
-    if pezzo_partenza.is_none() {
-        return false;
-    }
-    
-    let (pezzo, colore) = pezzo_partenza.unwrap();
-    let avversario = colore.opposto();
-    
-    // Salva lo stato per eventuale undo
-    let diritti_vecchi = scacchiera.diritti_arrocco();
-    let en_passant_vecchio = scacchiera.en_passant();
-    let contatore_semimosse_vecchio = scacchiera.contatore_semimosse();
-    
-    // Aggiorna diritti di arrocco
-    let mut nuovi_diritti = diritti_vecchi;
-    
-    // Se il re si muove, perde i diritti di arrocco
-    if pezzo == Pezzo::Re {
-        match colore {
-            Colore::Bianco => {
-                nuovi_diritti.bianco_lato_re = false;
-                nuovi_diritti.bianco_lato_regina = false;
-            }
-            Colore::Nero => {
-                nuovi_diritti.nero_lato_re = false;
-                nuovi_diritti.nero_lato_regina = false;
-            }
-        }
-    }
-    
-    // Se una torre si muove o viene catturata, aggiorna diritti
-    if pezzo == Pezzo::Torre {
-        match (colore, mossa.da.file(), mossa.da.rank()) {
-            (Colore::Bianco, 0, 0) => nuovi_diritti.bianco_lato_regina = false,
-            (Colore::Bianco, 7, 0) => nuovi_diritti.bianco_lato_re = false,
-            (Colore::Nero, 0, 7) => nuovi_diritti.nero_lato_regina = false,
-            (Colore::Nero, 7, 7) => nuovi_diritti.nero_lato_re = false,
-            _ => {}
-        }
-    }
-    
-    // Controlla se una torre viene catturata
-    if let Some((pezzo_catturato, colore_catturato)) = scacchiera.ottieni_pezzo(mossa.a) {
-        if pezzo_catturato == Pezzo::Torre {
-            match (colore_catturato, mossa.a.file(), mossa.a.rank()) {
-                (Colore::Bianco, 0, 0) => nuovi_diritti.bianco_lato_regina = false,
-                (Colore::Bianco, 7, 0) => nuovi_diritti.bianco_lato_re = false,
-                (Colore::Nero, 0, 7) => nuovi_diritti.nero_lato_regina = false,
-                (Colore::Nero, 7, 7) => nuovi_diritti.nero_lato_re = false,
-                _ => {}
-            }
-        }
-    }
-    
-    scacchiera.imposta_diritti_arrocco(nuovi_diritti);
-    
-    // Gestione en passant
-    let mut nuovo_en_passant = None;
-    if pezzo == Pezzo::Pedone {
-        let distanza = (mossa.da.rank() as i8 - mossa.a.rank() as i8).abs();
-        if distanza == 2 {
-            // Il pedone si è mosso di due caselle
-            let rank_en_passant = (mossa.da.rank() as i8 + mossa.a.rank() as i8) / 2;
-            nuovo_en_passant = Casella::nuova(mossa.da.file(), rank_en_passant as u8);
-        }
-        
-        // Cattura en passant
-        if let Some(en_passant_sq) = en_passant_vecchio {
-            if mossa.a == en_passant_sq && mossa.da.file() != mossa.a.file() {
-                // Rimuovi il pedone catturato en passant
-                let rank_cattura = mossa.da.rank();
-                if let Some(casella_cattura) = Casella::nuova(mossa.a.file(), rank_cattura) {
-                    scacchiera.imposta_pezzo(casella_cattura, None);
-                }
-            }
-        }
-    }
-    
-    scacchiera.imposta_en_passant(nuovo_en_passant);
-    
-    // Gestione arrocco
-    if pezzo == Pezzo::Re {
-        let distanza_file = (mossa.da.file() as i8 - mossa.a.file() as i8).abs();
-        if distanza_file == 2 {
-            // Arrocco: muovi anche la torre
-            if mossa.a.file() == 6 { // Arrocco corto
-                let torre_da = Casella::nuova(7, mossa.da.rank()).unwrap();
-                let torre_a = Casella::nuova(5, mossa.da.rank()).unwrap();
-                if let Some((_, colore_torre)) = scacchiera.ottieni_pezzo(torre_da) {
-                    scacchiera.imposta_pezzo(torre_a, Some((Pezzo::Torre, colore_torre)));
-                    scacchiera.imposta_pezzo(torre_da, None);
-                }
-            } else if mossa.a.file() == 2 { // Arrocco lungo
-                let torre_da = Casella::nuova(0, mossa.da.rank()).unwrap();
-                let torre_a = Casella::nuova(3, mossa.da.rank()).unwrap();
-                if let Some((_, colore_torre)) = scacchiera.ottieni_pezzo(torre_da) {
-                    scacchiera.imposta_pezzo(torre_a, Some((Pezzo::Torre, colore_torre)));
-                    scacchiera.imposta_pezzo(torre_da, None);
-                }
-            }
-        }
-    }
-    
-    // Esegui la mossa base
-    if let Some(pezzo_promosso) = mossa.promozione {
-        scacchiera.imposta_pezzo(mossa.a, Some((pezzo_promosso, colore)));
     } else {
-        scacchiera.imposta_pezzo(mossa.a, Some((pezzo, colore)));
-    }
-    scacchiera.imposta_pezzo(mossa.da, None);
-    
-    // Aggiorna contatore semimosse
-    if pezzo == Pezzo::Pedone || scacchiera.ottieni_pezzo(mossa.a).is_some() {
-        scacchiera.imposta_contatore_semimosse(0);
-    } else {
-        scacchiera.imposta_contatore_semimosse(contatore_semimosse_vecchio + 1);
-    }
-    
-    // Aggiorna numero mossa se è il turno del nero
-    if colore == Colore::Nero {
-        scacchiera.imposta_numero_mossa(scacchiera.numero_mossa() + 1);
-    }
-    
-    // Cambia colore attivo
-    scacchiera.imposta_colore_attivo(avversario);
-    
-    true
-}
-
-// ==================== UTILITY FUNCTIONS ====================
-
-pub fn filtra_mosse_legali(scacchiera: &Scacchiera, mosse: &[Mossa]) -> Vec<Mossa> {
-    let mut mosse_legali = Vec::new();
-    
-    for mossa in mosse {
-        let mut scacchiera_temp = scacchiera.clone();
-        if esegui_mossa_completa(&mut scacchiera_temp, mossa) {
-            // Controlla se il re è in scacco dopo la mossa
-            if !scacchiera_temp.re_in_scacco(scacchiera.colore_attivo()) {
-                mosse_legali.push(*mossa);
+        // Black short castling (Kingside)
+        if (s.diritti_arrocco & 4) != 0 && (all & 0x6000000000000000) == 0 {
+            if !crate::attacks::square_attacked(s, 61, Colore::Bianco) && 
+               !crate::attacks::square_attacked(s, 62, Colore::Bianco) {
+                mosse.push(Mossa::new(60, 62, MoveFlag::Castle, None));
+            }
+        }
+        // Black long castling (Queenside)
+        if (s.diritti_arrocco & 8) != 0 && (all & 0x0E00000000000000) == 0 {
+            if !crate::attacks::square_attacked(s, 59, Colore::Bianco) && 
+               !crate::attacks::square_attacked(s, 58, Colore::Bianco) {
+                mosse.push(Mossa::new(60, 58, MoveFlag::Castle, None));
             }
         }
     }
-    
-    mosse_legali
 }
 
-// Helper per test
-pub fn genera_e_filtra_mosse(scacchiera: &Scacchiera) -> Vec<Mossa> {
-    let tutte_mosse = genera_mosse(scacchiera);
-    filtra_mosse_legali(scacchiera, &tutte_mosse)
+/// Helper for pawn moves: automatically handles promotions
+/// if the pawn reaches the last rank.
+fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>) {
+    let rank = to / 8;
+    if rank == prom_rank {
+        for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
+            list.push(Mossa::new(from, to, MoveFlag::Promotion, Some(p)));
+        }
+    } else {
+        list.push(Mossa::new(from, to, MoveFlag::None, None));
+    }
+}
+
+/// Helper for pawn captures: handles captures that lead to a promotion.
+fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>) {
+    let rank = to / 8;
+    if rank == prom_rank {
+        for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
+            list.push(Mossa::new(from, to, MoveFlag::PromotionCapture, Some(p)));
+        }
+    } else {
+        list.push(Mossa::new(from, to, MoveFlag::Capture, None));
+    }
+}
+
+// --- MOVE ORDERING ---
+
+/// Sorts the generated move list by assigning priority to optimize Alpha-Beta cuts.
+// Updated: receives killer moves
+pub fn ordina_mosse(mosse: &mut Vec<Mossa>, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2]) {
+    mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers));
+}
+
+/// Assigns a score to a specific move to determine its exploration priority.
+fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2]) -> i32 {
+    // 1. TT Move (Maximum priority): the move previously found in the Transposition Table.
+    if m.data == tt_move.data && !m.is_null() { return 30000; }
+
+    // 2. Captures (MVV-LVA): Most Valuable Victim - Least Valuable Attacker
+    if m.is_cattura() {
+        let attacker = board.pezzo_in(m.da()).unwrap_or(0);
+        let victim_val = if m.move_flag() == MoveFlag::EnPassant { 100 } 
+                         else { board.pezzo_in(m.a()).map(|p| Pezzo::from_index(p).valore()).unwrap_or(0) };
+        let attacker_val = Pezzo::from_index(attacker).valore();
+        
+        // A pawn-eats-queen capture will have a very high score.
+        return 20000 + victim_val * 10 - attacker_val;
+    }
+
+    // 3. Promotions: Tend to explore promotion to Queen immediately.
+    if m.is_promozione() {
+        return 15000 + m.pezzo_promosso().unwrap().valore();
+    }
+
+    // 4. Killer Moves (Medium priority for quiet moves): Moves that have already caused a cut
+    // at the same depth level of the search tree.
+    if !m.is_cattura() && !m.is_promozione() {
+        if m.data == killers[0].data && !killers[0].is_null() { return 12000; }
+        if m.data == killers[1].data && !killers[1].is_null() { return 11000; }
+    }
+
+    // 5. Quiet moves: Evaluated based on the positional differential using PSTs.
+    let piece_type = board.pezzo_in(m.da()).unwrap_or(0);
+    let to_sq = m.a();
+    
+    // For Black, flip the index to use the same tables oriented for White.
+    let table_idx = if board.turno == Colore::Bianco { to_sq } else { to_sq ^ 56 };
+    let score = match piece_type {
+        0 => PST_PAWN[table_idx],
+        1 => PST_KNIGHT[table_idx],
+        2 => PST_BISHOP[table_idx],
+        3 => PST_ROOK[table_idx],
+        4 => PST_QUEEN[table_idx],
+        5 => PST_KING[table_idx],
+        _ => 0
+    };
+
+    1000 + score
 }
