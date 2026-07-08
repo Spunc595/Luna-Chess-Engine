@@ -23,7 +23,7 @@ fn main() {
     let z = get_zobrist_keys();
     
     // Attempts to load the neural network binary file in safe mode.
-    let nnue = LunaNNUE::load("luna_52000_safe.nnue"); 
+    let nnue = LunaNNUE::load("luna.nnue"); 
     
     // Attempts to load the textual opening book ("book.txt").
     let mut book = OpeningBook::load("book.txt");
