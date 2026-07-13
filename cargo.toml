@@ -1,14 +1,14 @@
 [package]
-name = "luna"
-version = "0.6.0"
-authors = ["Daniele & Alessandro"]
-edition = "2021"
+name = "luna_ce"
+version = "1.0.0"
+authors = ["Daniele"]
+edition = "2026"
 
 [dependencies]
 rand = "0.8"
-rand_chacha = "0.3"  # Aggiungi questa
-log = "0.4"          # Aggiungi questa
-env_logger = "0.11"  # Aggiungi questa (solo per debug)
+rand_chacha = "0.3"  
+log = "0.4"          
+env_logger = "0.11"  
 
 [features]
 default = []
