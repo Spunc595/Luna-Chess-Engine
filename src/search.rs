@@ -2,13 +2,11 @@ use crate::board::{Scacchiera, Mossa};
 use crate::tt::{TranspositionTable, Bound};
 use crate::zobrist::ZobristKeys;
 use crate::nnue::LunaNNUE;
+use crate::evaluation::{evaluate, EvalParams}; // Importato EvalParams
 use std::time::Instant;
 
 const MAX_PLY: usize = 64;
 
-/// Represents the Principal Variation (PV).
-/// Uses a fixed-size array to avoid dynamic memory allocations (heap) 
-/// during search, maximizing performance.
 #[derive(Clone)]
 pub struct PvLine {
     pub moves: [Mossa; MAX_PLY],
@@ -24,7 +22,6 @@ impl PvLine {
     }
 }
 
-/// Contains information about the current search state.
 pub struct SearchInfo {
     pub start_time: Instant,
     pub hard_limit: u128,
@@ -32,8 +29,6 @@ pub struct SearchInfo {
     pub depth_limit: i32,
     pub nodes: u64,
     pub stopped: bool,
-    /// Two-dimensional array for Killer Moves. 
-    /// Stores up to two moves that caused a cutoff for each ply of the tree.
     pub killer_moves: [[Mossa; 2]; MAX_PLY],
 }
 
@@ -47,12 +42,10 @@ impl SearchInfo {
             depth_limit,
             nodes: 0,
             stopped: false,
-            // Initialize all killer moves to a null move
             killer_moves: [[Mossa::null(); 2]; MAX_PLY],
         }
     }
 
-    /// Periodically checks (every 2048 nodes) if the available time has run out.
     #[inline(always)]
     pub fn check_time(&mut self) -> bool {
         if (self.nodes & 2047) == 0 {
@@ -65,42 +58,52 @@ impl SearchInfo {
     }
 }
 
-/// Main entry point for the search.
-/// Uses Iterative Deepening to explore the tree progressively.
+// INTEGRAZIONE NNUE (Punto 2):
+// Unico punto in cui si decide QUALE valutazione statica usare. Prima
+// negamax/quiescence chiamavano sempre evaluate(board, params) e ignoravano
+// del tutto `nnue`, anche quando la rete era caricata. Ora la rete ha
+// priorità se presente; la PST classica (`evaluate`) resta come fallback
+// automatico se `nnue` è `None` (rete non trovata su disco, file
+// corrotto, ecc.) — l'engine continua a funzionare in ogni caso, non fallisce
+// mai per mancanza della rete.
+#[inline(always)]
+fn eval(board: &Scacchiera, nnue: Option<&LunaNNUE>, params: &EvalParams) -> i32 {
+    match nnue {
+        Some(net) => net.evaluate(board),
+        None => evaluate(board, params),
+    }
+}
+
 pub fn iterative_deepening(
     board: &mut Scacchiera, 
     info: &mut SearchInfo, 
     tt: &mut TranspositionTable,
     z: &ZobristKeys,
-    nnue: Option<&LunaNNUE>
+    nnue: Option<&LunaNNUE>,
+    params: &EvalParams // Nuovo parametro
 ) -> (Mossa, i32) {
     let mut best_move = Mossa::null();
     let mut score = 0;
     let mut last_best_move = Mossa::null();
     let mut stability_counter = 0;
 
-    // Initialize search window (Aspiration Window)
     let mut alpha = -50000;
     let mut beta = 50000;
 
     for depth in 1..=info.depth_limit {
         let mut pv_line = PvLine::new();
         
-        // Loop for Aspiration Window: if the score goes out of bounds, 
-        // widen the bounds and repeat the search at the same depth.
         loop {
-            score = negamax(board, depth, 0, alpha, beta, info, tt, z, nnue, true, &mut pv_line);
+            // Passaggio ricorsivo di params
+            score = negamax(board, depth, 0, alpha, beta, info, tt, z, nnue, params, true, &mut pv_line);
             
             if info.stopped { break; }
 
-            // Bound check for the aspiration window
             if score <= alpha || score >= beta {
                 alpha = -50000;
                 beta = 50000;
-                continue; // Window failed, retry with infinite bounds
+                continue;
             }
-            
-            // Exact window: prepare narrow bounds for the next depth
             alpha = score - 50;
             beta = score + 50;
             break; 
@@ -108,7 +111,6 @@ pub fn iterative_deepening(
 
         if info.stopped && depth > 1 { break; }
 
-        // Handle output and time stability logic
         if pv_line.len > 0 {
             best_move = pv_line.moves[0];
             let elapsed = info.start_time.elapsed().as_millis();
@@ -120,7 +122,6 @@ pub fn iterative_deepening(
                 stability_counter = 0;
             }
 
-            // Flexible time management: stop if the best move is stable
             if elapsed > info.soft_limit && (stability_counter >= 3 || depth > 8) {
                 info.stopped = true;
             }
@@ -138,7 +139,6 @@ pub fn iterative_deepening(
         if info.stopped { break; }
     }
 
-    // Safety fallback: if nothing is found, return the first legal move
     if best_move.is_null() {
         let legali = board.genera_mosse_legali(z);
         if !legali.is_empty() { best_move = legali[0]; }
@@ -147,7 +147,6 @@ pub fn iterative_deepening(
     (best_move, score)
 }
 
-/// Recursive Negamax algorithm with Alpha-Beta pruning and Principal Variation Search (PVS).
 fn negamax(
     board: &mut Scacchiera, 
     depth: i32,
@@ -158,6 +157,7 @@ fn negamax(
     tt: &mut TranspositionTable,
     z: &ZobristKeys,
     nnue: Option<&LunaNNUE>,
+    params: &EvalParams, // Nuovo parametro
     allow_null: bool,
     pv_line: &mut PvLine
 ) -> i32 {
@@ -168,54 +168,41 @@ fn negamax(
 
     let pv_node = beta - alpha > 1; 
 
-    // Draw conditions
     if board.ply > 0 && (board.is_repetition() || board.rule_50 >= 100) {
         return 0;
     }
 
-    // Query Transposition Table (TT)
     if let Some(entry) = tt.probe(board.hash, depth, alpha, beta) {
         if !pv_node { return entry; }
     }
     
     let tt_move = tt.get_move(board.hash);
     let in_check = board.in_scacco();
-    let new_depth = if in_check { depth + 1 } else { depth }; // Check Extension
+    let new_depth = if in_check { depth + 1 } else { depth };
 
-    // If we reach the depth limit, proceed to Quiescence Search
     if new_depth <= 0 {
-        return quiescence(board, alpha, beta, info, z, nnue);
+        return quiescence(board, alpha, beta, info, z, nnue, params);
     }
 
-    // Null Move Pruning
     if allow_null && !pv_node && new_depth >= 3 && !in_check {
-        // CORREZIONE SYLWY: Utilizza la valutazione NNUE se disponibile, altrimenti quella classica
-        let static_eval = if let Some(n) = nnue {
-            n.evaluate(board)
-        } else {
-            crate::evaluation::evaluate(board)
-        };
-
+        // NNUE se disponibile, altrimenti PST (vedi eval() sopra)
+        let static_eval = eval(board, nnue, params);
         if static_eval >= beta {
             let undo = board.fai_mossa_nulla(z);
-            let mut null_pv = PvLine::new(); 
-            let null_val = -negamax(board, new_depth - 4, ply + 1, -beta, -beta + 1, info, tt, z, nnue, false, &mut null_pv);
+            let mut null_pv = PvLine::new();
+            let null_val = -negamax(board, new_depth - 4, ply + 1, -beta, -beta + 1, info, tt, z, nnue, params, false, &mut null_pv);
             board.annulla_mossa_nulla(undo, z);
             if null_val >= beta { return beta; }
         }
     }
 
     let mut legal_moves = board.genera_mosse_legali(z);
-    
-    // Checkmate or Stalemate
     if legal_moves.is_empty() {
         return if in_check { -49000 + (board.ply as i32) } else { 0 };
     }
 
-    // Safety limit for killer move indexing
     let safe_ply = if ply < MAX_PLY { ply } else { MAX_PLY - 1 };
     
-    // Move ordering to maximize pruning efficiency
     crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply]);
 
     let mut best_val = -50000;
@@ -228,17 +215,12 @@ fn negamax(
             moves_searched += 1;
             let mut val;
 
-            // Principal Variation Search (PVS)
             if moves_searched == 1 {
-                // Full window search for the first move (assumed best)
-                val = -negamax(board, new_depth - 1, ply + 1, -beta, -alpha, info, tt, z, nnue, true, &mut child_pv);
+                val = -negamax(board, new_depth - 1, ply + 1, -beta, -alpha, info, tt, z, nnue, params, true, &mut child_pv);
             } else {
-                // Zero Window Search to prove other moves are worse
-                val = -negamax(board, new_depth - 1, ply + 1, -alpha - 1, -alpha, info, tt, z, nnue, true, &mut child_pv);
-                
-                // If the move turns out better than expected, search with full window
+                val = -negamax(board, new_depth - 1, ply + 1, -alpha - 1, -alpha, info, tt, z, nnue, params, true, &mut child_pv);
                 if val > alpha && val < beta {
-                    val = -negamax(board, new_depth - 1, ply + 1, -beta, -alpha, info, tt, z, nnue, true, &mut child_pv);
+                    val = -negamax(board, new_depth - 1, ply + 1, -beta, -alpha, info, tt, z, nnue, params, true, &mut child_pv);
                 }
             }
 
@@ -248,8 +230,6 @@ fn negamax(
 
             if val > best_val {
                 best_val = val;
-                
-                // Efficient PV Line update
                 pv_line.moves[0] = m;
                 pv_line.moves[1..child_pv.len + 1].copy_from_slice(&child_pv.moves[0..child_pv.len]);
                 pv_line.len = child_pv.len + 1;
@@ -260,16 +240,15 @@ fn negamax(
                 flag = Bound::Exact;
             }
 
-            // Beta Cutoff (Pruning)
             if alpha >= beta {
-                // Save Killer Move (if not a capture/promotion)
-                if !m.is_cattura() && !m.is_promozione() && safe_ply < MAX_PLY {
-                    if info.killer_moves[safe_ply][0].data != m.data {
-                        info.killer_moves[safe_ply][1] = info.killer_moves[safe_ply][0];
-                        info.killer_moves[safe_ply][0] = m;
+                if !m.is_cattura() && !m.is_promozione() {
+                    if safe_ply < MAX_PLY {
+                        if info.killer_moves[safe_ply][0].data != m.data {
+                            info.killer_moves[safe_ply][1] = info.killer_moves[safe_ply][0];
+                            info.killer_moves[safe_ply][0] = m;
+                        }
                     }
                 }
-
                 tt.store(board.hash, depth, beta, Bound::Beta, m);
                 return beta;
             }
@@ -282,42 +261,60 @@ fn negamax(
     best_val
 }
 
-/// Quiescence Search: explores only forcing moves (captures/promotions) 
-/// to avoid the horizon effect and stabilize evaluation.
 fn quiescence(
     board: &mut Scacchiera, 
     mut alpha: i32, 
     beta: i32, 
     info: &mut SearchInfo, 
     z: &ZobristKeys, 
-    nnue: Option<&LunaNNUE>
+    nnue: Option<&LunaNNUE>,
+    params: &EvalParams // Nuovo parametro
 ) -> i32 {
     info.nodes += 1;
-    
-   
-    let stand_pat = if let Some(n) = nnue {
-        n.evaluate(board)
-    } else {
-        crate::evaluation::evaluate(board)
-    };
-
+    // NNUE se disponibile, altrimenti PST (vedi eval() sopra)
+    let stand_pat = eval(board, nnue, params);
     if stand_pat >= beta { return beta; }
     if stand_pat > alpha { alpha = stand_pat; }
 
-    let mut moves = board.genera_mosse_legali(z);
-    moves.retain(|m| m.is_cattura() || m.is_promozione()); 
-    
-    // In Q-Search pass empty arrays for killer moves (not used here)
+    // OTTIMIZZAZIONE (Punto 1 - Quiescence):
+    // Prima si chiamava genera_mosse_legali(), che esegue un make/unmake completo
+    // (con re_in_scacco -> square_attacked) su OGNI mossa pseudo-legale, comprese
+    // tutte le mosse silenziose che qui verrebbero comunque scartate subito dopo
+    // dal .retain(). Nei nodi di quiescence, che sono la maggioranza dei nodi
+    // visitati dall'engine, questo significava pagare il costo pieno della legality
+    // check anche per mosse che non sarebbero mai state cercate.
+    //
+    // Ora generiamo solo le mosse PSEUDO-legali (nessun make/unmake, nessuna
+    // re_in_scacco): board.genera_mosse() è una semplice generazione da bitboard.
+    let mut moves = board.genera_mosse();
+
+    // Il filtro cattura/promozione avviene SUBITO, su mosse ancora "a costo zero",
+    // prima di qualunque test di legalità: è qui che si concentra il risparmio.
+    moves.retain(|m| m.is_cattura() || m.is_promozione());
+
     crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2]);
 
     for m in moves {
+        // Test di legalità per-mossa (Punto 3):
+        // esegui_mossa() esegue il make_move e internamente, dopo aver applicato
+        // la mossa, controlla re_in_scacco() sul proprio re appena mosso:
+        //   - se il re risulta sotto scacco -> mossa illegale: esegui_mossa esegue
+        //     GIA' l'unmake al suo interno (vedi board.rs::annulla_mossa_veloce)
+        //     e ritorna false. Non dobbiamo (e non dobbiamo MAI) chiamare
+        //     annulla_mossa() in questo ramo, altrimenti si farebbe un doppio
+        //     unmake e si corromperebbe la history/hash della board.
+        //   - se il re non è sotto scacco -> mossa legale: la mossa resta
+        //     applicata, esegui_mossa ritorna true, e siamo noi responsabili
+        //     di richiamare annulla_mossa() dopo la ricerca ricorsiva.
         if board.esegui_mossa(&m, z) {
-            let score = -quiescence(board, -beta, -alpha, info, z, nnue);
-            board.annulla_mossa(&m, z);
-            
+            // Mossa legale: continua la ricerca ricorsiva.
+            let score = -quiescence(board, -beta, -alpha, info, z, nnue, params);
+            board.annulla_mossa(&m, z); // unmake esplicito: solo qui, mossa legale
+
             if score >= beta { return beta; }
             if score > alpha { alpha = score; }
         }
+        // else: mossa illegale, già annullata internamente -> si passa alla successiva
     }
     alpha
 }

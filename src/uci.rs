@@ -12,25 +12,25 @@ pub struct UCI {
     board: Scacchiera,
     tt: Arc<Mutex<TranspositionTable>>,
     book: Option<OpeningBook>,
-    // We use Arc to share the neural network (heavy) between threads without cloning it[cite: 5].
+    // Usiamo Arc per condividere la rete neurale (pesante) tra i thread senza clonarla
     nnue: Option<Arc<LunaNNUE>>,
 }
 
 impl UCI {
-    /// Creates a new UCI instance.
-    /// Receives the NNUE network already loaded from main (if present)[cite: 5].
+    /// Crea una nuova istanza UCI.
+    /// Riceve la rete NNUE già caricata dal main (se presente).
     pub fn new(nnue_option: Option<LunaNNUE>) -> Self {
         let keys = ZobristKeys::default();
         
-        // 1. Book loading (optional)[cite: 5]
+        // 1. Caricamento Book (opzionale)
         let book = OpeningBook::load("book.txt");
         if book.is_some() {
             println!("info string Book loaded successfully");
         }
 
-        // 2. NNUE management
-        // We transform the LunaNNUE object (owned) into an Arc<LunaNNUE> (shared)
-        // so we can pass it to the search thread without copying the data[cite: 5].
+        // 2. Gestione NNUE
+        // Trasformiamo l'oggetto LunaNNUE (owned) in un Arc<LunaNNUE> (shared)
+        // così possiamo passarlo al thread di ricerca senza copiare i dati.
         let nnue = if let Some(net) = nnue_option {
             Some(Arc::new(net))
         } else {
@@ -111,7 +111,7 @@ impl UCI {
     }
 
     fn parse_go(&mut self, parts: &[&str]) {
-        // Check opening from Book[cite: 5]
+        // Controllo apertura dal Book
         if let Some(book) = &self.book {
             if let Some(book_move) = book.get_move(&self.board) {
                 println!("bestmove {}", book_move.to_uci());
@@ -122,12 +122,12 @@ impl UCI {
         let mut depth = 64;
         let mut time = 10000;
         
-        // Parsing UCI parameters[cite: 5]
+        // Parsing parametri UCI
         for i in 0..parts.len() {
             if parts[i] == "depth" {
                 if let Ok(d) = parts[i+1].parse() { depth = d; }
             } else if parts[i] == "wtime" && self.board.turno == Colore::Bianco {
-                if let Ok(t) = parts[i+1].parse::<u128>() { time = t / 30; } // Basic time management[cite: 5]
+                if let Ok(t) = parts[i+1].parse::<u128>() { time = t / 30; } // Gestione tempo base
             } else if parts[i] == "btime" && self.board.turno == Colore::Nero {
                 if let Ok(t) = parts[i+1].parse::<u128>() { time = t / 30; }
             } else if parts[i] == "movetime" {
@@ -135,11 +135,11 @@ impl UCI {
             }
         }
 
-        // Data preparation for the thread[cite: 5]
+        // Preparazione dati per il thread
         let mut board_copy = self.board.clone();
         let tt_arc = self.tt.clone();
         
-        // We clone the NNUE Arc (it only increments the reference counter, it does not copy data)[cite: 5]
+        // Cloniamo l'Arc della NNUE (incrementa solo il contatore di riferimenti, non copia i dati)
         let nnue_arc = self.nnue.clone(); 
         
         thread::spawn(move || {
@@ -148,8 +148,8 @@ impl UCI {
             let z = ZobristKeys::default();
             tt.new_search();
             
-            // We get an optional reference to the network to pass to the search
-            // as_deref converts Option<Arc<T>> into Option<&T>[cite: 5]
+            // Otteniamo un riferimento opzionale alla rete da passare alla ricerca
+            // as_deref converte Option<Arc<T>> in Option<&T>
             let nnue_ref = nnue_arc.as_deref();
             
             let (best, _) = iterative_deepening(&mut board_copy, &mut info, &mut tt, &z, nnue_ref);

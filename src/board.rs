@@ -1,21 +1,13 @@
 use std::fmt;
 use crate::zobrist::ZobristKeys;
 
-// --- BASE TYPES ---
-
-/// Base definition for the chessboard. 
-/// A u64 has exactly 64 bits, perfect for mapping each square (0-63).
+// Tipi base
 pub type Bitboard = u64;
 
-/// Represents the color of the piece or the turn.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Colore { 
-    Bianco = 0, 
-    Nero = 1 
-}
+pub enum Colore { Bianco = 0, Nero = 1 }
 
 impl Colore {
-    /// Returns the opposite color.
     #[inline(always)] 
     pub fn opposto(&self) -> Colore { 
         match self { 
@@ -24,17 +16,12 @@ impl Colore {
         } 
     }
     
-    /// Converts the color into a numeric index (useful for arrays).
     #[inline(always)] 
     pub fn indice(&self) -> usize { *self as usize }
 
-    /// Creates a color from an index (0 = White, 1 = Black).
-    pub fn from_index(i: usize) -> Self { 
-        if i == 0 { Colore::Bianco } else { Colore::Nero } 
-    }
+    pub fn from_index(i: usize) -> Self { if i == 0 { Colore::Bianco } else { Colore::Nero } }
 }
 
-/// Represents the types of pieces on the chessboard.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Pezzo { 
     Pedone = 0, 
@@ -49,7 +36,6 @@ impl Pezzo {
     #[inline(always)] 
     pub fn indice(&self) -> usize { *self as usize }
     
-    /// Returns the base value in centipawns for material evaluation.
     #[inline(always)] 
     pub fn valore(&self) -> i32 {
         match self { 
@@ -70,7 +56,6 @@ impl Pezzo {
         }
     }
     
-    /// Decodes a piece starting from a standard FEN character.
     pub fn from_char(c: char) -> Option<(Colore, Pezzo)> {
         match c {
             'P' => Some((Colore::Bianco, Pezzo::Pedone)),
@@ -90,7 +75,6 @@ impl Pezzo {
     }
 }
 
-/// Special labels (Flags) to categorize the move type.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum MoveFlag { 
@@ -110,13 +94,6 @@ impl MoveFlag {
     }
 }
 
-// --- MOVE DATA STRUCTURES ---
-
-/// Represents a chess move encoded to occupy very little memory.
-/// Uses a 16-bit integer (data) for:
-/// - bits 0-5: starting square (0-63)
-/// - bits 6-11: destination square (0-63)
-/// - bits 12-15: move flag (e.g., capture, castling, etc.)
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Mossa { 
     pub data: u16,
@@ -124,7 +101,6 @@ pub struct Mossa {
 }
 
 impl Mossa {
-    /// Creates a new move from the provided parameters.
     pub fn new(from: usize, to: usize, flag: MoveFlag, promo_piece: Option<Pezzo>) -> Self {
         let promo_val = promo_piece.map(|p| p.indice() as u8).unwrap_or(6);
         Mossa { 
@@ -150,30 +126,23 @@ impl Mossa {
         if self.promozione < 6 { Some(Pezzo::from_index(self.promozione as usize)) } else { None }
     }
 
-    /// Converts the move to standard UCI notation (e.g., "e2e4").
     pub fn to_uci(&self) -> String {
         if self.is_null() { return "0000".to_string(); }
         let from = self.da(); let to = self.a();
         let mut s = format!("{}{}{}{}", 
             (b'a' + (from % 8) as u8) as char, (b'1' + (from / 8) as u8) as char,
             (b'a' + (to % 8) as u8) as char, (b'1' + (to / 8) as u8) as char);
-        
         if let Some(p) = self.pezzo_promosso() {
-            s.push(match p { 
-                Pezzo::Cavallo => 'n', Pezzo::Alfiere => 'b', Pezzo::Torre => 'r', _ => 'q' 
-            });
+            s.push(match p { Pezzo::Cavallo => 'n', Pezzo::Alfiere => 'b', Pezzo::Torre => 'r', _ => 'q' });
         }
         s
     }
 
-    /// Constructors for a null move.
     pub fn null() -> Self { Mossa { data: 0, promozione: 6 } }
     pub fn is_null(&self) -> bool { self.data == 0 }
     pub fn from_data(data: u16) -> Self { Mossa { data, promozione: 6 } }
 }
 
-/// Structure to store the irreversible state prior to a move.
-/// Essential for the unmake_move function.
 #[derive(Clone, Debug)]
 pub struct UndoData {
     pub hash: u64,
@@ -183,7 +152,6 @@ pub struct UndoData {
     pub cattura_p: Option<usize>,
 }
 
-/// Constant to quickly update castling rights by moving king and rooks.
 const CASTLING_RIGHTS_UPDATE: [u8; 64] = [
     13, 15, 15, 15, 12, 15, 15, 14, 15, 15, 15, 15, 15, 15, 15, 15,
     15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
@@ -191,21 +159,15 @@ const CASTLING_RIGHTS_UPDATE: [u8; 64] = [
     15, 15, 15, 15, 15, 15, 15, 15,  7, 15, 15, 15,  3, 15, 15, 11,
 ];
 
-// --- BOARD STRUCTURE ---
-
-/// The core structure representing a position on the chessboard.
 #[derive(Clone, Debug)]
 pub struct Scacchiera {
-    /// 6 bitboards, one for each piece type
     pub pezzi: [Bitboard; 6],
-    /// 2 bitboards: one for white pieces and one for black
     pub colori: [Bitboard; 2],
     pub turno: Colore,
     pub ep_square: Option<usize>,
     pub diritti_arrocco: u8,
     pub hash: u64,
     pub mezze_mosse: u32,
-    /// History stack to handle 'undos' and check for repetitions
     pub history: Vec<UndoData>,
     pub ply: u32,
     pub pst_val: i32,
@@ -213,7 +175,6 @@ pub struct Scacchiera {
 }
 
 impl Scacchiera {
-    /// Initializes a chessboard from a FEN notation string.
     pub fn from_fen(fen: &str, z: &ZobristKeys) -> Self {
         let mut pezzi = [0; 6];
         let mut colori = [0; 2];
@@ -221,7 +182,6 @@ impl Scacchiera {
         
         let mut rank = 7; let mut file = 0;
         let mut pst_val = 0;
-        
         for c in parts[0].chars() {
             if c == '/' { rank -= 1; file = 0; }
             else if let Some(d) = c.to_digit(10) { file += d as usize; }
@@ -262,25 +222,23 @@ impl Scacchiera {
         board
     }
 
-    /// Creates the standard initial chess position.
     pub fn new_iniziale(z: &ZobristKeys) -> Self {
         Self::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", z)
     }
 
-    /// Checks if the current position has already occurred in the game history.
     pub fn is_repetition(&self) -> bool {
         let mut count = 0;
         for undo in self.history.iter().rev() {
-            if undo.hash == self.hash { count += 1; }
+            if undo.hash == self.hash {
+                count += 1;
+            }
             if count >= 1 { return true; } 
         }
         false
     }
 
-    /// Returns a bitboard with all occupied squares.
     #[inline(always)] pub fn occupazione(&self) -> Bitboard { self.colori[0] | self.colori[1] }
 
-    /// Counts the total number of pieces on the chessboard.
     pub fn conta_pezzi(&self) -> u32 {
         let mut count = 0;
         for piece_bb in self.pezzi.iter() {
@@ -289,7 +247,6 @@ impl Scacchiera {
         count
     }
 
-    /// Calculates the Zobrist hash key for the current position from scratch.
     pub fn get_hash(&self, z: &ZobristKeys) -> u64 {
         let mut h = 0;
         for c in 0..2 {
@@ -307,8 +264,6 @@ impl Scacchiera {
         if let Some(sq) = self.ep_square { h ^= z.ep_file[sq % 8]; }
         h
     }
-
-    // --- BOARD QUERY FUNCTIONS ---
 
     #[inline(always)]
     pub fn pezzo_in(&self, sq: usize) -> Option<usize> {
@@ -329,7 +284,9 @@ impl Scacchiera {
     pub fn pezzo_e_colore_in(&self, sq: usize) -> Option<(Colore, Pezzo)> {
         if let (Some(colore), Some(p_idx)) = (self.colore_in(sq), self.pezzo_in(sq)) {
             Some((colore, Pezzo::from_index(p_idx)))
-        } else { None }
+        } else {
+            None
+        }
     }
 
     pub fn in_scacco(&self) -> bool {
@@ -342,10 +299,6 @@ impl Scacchiera {
         crate::attacks::square_attacked(self, king_bb.trailing_zeros() as usize, c.opposto())
     }
 
-    // --- MOVE EXECUTION AND UNMAKE LOGIC ---
-
-    /// Executes a move on the chessboard. 
-    /// Returns true if the move is legal (the King is not in check at the end of the turn), false otherwise.
     pub fn esegui_mossa(&mut self, m: &Mossa, z: &ZobristKeys) -> bool {
         let from = m.da(); let to = m.a();
         let flag = m.move_flag();
@@ -405,7 +358,6 @@ impl Scacchiera {
         }
         self.rule_50 = self.mezze_mosse; 
         
-        // Legality check
         if self.re_in_scacco(Colore::from_index(us)) {
             self.annulla_mossa_veloce(m, &undo, z, us, moved_p);
             return false;
@@ -416,7 +368,6 @@ impl Scacchiera {
         true
     }
 
-    /// Alternative method for immediate undo if the move is illegal during execute_move.
     fn annulla_mossa_veloce(&mut self, m: &Mossa, u: &UndoData, _z: &ZobristKeys, us: usize, moved_p: usize) {
         let from = m.da(); let to = m.a();
         let them = 1 - us;
@@ -451,9 +402,10 @@ impl Scacchiera {
         self.rule_50 = u.mezze_mosse; 
     }
 
-    /// Officially undoes a move (used extensively in search.rs).
+    // --- NUOVO METODO: Annulla Mossa ufficiale (usato in search) ---
     pub fn annulla_mossa(&mut self, m: &Mossa, _z: &ZobristKeys) {
-        let u = self.history.pop().expect("Critical error: empty history during unmake_move");
+        // Recuperiamo i dati irreversibili persi durante la mossa
+        let u = self.history.pop().expect("Errore critico: history vuota durante unmake_move");
         
         self.ply -= 1;
         self.turno = self.turno.opposto();
@@ -464,19 +416,23 @@ impl Scacchiera {
         let to = m.a();
         let flag = m.move_flag();
 
+        // Identifichiamo i pezzi
         let final_p = if flag.is_promotion() { 
             m.pezzo_promosso().unwrap().indice() 
         } else { 
             self.pezzo_in(to).unwrap_or(0) 
         };
         
-        let moved_p = if flag.is_promotion() { 0 } else { final_p }; 
+        let moved_p = if flag.is_promotion() { 0 } else { final_p }; // Il pedone è 0
 
+        // 1. Togliamo il pezzo dalla casella di arrivo e lo rimettiamo in partenza
         self.pezzi[final_p] &= !(1 << to);
         self.colori[us] &= !(1 << to);
+        
         self.pezzi[moved_p] |= 1 << from;
         self.colori[us] |= 1 << from;
 
+        // 2. Ripristiniamo le catture o mosse speciali
         if flag == MoveFlag::EnPassant {
             let cap_sq = if us == 0 { to - 8 } else { to + 8 };
             self.pezzi[0] |= 1 << cap_sq;
@@ -492,6 +448,7 @@ impl Scacchiera {
             self.colori[us] ^= (1 << rf) | (1 << rt);
         }
 
+        // 3. Ripristiniamo i contatori e chiavi hash
         self.hash = u.hash;
         self.ep_square = u.ep_square;
         self.diritti_arrocco = u.diritti_arrocco;
@@ -499,8 +456,7 @@ impl Scacchiera {
         self.rule_50 = u.mezze_mosse;
     }
 
-    /// Executes a virtual "null move" (forced turn skip).
-    /// Used for heuristic search (Null Move Pruning).
+    // --- NUOVI METODI PER NULL MOVE PRUNING ---
     pub fn fai_mossa_nulla(&mut self, z: &ZobristKeys) -> UndoData {
         let undo = UndoData {
             hash: self.hash,
@@ -522,7 +478,6 @@ impl Scacchiera {
         undo
     }
 
-    /// Undoes the null move.
     pub fn annulla_mossa_nulla(&mut self, undo: UndoData, _z: &ZobristKeys) {
         self.ply -= 1;
         self.turno = self.turno.opposto();
@@ -533,18 +488,19 @@ impl Scacchiera {
         self.history.pop();
     }
     
-    /// Generates pseudo-legal moves (not necessarily legal, useful for quick sorting).
     pub fn genera_mosse(&self) -> Vec<Mossa> {
         crate::movegen::genera_mosse(self)
     }
 
-    /// Generates strictly legal moves avoiding multiple allocations (uses make/unmake).
+    // --- CORREZIONE: Generazione mosse legali senza allocazioni extra ---
+    // Passando &mut self invece di &self, eliminiamo del tutto il bisogno di usare .clone()
     pub fn genera_mosse_legali(&mut self, z: &ZobristKeys) -> Vec<Mossa> {
         let mosse = crate::movegen::genera_mosse(self);
         let mut legali = Vec::with_capacity(mosse.len());
         
         for m in mosse {
             if self.esegui_mossa(&m, z) {
+                // Se la mossa è valida, la annulliamo e la salviamo nella lista
                 self.annulla_mossa(&m, z);
                 legali.push(m);
             }
@@ -552,7 +508,6 @@ impl Scacchiera {
         legali
     }
 
-    /// Returns the FEN string corresponding to the current position.
     pub fn to_fen(&self) -> String {
         let mut fen = String::new();
         for rank in (0..8).rev() {
