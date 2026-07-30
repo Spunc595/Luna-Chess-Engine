@@ -66,7 +66,7 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v2.0.0");
+                println!("id name Luna CE v2.1.0");
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 1024");
                 println!("uciok");
