@@ -1,0 +1,6 @@
+/target
+*.nnue
+/CLAUDE.md
+/.claude
+training_data.txt
+/.vscode

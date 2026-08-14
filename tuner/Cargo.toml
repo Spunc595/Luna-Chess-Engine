@@ -1,0 +1,10 @@
+[package]
+name = "luna-tuner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Qui importi il tuo engine principale come dipendenza locale
+luna = { path = ".." } 
+rand = "0.8" 
+rayon = "1.7" # Fondamentale per la parallelizzazione che ti dicevo

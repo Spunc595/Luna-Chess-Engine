@@ -2,7 +2,6 @@ use crate::board::Mossa;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Bound {
-    None = 0,
     Exact = 1,
     Alpha = 2, // Upper Bound
     Beta = 3,  // Lower Bound
@@ -12,9 +11,9 @@ pub enum Bound {
 pub struct TTEntry {
     pub key: u64,
     pub score: i32,
-    pub move_data: u16, // Memorizziamo solo i dati raw della mossa
+    pub move_data: u16, // We only store the move's raw data
     pub depth: u8,
-    pub bound: u8,      // Convertiamo Bound in u8 per compattezza
+    pub bound: u8,      // Bound converted to u8 for compactness
     pub generation: u8,
 }
 
@@ -29,7 +28,7 @@ impl TranspositionTable {
         let size = (mb_size * 1024 * 1024) / std::mem::size_of::<TTEntry>();
         let mut real_size = 1;
         while real_size <= size { real_size *= 2; }
-        
+
         TranspositionTable {
             entries: vec![TTEntry { key: 0, score: 0, move_data: 0, depth: 0, bound: 0, generation: 0 }; real_size],
             mask: real_size - 1,
@@ -45,19 +44,15 @@ impl TranspositionTable {
         self.generation = 1;
     }
 
-    pub fn new_search(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-    }
-
-    // Aggiornato per accettare i parametri di search.rs
-    // Restituisce Option<valore> per cutoff
+    // Updated to accept search.rs's parameters
+    // Returns Option<value> for cutoff
     pub fn probe(&self, key: u64, depth: i32, alpha: i32, beta: i32) -> Option<i32> {
         let idx = (key as usize) & self.mask;
         let entry = &self.entries[idx];
 
         if entry.key == key {
             if entry.depth as i32 >= depth {
-                let score = entry.score; // Qui si dovrebbe gestire il mate score
+                let score = entry.score; // Mate score handling should go here
                 let bound = entry.bound;
 
                 if bound == Bound::Exact as u8 {
@@ -74,7 +69,7 @@ impl TranspositionTable {
         None
     }
 
-    // Metodo helper per recuperare la mossa (usato per l'ordinamento mosse)
+    // Helper method to retrieve the move (used for move ordering)
     pub fn get_move(&self, key: u64) -> Mossa {
         let idx = (key as usize) & self.mask;
         let entry = &self.entries[idx];
@@ -85,19 +80,19 @@ impl TranspositionTable {
         }
     }
 
-    // Aggiornato per accettare i parametri di search.rs
+    // Updated to accept search.rs's parameters
     pub fn store(&mut self, key: u64, depth: i32, score: i32, bound: Bound, best_move: Mossa) {
         let idx = (key as usize) & self.mask;
         let entry = &mut self.entries[idx];
 
-        // Semplice politica di sostituzione: deepness o generazione diversa
+        // Simple replacement policy: greater depth or different generation
         if entry.key != key || depth as u8 >= entry.depth || entry.generation != self.generation {
             entry.key = key;
             entry.score = score;
             entry.depth = depth as u8;
             entry.bound = bound as u8;
             entry.generation = self.generation;
-            
+
             if !best_move.is_null() {
                 entry.move_data = best_move.data;
             }

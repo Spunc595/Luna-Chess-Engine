@@ -1,9 +1,8 @@
-use crate::board::{Scacchiera, Colore};
 use std::sync::OnceLock;
 use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
-/// Chiavi Zobrist per hashing di posizioni
+/// Zobrist keys for position hashing
 #[derive(Clone, Debug)]
 pub struct ZobristKeys {
     pub pezzi: [[[u64; 64]; 6]; 2],
@@ -13,7 +12,7 @@ pub struct ZobristKeys {
 }
 
 impl ZobristKeys {
-    /// Inizializza con un seed costante per garantire coerenza assoluta tra i moduli.
+    /// Initializes with a constant seed to guarantee absolute consistency across modules.
     pub fn init_deterministic() -> Self {
         let mut rng = ChaCha20Rng::seed_from_u64(0x123456789ABCDEF0);
         
@@ -45,38 +44,17 @@ impl ZobristKeys {
             arrocco_completo,
         }
     }
-
-    /// Calcola hash per una board (Metodo di utilità)
-    pub fn hash_board(&self, board: &Scacchiera) -> u64 {
-        let mut hash = 0u64;
-        for c in 0..2 {
-            for p in 0..6 {
-                let mut bb = board.pezzi[p] & board.colori[c];
-                while bb != 0 {
-                    let sq = bb.trailing_zeros() as usize;
-                    hash ^= self.pezzi[c][p][sq];
-                    bb &= bb - 1;
-                }
-            }
-        }
-        if board.turno == Colore::Nero { hash ^= self.turno; }
-        hash ^= self.arrocco_completo[board.diritti_arrocco as usize];
-        if let Some(sq) = board.ep_square {
-            hash ^= self.ep_file[sq % 8];
-        }
-        hash
-    }
 }
 
-/// Istanza globale thread-safe
+/// Thread-safe global instance
 static ZOBRIST_KEYS: OnceLock<ZobristKeys> = OnceLock::new();
 
-/// Ottieni le chiavi Zobrist globali (Metodo raccomandato)
+/// Gets the global Zobrist keys (recommended method)
 pub fn get_zobrist_keys() -> &'static ZobristKeys {
     ZOBRIST_KEYS.get_or_init(|| ZobristKeys::init_deterministic())
 }
 
-/// Implementazione di Default che punta alle chiavi deterministiche.
+/// Default implementation pointing to the deterministic keys.
 impl Default for ZobristKeys {
     fn default() -> Self {
         ZobristKeys::init_deterministic()

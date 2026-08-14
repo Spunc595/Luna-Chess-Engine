@@ -1,0 +1,33 @@
+[workspace]
+members = [
+    ".",
+    "tuner",
+    "book_converter",
+]
+
+[package]
+name = "luna"
+version = "2.5.0"
+authors = ["Daniele Marpino"]
+edition = "2021"
+description = "Luna, a UCI chess engine written in Rust with NNUE evaluation"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/Spunc595/Luna-Chess-Engine"
+
+[dependencies]
+rand = "0.8"
+rand_chacha = "0.3"
+log = "0.4"
+env_logger = "0.11"  # Debug only
+
+[features]
+default = []
+simd = []
+nnue = []
+embedded_nnue = []
+evaluation = []  # Evaluation-tuning feature flag
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

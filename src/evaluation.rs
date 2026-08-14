@@ -1,6 +1,6 @@
 use crate::board::{Scacchiera, Colore, Pezzo};
 
-// Struttura che contiene tutti i parametri che andremo a "tunare"
+// Struct holding all the parameters we'll be tuning
 #[derive(Clone)]
 pub struct EvalParams {
     pub mg_pawn: i32,
@@ -16,7 +16,7 @@ pub struct EvalParams {
     pub king_pst: [i32; 64],
 }
 
-// Funzione di utilità per creare i parametri di default (i tuoi attuali)
+// Utility to build the default parameters (the current ones)
 impl Default for EvalParams {
     fn default() -> Self {
         Self {
@@ -37,8 +37,6 @@ impl Default for EvalParams {
 
 pub fn evaluate(board: &Scacchiera, params: &EvalParams) -> i32 {
     let mut score = 0;
-    let mut white_king_sq: i32 = -1;
-    let mut black_king_sq: i32 = -1;
 
     for sq in 0..64 {
         if let Some((colore, pezzo)) = board.pezzo_e_colore_in(sq) {
@@ -46,7 +44,7 @@ pub fn evaluate(board: &Scacchiera, params: &EvalParams) -> i32 {
             let sq_idx = sq as usize;
             let pst_idx = if is_white { sq_idx } else { sq_idx ^ 56 };
 
-            let mut val = 0;
+            let mut val;
 
             match pezzo {
                 Pezzo::Pedone => {
@@ -62,9 +60,7 @@ pub fn evaluate(board: &Scacchiera, params: &EvalParams) -> i32 {
                 Pezzo::Torre   => { val = params.mg_rook   + params.rook_pst[pst_idx]; },
                 Pezzo::Regina  => { val = params.mg_queen  + params.queen_pst[pst_idx]; },
                 Pezzo::Re => {
-                    if is_white { white_king_sq = sq as i32; } 
-                    else { black_king_sq = sq as i32; }
-                    val = params.king_pst[pst_idx]; 
+                    val = params.king_pst[pst_idx];
                 },
             };
 
@@ -72,30 +68,11 @@ pub fn evaluate(board: &Scacchiera, params: &EvalParams) -> i32 {
         }
     }
 
-    if white_king_sq != -1 && black_king_sq != -1 {
-        // Abbassata la soglia da 300 a 100 per attivare il mop-up prima
-        if score > 100 {
-            score += evaluate_mop_up(white_king_sq, black_king_sq);
-        } else if score < -100 {
-            score -= evaluate_mop_up(black_king_sq, white_king_sq);
-        }
-    }
-
+    // The mop-up bonus (pushing the opponent's king toward the corner when
+    // clearly winning) no longer lives here: it was generalized into
+    // `search::apply_progress_adjustment`, which applies it inside `eval()`
+    // regardless of the evaluation source (this classical PST or NNUE).
+    // Applying it here too would double-count it whenever the network isn't
+    // loaded and we fall back to this function.
     if board.turno == Colore::Bianco { score } else { -score }
-}
-
-fn evaluate_mop_up(winner_king_sq: i32, loser_king_sq: i32) -> i32 {
-    let mut bonus = 0;
-    let l_rank = loser_king_sq / 8;
-    let l_file = loser_king_sq % 8;
-    let w_rank = winner_king_sq / 8;
-    let w_file = winner_king_sq % 8;
-
-    let center_dist = (2 * l_rank - 7).abs() + (2 * l_file - 7).abs();
-    bonus += center_dist * 25; 
-
-    let dist_kings = (w_rank - l_rank).abs() + (w_file - l_file).abs();
-    bonus += (14 - dist_kings) * 20;
-
-    bonus
 }

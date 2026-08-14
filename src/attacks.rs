@@ -4,7 +4,7 @@ use rand::{RngCore, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 
 // =====================================================================
-// TABELLE PER PEZZI NON-SLIDER (Pedoni, Cavalli, Re) — INVARIATE
+// TABLES FOR NON-SLIDER PIECES (Pawns, Knights, King) — UNCHANGED
 // =====================================================================
 
 pub struct AttackTables {
@@ -44,19 +44,20 @@ pub fn king_attacks(sq: usize) -> Bitboard {
 }
 
 // =====================================================================
-// MAGIC BITBOARDS — ALFIERI E TORRI (ex calcolo "a raggio")
+// MAGIC BITBOARDS — BISHOPS AND ROOKS (formerly "ray-casting" computation)
 // =====================================================================
 //
-// Schema "fancy magic bitboards": una MagicEntry per casella (mask, magic,
-// shift, offset) e due tabelle piatte condivise (bishop_table / rook_table).
-// Le tabelle e i magic number vengono generati UNA SOLA VOLTA all'avvio
-// (tramite OnceLock, stesso pattern già usato sopra per AttackTables) e poi
-// riutilizzati per tutta la durata del processo: da qui in poi bishop_attacks
-// e rook_attacks sono lookup O(1), non più cicli a raggio.
+// "Fancy magic bitboards" scheme: one MagicEntry per square (mask, magic,
+// shift, offset) plus two shared flat tables (bishop_table / rook_table).
+// The tables and magic numbers are generated ONCE at startup (via
+// OnceLock, same pattern already used above for AttackTables) and then
+// reused for the entire lifetime of the process: from this point on,
+// bishop_attacks and rook_attacks are O(1) lookups, no more ray-casting
+// loops.
 //
-// Le funzioni "_slow" (ray-casting, identiche alla vecchia implementazione)
-// sopravvivono come funzioni PRIVATE, usate solo per costruire le tabelle
-// in fase di init e come riferimento nei debug_assert di validazione.
+// The "_slow" functions (ray-casting, identical to the old implementation)
+// survive as PRIVATE functions, used only to build the tables during init
+// and as a reference in the runtime validation debug_asserts.
 
 #[derive(Clone, Copy)]
 struct MagicEntry {
@@ -93,12 +94,12 @@ pub fn bishop_attacks(sq: usize, occ: Bitboard) -> Bitboard {
     let entry = &tables.bishop_magics[sq];
     let result = tables.bishop_table[magic_index(entry, occ)];
 
-    // Rete di sicurezza: compilata via SOLO nelle build debug (costo zero in
-    // release, dove debug-assertions è disabilitato dal profilo [profile.release]).
+    // Safety net: compiled in ONLY in debug builds (zero cost in release,
+    // where debug-assertions is disabled by the [profile.release] profile).
     debug_assert_eq!(
         result,
         bishop_attacks_slow(sq, occ),
-        "Magic bitboard alfiere non valido sulla casella {}",
+        "Invalid bishop magic bitboard on square {}",
         sq
     );
 
@@ -114,7 +115,7 @@ pub fn rook_attacks(sq: usize, occ: Bitboard) -> Bitboard {
     debug_assert_eq!(
         result,
         rook_attacks_slow(sq, occ),
-        "Magic bitboard torre non valido sulla casella {}",
+        "Invalid rook magic bitboard on square {}",
         sq
     );
 
@@ -126,12 +127,12 @@ pub fn queen_attacks(sq: usize, occ: Bitboard) -> Bitboard {
     bishop_attacks(sq, occ) | rook_attacks(sq, occ)
 }
 
-// --- Costruzione delle tabelle (eseguita una sola volta, alla prima chiamata) ---
+// --- Table construction (runs once, on first call) ---
 
 fn build_magic_tables() -> MagicTables {
-    // Seed costante e deterministico: stessa filosofia di zobrist.rs
-    // ("coerenza assoluta tra i moduli") — le tabelle generate sono sempre
-    // identiche ad ogni avvio, niente non-determinismo da debuggare.
+    // Constant, deterministic seed: same philosophy as zobrist.rs
+    // ("absolute consistency across modules") — the generated tables are
+    // always identical on every startup, no non-determinism to debug.
     let mut rng = ChaCha20Rng::seed_from_u64(0xC0FFEE123456789A);
 
     let mut bishop_magics: Vec<MagicEntry> = Vec::with_capacity(64);
@@ -156,25 +157,25 @@ fn build_magic_tables() -> MagicTables {
     MagicTables {
         bishop_magics: bishop_magics
             .try_into()
-            .unwrap_or_else(|v: Vec<MagicEntry>| panic!("Attese 64 bishop magics, trovate {}", v.len())),
+            .unwrap_or_else(|v: Vec<MagicEntry>| panic!("Expected 64 bishop magics, found {}", v.len())),
         rook_magics: rook_magics
             .try_into()
-            .unwrap_or_else(|v: Vec<MagicEntry>| panic!("Attese 64 rook magics, trovate {}", v.len())),
+            .unwrap_or_else(|v: Vec<MagicEntry>| panic!("Expected 64 rook magics, found {}", v.len())),
         bishop_table,
         rook_table,
     }
 }
 
-/// Cerca un magic number valido per la casella `sq`, dato l'insieme dei bit
-/// rilevanti `mask`. Ritorna (magic, shift, tabella_attacchi_per_indice).
+/// Searches for a valid magic number for square `sq`, given the set of
+/// relevant bits `mask`. Returns (magic, shift, attack_table_by_index).
 fn find_magic(sq: usize, mask: Bitboard, is_bishop: bool, rng: &mut ChaCha20Rng) -> (u64, u32, Vec<Bitboard>) {
     let relevant_bits = mask.count_ones();
     let size = 1usize << relevant_bits;
     let shift = 64 - relevant_bits;
 
-    // Precalcoliamo UNA SOLA VOLTA tutte le combinazioni di occupazione
-    // possibili sulla maschera (tecnica "Carry-Rippler") e il relativo
-    // attacco di riferimento, calcolato con il vecchio metodo a raggio.
+    // Precompute ALL possible occupancy combinations on the mask ONCE
+    // (the "Carry-Rippler" technique) along with the corresponding
+    // reference attack, computed with the old ray-casting method.
     let mut occupancies: Vec<Bitboard> = Vec::with_capacity(size);
     let mut reference_attacks: Vec<Bitboard> = Vec::with_capacity(size);
     let mut occ: Bitboard = 0;
@@ -194,15 +195,15 @@ fn find_magic(sq: usize, mask: Bitboard, is_bishop: bool, rng: &mut ChaCha20Rng)
         attempts += 1;
         if attempts > 100_000_000 {
             panic!(
-                "Impossibile trovare un magic number valido per la casella {} dopo {} tentativi",
+                "Could not find a valid magic number for square {} after {} attempts",
                 sq, attempts
             );
         }
 
         let candidate = sparse_random_u64(rng);
 
-        // Euristica di scarto rapido: pochi bit alti = magic scadente,
-        // si passa oltre senza nemmeno provare a costruire la tabella.
+        // Quick rejection heuristic: few high bits set means a poor magic,
+        // skip it without even trying to build the table.
         if ((mask.wrapping_mul(candidate)) >> 56).count_ones() < 6 {
             continue;
         }
@@ -215,11 +216,12 @@ fn find_magic(sq: usize, mask: Bitboard, is_bishop: bool, rng: &mut ChaCha20Rng)
             match table[idx] {
                 None => table[idx] = Some(reference_attacks[i]),
                 Some(existing) if existing == reference_attacks[i] => {
-                    // Collisione "innocua": due occupazioni diverse producono
-                    // lo stesso attacco reale (es. blocco alla stessa distanza).
+                    // "Harmless" collision: two different occupancies
+                    // produce the same real attack (e.g. blocked at the
+                    // same distance).
                 }
                 Some(_) => {
-                    // Collisione in conflitto: questo magic non va bene.
+                    // Conflicting collision: this magic doesn't work.
                     valid = false;
                     break;
                 }
@@ -233,15 +235,16 @@ fn find_magic(sq: usize, mask: Bitboard, is_bishop: bool, rng: &mut ChaCha20Rng)
     }
 }
 
-/// Numeri pseudo-random "sparsi" (pochi bit a 1) convergono più in fretta
-/// verso magic number validi: trucco standard nella letteratura sui magic.
+/// "Sparse" pseudo-random numbers (few bits set to 1) converge faster
+/// toward valid magic numbers: a standard trick from the magic bitboard
+/// literature.
 fn sparse_random_u64(rng: &mut ChaCha20Rng) -> u64 {
     rng.next_u64() & rng.next_u64() & rng.next_u64()
 }
 
-/// Maschera dei bit "rilevanti" per un alfiere sulla casella `sq`:
-/// esclude i bordi della scacchiera, perché la loro occupazione non cambia
-/// mai l'attacco (il raggio si ferma comunque lì).
+/// Mask of the "relevant" bits for a bishop on square `sq`: excludes the
+/// board edges, since their occupancy never changes the attack (the ray
+/// stops there regardless).
 fn bishop_mask(sq: usize) -> Bitboard {
     let r = (sq / 8) as i32;
     let f = (sq % 8) as i32;
@@ -258,8 +261,8 @@ fn bishop_mask(sq: usize) -> Bitboard {
     mask
 }
 
-/// Maschera dei bit "rilevanti" per una torre sulla casella `sq` (stesso
-/// principio del bishop_mask, applicato ai 4 assi cardinali).
+/// Mask of the "relevant" bits for a rook on square `sq` (same principle
+/// as bishop_mask, applied to the 4 cardinal directions).
 fn rook_mask(sq: usize) -> Bitboard {
     let r = (sq / 8) as i32;
     let f = (sq % 8) as i32;
@@ -277,9 +280,9 @@ fn rook_mask(sq: usize) -> Bitboard {
     mask
 }
 
-/// Calcolo "a raggio" dell'attacco di un alfiere (ex implementazione
-/// pubblica). Usato ora SOLO in fase di costruzione delle tabelle magic
-/// e nei debug_assert di validazione a runtime.
+/// Ray-casting computation of a bishop's attack (formerly the public
+/// implementation). Now used ONLY when building the magic tables and in
+/// the runtime validation debug_asserts.
 fn bishop_attacks_slow(sq: usize, occ: Bitboard) -> Bitboard {
     let mut atk = 0;
     let r = (sq / 8) as i32;
@@ -299,9 +302,9 @@ fn bishop_attacks_slow(sq: usize, occ: Bitboard) -> Bitboard {
     atk
 }
 
-/// Calcolo "a raggio" dell'attacco di una torre (ex implementazione
-/// pubblica). Usato ora SOLO in fase di costruzione delle tabelle magic
-/// e nei debug_assert di validazione a runtime.
+/// Ray-casting computation of a rook's attack (formerly the public
+/// implementation). Now used ONLY when building the magic tables and in
+/// the runtime validation debug_asserts.
 fn rook_attacks_slow(sq: usize, occ: Bitboard) -> Bitboard {
     let mut atk = 0;
     let r = (sq / 8) as i32;
@@ -322,52 +325,52 @@ fn rook_attacks_slow(sq: usize, occ: Bitboard) -> Bitboard {
 }
 
 // =====================================================================
-// square_attacked — INVARIATA (beneficia in automatico dell'O(1) sopra)
+// square_attacked — UNCHANGED (benefits automatically from the O(1) lookups above)
 // =====================================================================
 
 pub fn square_attacked(board: &Scacchiera, sq: usize, side_attacker: Colore) -> bool {
     let occ = board.occupazione();
     let targets = board.colori[side_attacker.indice()];
 
-    // Check pedoni (attacchi inversi: da chi attacca verso sq)
+    // Pawn check (reverse attacks: from the attacker's perspective toward sq)
     if (pawn_attacks(sq, side_attacker.opposto()) & board.pezzi[Pezzo::Pedone.indice()] & targets) != 0 { return true; }
 
-    // Check cavalli
+    // Knight check
     if (knight_attacks(sq) & board.pezzi[Pezzo::Cavallo.indice()] & targets) != 0 { return true; }
 
-    // Check Re
+    // King check
     if (king_attacks(sq) & board.pezzi[Pezzo::Re.indice()] & targets) != 0 { return true; }
 
-    // Check Sliders (ora lookup O(1) via magic bitboards)
-    // Alfiere / Regina
+    // Slider check (now an O(1) lookup via magic bitboards)
+    // Bishop / Queen
     if (bishop_attacks(sq, occ) & (board.pezzi[Pezzo::Alfiere.indice()] | board.pezzi[Pezzo::Regina.indice()]) & targets) != 0 { return true; }
 
-    // Torre / Regina
+    // Rook / Queen
     if (rook_attacks(sq, occ) & (board.pezzi[Pezzo::Torre.indice()] | board.pezzi[Pezzo::Regina.indice()]) & targets) != 0 { return true; }
 
     false
 }
 
 // =====================================================================
-// INIZIALIZZAZIONE TABELLE NON-SLIDER — INVARIATA
+// NON-SLIDER TABLE INITIALIZATION — UNCHANGED
 // =====================================================================
 
 fn init_tables(t: &mut AttackTables) {
     for sq in 0..64 {
         let b = 1u64 << sq;
 
-        // Pedoni Bianchi (attaccano verso rank+1)
+        // White pawns (attack toward rank+1)
         if sq < 56 {
             if sq % 8 > 0 { t.pawn_attacks[0][sq] |= b << 7; } // NW
             if sq % 8 < 7 { t.pawn_attacks[0][sq] |= b << 9; } // NE
         }
-        // Pedoni Neri (attaccano verso rank-1)
+        // Black pawns (attack toward rank-1)
         if sq > 7 {
             if sq % 8 > 0 { t.pawn_attacks[1][sq] |= b >> 9; } // SW
             if sq % 8 < 7 { t.pawn_attacks[1][sq] |= b >> 7; } // SE
         }
 
-        // Cavalli
+        // Knights
         let r = (sq / 8) as i32;
         let f = (sq % 8) as i32;
         for &(dr, df) in &[(2, 1), (2, -1), (-2, 1), (-2, -1), (1, 2), (1, -2), (-1, 2), (-1, -2)] {
@@ -377,7 +380,7 @@ fn init_tables(t: &mut AttackTables) {
             }
         }
 
-        // Re
+        // King
         for dr in -1..=1 {
             for df in -1..=1 {
                 if dr == 0 && df == 0 { continue; }
