@@ -7,7 +7,7 @@ members = [
 
 [package]
 name = "luna"
-version = "3.0.0"
+version = "3.1.0"
 authors = ["Daniele Marpino"]
 edition = "2021"
 description = "Luna, a UCI chess engine written in Rust with NNUE evaluation"

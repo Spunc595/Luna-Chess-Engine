@@ -5,6 +5,7 @@ use crate::nnue::LunaNNUE;
 use crate::evaluation::{evaluate, EvalParams}; // Imported EvalParams
 use crate::movegen::see;
 use std::time::Instant;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::OnceLock;
 
 pub const MAX_PLY: usize = 64;
@@ -254,9 +255,57 @@ const CAPTURE_HISTORY_MAX: i32 = 12800;
 /// from Viridithas and confirmed identical in Reckless (both Rust chess
 /// engines), a standard formula known as "history gravity".
 #[inline(always)]
-fn update_history_gravity(entry: &mut i32, delta: i32, max: i32) {
-    *entry += delta - *entry * delta.abs() / max;
-    *entry = (*entry).clamp(-max, max);
+fn update_history_gravity(entry: &AtomicI32, delta: i32, max: i32) {
+    let current = entry.load(Ordering::Relaxed);
+    let updated = (current + delta - current * delta.abs() / max).clamp(-max, max);
+    entry.store(updated, Ordering::Relaxed);
+}
+
+/// Quiet-move and capture history tables, shared by reference across every
+/// search thread (see main.rs's "go" handler) instead of living inside the
+/// per-thread `SearchInfo` — Lazy SMP's whole premise is threads helping
+/// each other, and a shared history is a second channel of that beyond the
+/// shared transposition table (see tt.rs). `AtomicI32` cells let every
+/// thread read/update them with no lock: a `Relaxed` load-then-store is
+/// not a single atomic read-modify-write, so a rare concurrent update from
+/// another thread can be lost, but that "statistical dirtiness" costs
+/// nothing measurable in practice — the same tradeoff already accepted
+/// for the transposition table's replacement policy (see tt.rs::store).
+///
+/// `killer_moves`/`counter_moves` deliberately stay OUT of this struct and
+/// remain per-thread fields on `SearchInfo`: killers are tied to a
+/// specific ply in a specific thread's own tree shape, not a
+/// position-independent statistic like history, so sharing them across
+/// threads searching different move orders would mix unrelated signals.
+pub struct SharedHistory {
+    /// `history[colore][da][a]`, cumulative bonus for quiet moves that
+    /// caused a beta-cutoff, independent of the ply at which it occurred.
+    pub history: [[[AtomicI32; 64]; 64]; 2],
+    /// `capture_history[pezzo_attaccante][a][pezzo_catturato]`, same
+    /// gravity/malus mechanism applied to captures.
+    pub capture_history: [[[AtomicI32; 6]; 64]; 6],
+}
+
+impl SharedHistory {
+    pub fn new() -> Self {
+        SharedHistory {
+            history: std::array::from_fn(|_| std::array::from_fn(|_| std::array::from_fn(|_| AtomicI32::new(0)))),
+            capture_history: std::array::from_fn(|_| std::array::from_fn(|_| std::array::from_fn(|_| AtomicI32::new(0)))),
+        }
+    }
+
+    pub fn clear(&self) {
+        for color in &self.history {
+            for row in color {
+                for cell in row { cell.store(0, Ordering::Relaxed); }
+            }
+        }
+        for piece in &self.capture_history {
+            for row in piece {
+                for cell in row { cell.store(0, Ordering::Relaxed); }
+            }
+        }
+    }
 }
 
 pub struct SearchInfo {
@@ -267,12 +316,6 @@ pub struct SearchInfo {
     pub nodes: u64,
     pub stopped: bool,
     pub killer_moves: [[Mossa; 2]; MAX_PLY],
-    /// History heuristic: `history[colore][da][a]`, cumulative bonus for
-    /// quiet moves that caused a beta-cutoff, independent of the ply at
-    /// which it occurred (unlike killer moves, which are specific to a
-    /// single ply). Fixed array (64x64x2 = 32KB), no heap allocations:
-    /// same pattern as `killer_moves`.
-    pub history: [[[i32; 64]; 64]; 2],
     /// Counter-move heuristic: `counter_moves[pezzo][a]`, indexed by the
     /// piece and destination square of the LAST move played (by the
     /// opponent, the one that brought us to this position), not by ply
@@ -280,16 +323,10 @@ pub struct SearchInfo {
     /// "that piece arriving on that square", independent of where in the
     /// tree this happens — a signal different both from killers (ply
     /// specific) and from flat history (no link to the opponent's move).
-    /// Fixed array (6x64), same pattern as `killer_moves`.
+    /// Fixed array (6x64), same pattern as `killer_moves`. Per-thread for
+    /// the same reason `killer_moves` is (see `SharedHistory`'s doc
+    /// comment) — kept here, not promoted to `SharedHistory`.
     pub counter_moves: [[Mossa; 64]; 6],
-    /// Capture history: `capture_history[pezzo_attaccante][a][pezzo_catturato]`,
-    /// same gravity/malus mechanism as the quiet-move history but for
-    /// captures, which today are ordered in `movegen.rs` only via static
-    /// SEE + MVV-LVA (no learning). Idea taken from Reckless (Rust
-    /// engine): which "capturing piece, square, captured piece" exchange
-    /// has historically caused a beta-cutoff, independent of ply. Fixed
-    /// array (6x64x6), same pattern as the other tables.
-    pub capture_history: [[[i32; 6]; 64]; 6],
 }
 
 impl SearchInfo {
@@ -303,21 +340,8 @@ impl SearchInfo {
             nodes: 0,
             stopped: false,
             killer_moves: [[Mossa::null(); 2]; MAX_PLY],
-            history: [[[0i32; 64]; 64]; 2],
             counter_moves: [[Mossa::null(); 64]; 6],
-            capture_history: [[[0i32; 6]; 64]; 6],
         }
-    }
-
-    /// Clears the history heuristic. Not called automatically from
-    /// `new()` onward (every `go` already creates a fresh `SearchInfo`
-    /// with history at zero): serves as an explicit hook for a future
-    /// handler of the UCI "ucinewgame" command, if/when history should
-    /// start persisting across multiple calls to `iterative_deepening`
-    /// within the same game instead of being recreated from scratch on
-    /// every move.
-    pub fn clear_history(&mut self) {
-        self.history = [[[0i32; 64]; 64]; 2];
     }
 
     #[inline(always)]
@@ -443,33 +467,50 @@ fn lmr_reduction(depth: i32, move_count: i32) -> i32 {
 pub fn iterative_deepening(
     board: &mut Scacchiera,
     info: &mut SearchInfo,
-    tt: &mut TranspositionTable,
+    tt: &TranspositionTable,
+    sh: &SharedHistory,
     z: &ZobristKeys,
     nnue: Option<&LunaNNUE>,
-    params: &EvalParams
-) -> (Mossa, i32) {
+    params: &EvalParams,
+    // Lazy SMP thread diversity (see main.rs's "go" handler): secondary
+    // threads pass a value above 1 here to skip the depth-1..start_depth-1
+    // iterations, which are cheap and largely redundant across threads
+    // anyway. The primary thread always passes 1 (search every depth,
+    // unchanged from before multi-threading existed).
+    start_depth: i32,
+    // Only the primary thread (thread 0) should print "info depth ..."
+    // lines: with several threads all doing their own iterative
+    // deepening, letting every one of them print would flood a UCI
+    // GUI/wrapper with conflicting, interleaved depth/score/pv lines from
+    // different searches of the same "go" command.
+    report_info: bool,
+) -> (Mossa, i32, i32) {
     let mut best_move = Mossa::null();
     let mut score = 0;
     let mut last_best_move = Mossa::null();
     let mut stability_counter = 0;
+    let mut last_completed_depth = 0;
 
     let mut alpha = -INFINITY;
     let mut beta = INFINITY;
 
-    for depth in 1..=info.depth_limit {
+    for depth in start_depth.max(1)..=info.depth_limit {
         let mut pv_line = PvLine::new();
         let mut delta = ASPIRATION_INITIAL_DELTA;
 
-        // Only from the second depth onward do we have a reliable
-        // previous `score` on which to base a narrow aspiration window;
-        // at the first depth we always search with a full window.
-        if depth > 1 {
+        // Only once this thread has already completed at least one
+        // iteration do we have a reliable previous `score` to center a
+        // narrow aspiration window on; the first iteration this thread
+        // actually runs (depth 1 normally, but possibly later for a
+        // secondary thread with start_depth > 1 — see above) always uses
+        // a full window.
+        if depth > start_depth.max(1) {
             alpha = (score - delta).max(-INFINITY);
             beta = (score + delta).min(INFINITY);
         }
 
         loop {
-            score = negamax(board, depth, 0, alpha, beta, info, tt, z, nnue, params, true, &mut pv_line, Mossa::null());
+            score = negamax(board, depth, 0, alpha, beta, info, tt, sh, z, nnue, params, true, &mut pv_line, Mossa::null());
 
             if info.stopped { break; }
 
@@ -492,10 +533,11 @@ pub fn iterative_deepening(
             }
         }
 
-        if info.stopped && depth > 1 { break; }
+        if info.stopped && depth > start_depth.max(1) { break; }
 
         if pv_line.len > 0 {
             best_move = pv_line.moves[0];
+            last_completed_depth = depth;
             let elapsed = info.start_time.elapsed().as_millis();
 
             if best_move.data == last_best_move.data {
@@ -509,14 +551,16 @@ pub fn iterative_deepening(
                 info.stopped = true;
             }
 
-            let nps = if elapsed > 0 { info.nodes as u128 * 1000 / elapsed } else { 0 };
+            if report_info {
+                let nps = if elapsed > 0 { info.nodes as u128 * 1000 / elapsed } else { 0 };
 
-            print!("info depth {} score cp {} nodes {} nps {} time {} pv",
-                depth, score, info.nodes, nps, elapsed);
-            for i in 0..pv_line.len {
-                print!(" {}", pv_line.moves[i].to_uci());
+                print!("info depth {} score cp {} nodes {} nps {} time {} pv",
+                    depth, score, info.nodes, nps, elapsed);
+                for i in 0..pv_line.len {
+                    print!(" {}", pv_line.moves[i].to_uci());
+                }
+                println!();
             }
-            println!();
         }
 
         if info.stopped { break; }
@@ -527,7 +571,7 @@ pub fn iterative_deepening(
         if !legali.is_empty() { best_move = legali[0]; }
     }
 
-    (best_move, score)
+    (best_move, score, last_completed_depth)
 }
 
 fn negamax(
@@ -537,7 +581,8 @@ fn negamax(
     mut alpha: i32,
     mut beta: i32,
     info: &mut SearchInfo,
-    tt: &mut TranspositionTable,
+    tt: &TranspositionTable,
+    sh: &SharedHistory,
     z: &ZobristKeys,
     nnue: Option<&LunaNNUE>,
     params: &EvalParams,
@@ -558,7 +603,7 @@ fn negamax(
     // out-of-bounds index. We treat the node as a leaf (quiescence)
     // exactly as for new_depth <= 0.
     if ply >= MAX_PLY - 1 {
-        return quiescence(board, alpha, beta, info, z, nnue, params);
+        return quiescence(board, alpha, beta, info, sh, z, nnue, params);
     }
 
     let pv_node = beta - alpha > 1;
@@ -599,7 +644,7 @@ fn negamax(
     let new_depth = if in_check { depth + 1 } else { depth };
 
     if new_depth <= 0 {
-        return quiescence(board, alpha, beta, info, z, nnue, params);
+        return quiescence(board, alpha, beta, info, sh, z, nnue, params);
     }
 
     // --- SHARED STATIC EVAL ---
@@ -642,7 +687,7 @@ fn negamax(
         let r = NULL_MOVE_BASE_REDUCTION + new_depth / 4;
         let undo = board.fai_mossa_nulla(z);
         let mut null_pv = PvLine::new();
-        let null_val = -negamax(board, new_depth - 1 - r, ply + 1, -beta, -beta + 1, info, tt, z, nnue, params, false, &mut null_pv, Mossa::null());
+        let null_val = -negamax(board, new_depth - 1 - r, ply + 1, -beta, -beta + 1, info, tt, sh, z, nnue, params, false, &mut null_pv, Mossa::null());
         board.annulla_mossa_nulla(undo, z);
 
         if info.stopped { return 0; }
@@ -684,7 +729,7 @@ fn negamax(
         Mossa::null()
     };
 
-    crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply], &info.history, counter_move, &info.capture_history);
+    crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply], &sh.history, counter_move, &sh.capture_history);
 
     // Futility Pruning parameters for this node: invariant for the whole
     // duration of the move loop, computed once outside the loop.
@@ -757,7 +802,7 @@ fn negamax(
             let mut val;
 
             if moves_searched == 1 {
-                val = -negamax(board, new_depth - 1 + passed_push_extension, ply + 1, -beta, -alpha, info, tt, z, nnue, params, true, &mut child_pv, m);
+                val = -negamax(board, new_depth - 1 + passed_push_extension, ply + 1, -beta, -alpha, info, tt, sh, z, nnue, params, true, &mut child_pv, m);
             } else {
                 // --- LATE MOVE REDUCTIONS ---
                 // We reduce the depth for quiet, late moves in the ordered
@@ -776,14 +821,14 @@ fn negamax(
                     reduction = reduction.clamp(0, new_depth - 2);
                 }
 
-                val = -negamax(board, new_depth - 1 - reduction + passed_push_extension, ply + 1, -alpha - 1, -alpha, info, tt, z, nnue, params, true, &mut child_pv, m);
+                val = -negamax(board, new_depth - 1 - reduction + passed_push_extension, ply + 1, -alpha - 1, -alpha, info, tt, sh, z, nnue, params, true, &mut child_pv, m);
 
                 if val > alpha && reduction > 0 {
-                    val = -negamax(board, new_depth - 1 + passed_push_extension, ply + 1, -alpha - 1, -alpha, info, tt, z, nnue, params, true, &mut child_pv, m);
+                    val = -negamax(board, new_depth - 1 + passed_push_extension, ply + 1, -alpha - 1, -alpha, info, tt, sh, z, nnue, params, true, &mut child_pv, m);
                 }
 
                 if val > alpha && val < beta {
-                    val = -negamax(board, new_depth - 1 + passed_push_extension, ply + 1, -beta, -alpha, info, tt, z, nnue, params, true, &mut child_pv, m);
+                    val = -negamax(board, new_depth - 1 + passed_push_extension, ply + 1, -beta, -alpha, info, tt, sh, z, nnue, params, true, &mut child_pv, m);
                 }
             }
 
@@ -823,7 +868,7 @@ fn negamax(
                     // color that actually played `m`.
                     let bonus = new_depth * new_depth;
                     let side = board.turno.indice();
-                    update_history_gravity(&mut info.history[side][m.da()][m.a()], bonus, HISTORY_MAX);
+                    update_history_gravity(&sh.history[side][m.da()][m.a()], bonus, HISTORY_MAX);
 
                     // Malus for quiet moves tried BEFORE `m` at this same
                     // node, which therefore did NOT cause the cutoff: a
@@ -834,7 +879,7 @@ fn negamax(
                     // last element of `quiets_tried` (just added above),
                     // so we exclude it from the range.
                     for &tried in &quiets_tried[..quiets_tried_count.saturating_sub(1)] {
-                        update_history_gravity(&mut info.history[side][tried.da()][tried.a()], -bonus, HISTORY_MAX);
+                        update_history_gravity(&sh.history[side][tried.da()][tried.a()], -bonus, HISTORY_MAX);
                     }
 
                     // --- COUNTER-MOVE HEURISTIC ---
@@ -866,7 +911,7 @@ fn negamax(
                     } else {
                         board.pezzo_in(m.a()).unwrap_or(0)
                     };
-                    update_history_gravity(&mut info.capture_history[attacker][m.a()][captured], bonus, CAPTURE_HISTORY_MAX);
+                    update_history_gravity(&sh.capture_history[attacker][m.a()][captured], bonus, CAPTURE_HISTORY_MAX);
 
                     for &tried in &captures_tried[..captures_tried_count.saturating_sub(1)] {
                         let tried_attacker = board.pezzo_in(tried.da()).unwrap_or(0);
@@ -875,7 +920,7 @@ fn negamax(
                         } else {
                             board.pezzo_in(tried.a()).unwrap_or(0)
                         };
-                        update_history_gravity(&mut info.capture_history[tried_attacker][tried.a()][tried_captured], -bonus, CAPTURE_HISTORY_MAX);
+                        update_history_gravity(&sh.capture_history[tried_attacker][tried.a()][tried_captured], -bonus, CAPTURE_HISTORY_MAX);
                     }
                 }
                 tt.store(board.hash, depth, beta, Bound::Beta, m);
@@ -895,6 +940,7 @@ fn quiescence(
     mut alpha: i32,
     beta: i32,
     info: &mut SearchInfo,
+    sh: &SharedHistory,
     z: &ZobristKeys,
     nnue: Option<&LunaNNUE>,
     params: &EvalParams
@@ -926,7 +972,7 @@ fn quiescence(
     // `score_move` will never be reached for these elements. We still
     // pass the real table (instead of a dummy one) so as not to introduce
     // a second parameter type just for this call site.
-    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &info.history, Mossa::null(), &info.capture_history);
+    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
 
     for m in moves {
         // --- SEE PRUNING (objectively losing captures) ---
@@ -967,7 +1013,7 @@ fn quiescence(
         // board.rs::annulla_mossa_veloce), so in that branch
         // annulla_mossa must NEVER be called explicitly.
         if board.esegui_mossa(&m, z, nnue) {
-            let score = -quiescence(board, -beta, -alpha, info, z, nnue, params);
+            let score = -quiescence(board, -beta, -alpha, info, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
             if score >= beta { return beta; }
@@ -1009,7 +1055,8 @@ mod mate_tests {
 
             let mut tt = TranspositionTable::new(16);
             let mut info = SearchInfo::new(5000, 3);
-            let (best_move, score) = iterative_deepening(&mut board, &mut info, &mut tt, &z, None, &params);
+            let sh = SharedHistory::new();
+            let (best_move, score, _depth) = iterative_deepening(&mut board, &mut info, &mut tt, &sh, &z, None, &params, 1, true);
 
             assert_eq!(best_move.to_uci(), "d8h4", "mossa di matto non trovata (ply simulato = {})", simulated_ply);
             assert!(

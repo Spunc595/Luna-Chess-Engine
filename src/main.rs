@@ -9,11 +9,12 @@ mod tt;
 mod book;
 
 use std::io::{self, BufRead, Write};
-use crate::board::{Scacchiera, Colore};
+use std::thread;
+use crate::board::{Scacchiera, Colore, Mossa};
 use crate::zobrist::get_zobrist_keys;
 use crate::nnue::LunaNNUE;
 use crate::evaluation::EvalParams;
-use crate::search::{iterative_deepening, SearchInfo, MAX_PLY};
+use crate::search::{iterative_deepening, SearchInfo, SharedHistory, MAX_PLY};
 use crate::tt::TranspositionTable;
 use crate::book::OpeningBook;
 
@@ -64,10 +65,18 @@ fn main() {
     }
 
     let mut tt = TranspositionTable::new(256);
+    // Quiet-move/capture history, shared by reference across every search
+    // thread (see search.rs::SharedHistory's doc comment): owned once,
+    // here, like `tt`, and cleared alongside it on "ucinewgame".
+    let shared_history = SharedHistory::new();
+    // Lazy SMP thread count, default 1 (single-threaded, unchanged
+    // behavior unless a UCI GUI/wrapper explicitly asks for more via
+    // "setoption name Threads value N").
+    let mut num_threads: usize = 1;
     let mut s = Scacchiera::new_iniziale(z);
     s.refresh_nnue(nnue.as_ref());
 
-    println!("Luna CE v3.0.0");
+    println!("Luna CE v3.1.0");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
@@ -78,9 +87,10 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v3.0.0");
+                println!("id name Luna CE v3.1.0");
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 1024");
+                println!("option name Threads type spin default 1 min 1 max 64");
                 println!("uciok");
             }
             "isready" => println!("readyok"),
@@ -96,11 +106,16 @@ fn main() {
                 // live in `SearchInfo`, recreated from scratch on every
                 // "go": no need to touch them here.
                 tt.clear();
+                shared_history.clear();
             }
             "setoption" => {
                 if parts.len() >= 5 && parts[2] == "Hash" {
                     if let Ok(new_size) = parts[4].parse::<usize>() {
                         tt = TranspositionTable::new(new_size);
+                    }
+                } else if parts.len() >= 5 && parts[2] == "Threads" {
+                    if let Ok(n) = parts[4].parse::<usize>() {
+                        num_threads = n.max(1);
                     }
                 }
             }
@@ -128,6 +143,17 @@ fn main() {
                 }
             }
             "go" => {
+                // Cleared before every search, not just on "ucinewgame":
+                // matches the pre-multi-threading behavior (a fresh
+                // `SearchInfo`, history included, was created on every
+                // single "go"). Persisting history across moves within a
+                // game is a DIFFERENT idea ("persist-heuristics") already
+                // SPRT-tested on its own and found neutral — keeping that
+                // variable out of this change avoids conflating "does
+                // multi-threading help" with "does persisting history
+                // across moves help", which would muddy the comparison.
+                shared_history.clear();
+
                 let mut mossa_trovata = false;
                 if let Some(ref mut b) = book {
                     if let Some(book_move) = b.get_move(&mut s) {
@@ -237,9 +263,6 @@ fn main() {
                         },
                     };
 
-                    let mut info = SearchInfo::new(movetime, depth as i32);
-                    // Pass &params here
-                    //
                     // NOTE: `iterative_deepening` already internally
                     // guarantees (see the fallback on best_move.is_null())
                     // that the returned move is legal. Regenerating ALL
@@ -251,7 +274,69 @@ fn main() {
                     // the search having finished with a wide margin on the
                     // budget. Removed to minimize that window to just
                     // stdout+flush.
-                    let (best_m, _) = iterative_deepening(&mut s, &mut info, &mut tt, &z, nnue.as_ref(), &params);
+                    let best_m = if num_threads <= 1 {
+                        let mut info = SearchInfo::new(movetime, depth as i32);
+                        let (best_m, _score, _depth) = iterative_deepening(&mut s, &mut info, &tt, &shared_history, &z, nnue.as_ref(), &params, 1, true);
+                        best_m
+                    } else {
+                        // Lazy SMP: every thread runs its own full
+                        // iterative-deepening search of the SAME root
+                        // position, cooperating only through the shared TT
+                        // (tt.rs) and shared history (search.rs) — no
+                        // work-splitting, no coordination beyond that. Each
+                        // thread gets its own cloned `Scacchiera` (make/
+                        // unmake during search mutates it) and its own
+                        // `SearchInfo` (killer moves, counter-moves, node
+                        // count, timing all stay per-thread — see
+                        // SharedHistory's doc comment in search.rs for why
+                        // only history/capture_history are shared).
+                        //
+                        // `thread::scope` (stable, no extra crate) lets
+                        // every closure below borrow `&tt`/`&shared_history`/
+                        // `&nnue`/`&params`/`&z` directly and guarantees
+                        // they're all joined before the scope returns — no
+                        // `Arc`, no manual `JoinHandle` bookkeeping.
+                        let nnue_ref = nnue.as_ref();
+                        thread::scope(|scope| {
+                            let handles: Vec<_> = (0..num_threads)
+                                .map(|thread_id| {
+                                    let mut board_clone = s.clone();
+                                    let tt_ref = &tt;
+                                    let sh_ref = &shared_history;
+                                    let params_ref = &params;
+                                    let z_ref = &z;
+                                    scope.spawn(move || {
+                                        let mut info = SearchInfo::new(movetime, depth as i32);
+                                        // Diversity (round 1, kept simple):
+                                        // secondary threads skip the depth-1
+                                        // iteration, cheap and largely
+                                        // redundant across threads anyway.
+                                        // Only thread 0 prints "info depth"
+                                        // lines, to avoid flooding the
+                                        // GUI/wrapper with interleaved
+                                        // output from several simultaneous
+                                        // searches of the same "go".
+                                        let start_depth = if thread_id == 0 { 1 } else { 2 };
+                                        let report_info = thread_id == 0;
+                                        iterative_deepening(&mut board_clone, &mut info, tt_ref, sh_ref, z_ref, nnue_ref, params_ref, start_depth, report_info)
+                                    })
+                                })
+                                .collect();
+
+                            // Selection rule: the deepest completed result
+                            // wins; ties favor thread 0 (searched every
+                            // depth from 1, no skipped iterations). A
+                            // depth-weighted majority vote across threads'
+                            // PVs would be more robust but is an explicit
+                            // round-2 refinement, not in this first version.
+                            let results: Vec<(Mossa, i32, i32)> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+                            let best_idx = results.iter().enumerate()
+                                .max_by_key(|(idx, (_, _, reached_depth))| (*reached_depth, if *idx == 0 { 1 } else { 0 }))
+                                .map(|(idx, _)| idx)
+                                .unwrap_or(0);
+                            results[best_idx].0
+                        })
+                    };
                     println!("bestmove {}", best_m.to_uci());
                 }
             }

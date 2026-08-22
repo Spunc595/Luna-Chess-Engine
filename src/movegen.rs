@@ -1,4 +1,5 @@
 use crate::board::{Scacchiera, Mossa, Pezzo, MoveFlag, Colore, Bitboard};
+use std::sync::atomic::{AtomicI32, Ordering};
 
 // ============================================================================
 // SEE — Static Exchange Evaluation
@@ -324,14 +325,14 @@ pub fn ordina_mosse(
     board: &Scacchiera,
     tt_move: Mossa,
     killers: &[Mossa; 2],
-    history: &[[[i32; 64]; 64]; 2],
+    history: &[[[AtomicI32; 64]; 64]; 2],
     counter_move: Mossa,
-    capture_history: &[[[i32; 6]; 64]; 6],
+    capture_history: &[[[AtomicI32; 6]; 64]; 6],
 ) {
     mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers, history, counter_move, capture_history));
 }
 
-fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[i32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[i32; 6]; 64]; 6]) -> i32 {
+fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
     // 1. TT move (highest priority)
     if m.data == tt_move.data && !m.is_null() { return 30000; }
 
@@ -358,7 +359,7 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
         let attacker = board.pezzo_in(m.da()).unwrap_or(0);
         let captured = if m.move_flag() == MoveFlag::EnPassant { 0 }
                         else { board.pezzo_in(m.a()).unwrap_or(0) };
-        let cap_hist = capture_history[attacker][m.a()][captured];
+        let cap_hist = capture_history[attacker][m.a()][captured].load(Ordering::Relaxed);
         if see_value >= 0 {
             let victim_val = if m.move_flag() == MoveFlag::EnPassant { 100 }
                              else { Pezzo::from_index(captured).valore() };
@@ -420,7 +421,7 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
         5 => PST_KING[table_idx],
         _ => 0
     };
-    let history_score = history[board.turno.indice()][m.da()][m.a()];
+    let history_score = history[board.turno.indice()][m.da()][m.a()].load(Ordering::Relaxed);
 
     1000 + pst_score + history_score
 }
