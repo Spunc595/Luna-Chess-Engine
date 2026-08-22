@@ -11,6 +11,7 @@ Luna is a UCI-compatible chess engine written entirely in **Rust**, combining cl
 - Static Exchange Evaluation (SEE) for capture ordering and pruning
 
 **Search**
+- Lazy SMP multi-threading (`Threads` UCI option): independent iterative-deepening search per thread over a lock-free shared transposition table and shared history/capture-history tables
 - Negamax with Principal Variation Search (PVS) and iterative deepening
 - Progressive aspiration windows
 - Transposition table with generational aging
