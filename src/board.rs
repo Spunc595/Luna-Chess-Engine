@@ -355,7 +355,7 @@ impl Scacchiera {
         let us_white = us == 0;
 
         // Squares of the two kings BEFORE any mutation from this move:
-        // for the HalfKP perspective whose king does not move on this move
+        // for the perspective whose king does not move on this move
         // these remain valid afterward too; for the other perspective they are irrelevant
         // anyway, because that half of the accumulator will be recalculated from scratch further
         // below if the King is the piece being moved (see `refresh_nnue_perspective`).
@@ -405,10 +405,13 @@ impl Scacchiera {
             }
         }
 
-        // The King has moved: for HalfKP the entire king-bucket of its own
-        // perspective changes, so none of the add/remove_piece calls
-        // above have any effect on it (they are no-ops by construction when the
-        // piece is a King) and it must be recalculated from scratch on the final position.
+        // The King has moved: its own perspective's entire king-bucket
+        // changes (see nnue.rs's `get_base_index`), so the add/remove_piece
+        // calls above — which DID also touch that half, incrementally, on
+        // now-stale king-bucket assumptions — get entirely overwritten here
+        // by a full recalculation from scratch on the final position. The
+        // OTHER perspective (whose own king didn't move) already received
+        // a correct incremental update from those same calls above.
         if moved_p == 5 {
             if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
         }
@@ -573,7 +576,7 @@ impl Scacchiera {
         }
 
         // Symmetric to esegui_mossa: the King having returned to `from` above implies
-        // a full recalculation of its own HalfKP perspective.
+        // a full recalculation of its own perspective.
         if final_p == 5 {
             if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
         }
@@ -628,7 +631,7 @@ impl Scacchiera {
     // `nnue` is always `None` in this method (not at the call sites): every move
     // here is applied and IMMEDIATELY undone just to verify its
     // legality, with nobody ever reading `nnue_acc` in between. With a
-    // real HalfKP network, propagating the network here could potentially cost a
+    // real network loaded, propagating it here could potentially cost a
     // full refresh for every King move generated (up to 8 per node) for
     // a result that is never observed: pure waste. The search (search.rs)
     // later calls esegui_mossa/annulla_mossa a second time, this time

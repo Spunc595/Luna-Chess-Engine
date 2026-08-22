@@ -1,4 +1,4 @@
-// Verifica che l'accumulatore NNUE incrementale HalfKP (board.rs::esegui_mossa/
+// Verifica che l'accumulatore NNUE incrementale (board.rs::esegui_mossa/
 // annulla_mossa + nnue.rs::LunaNNUE::{add_piece,remove_piece,refresh_one_perspective})
 // produca esattamente lo stesso risultato di un ricalcolo completo
 // (LunaNNUE::refresh) in ogni posizione raggiunta, sia in avanti (make) che
@@ -6,9 +6,11 @@
 // mossa del Re (senza arrocco: innesca il refresh di una sola prospettiva),
 // arrocco (Re + Torre nella stessa mossa) e promozione con cattura.
 //
-// Il file .nnue di test è generato al volo in formato binario HalfKP
-// 256x2-32-32-1 (lo stesso letto da LunaNNUE::load), con pesi pseudo-random
-// deterministici: i valori numerici non contano, conta solo che
+// Il file .nnue di test è generato al volo nel formato binario "flat" letto
+// da LunaNNUE::load (768 feature x 4 king-bucket, 1024 neuroni nascosti,
+// nessun header/hash: solo dimensione del file come validazione), con pesi
+// pseudo-random deterministici: i valori numerici non contano (questi test
+// non chiamano mai evaluate_from_accumulator), conta solo che
 // add_piece/remove_piece/refresh_one_perspective restino coerenti tra loro.
 
 use luna::board::Scacchiera;
@@ -17,15 +19,18 @@ use luna::zobrist::ZobristKeys;
 use std::io::Write;
 use std::sync::OnceLock;
 
-const HALFKP_INPUT_DIMENSIONS: usize = 64 * 641;
-const L1_SIZE: usize = 256;
-const L2_SIZE: usize = 32;
-const L3_SIZE: usize = 32;
+const HIDDEN: usize = 1024;
+const NUM_BUCKETS: usize = 4;
+/// 62 byte di padding finale (allineamento a 64 byte del formato sorgente),
+/// mai letti da LunaNNUE::parse ma necessari perché la dimensione del file
+/// combaci con quella attesa (l'unica validazione strutturale del nuovo
+/// formato, che non ha più un header con magic number).
+const TRAILING_PADDING: usize = 62;
 
-/// Genera un file .nnue HalfKP sintetico (header + feature transformer +
-/// rete a 3 layer) con pesi pseudo-random deterministici, lo scrive in un
-/// file temporaneo, lo carica tramite `LunaNNUE::load` (l'unico costruttore
-/// pubblico) e cancella il file temporaneo.
+/// Genera un file .nnue sintetico (solo pesi flat, nessun header) con pesi
+/// pseudo-random deterministici, lo scrive in un file temporaneo, lo carica
+/// tramite `LunaNNUE::load` (l'unico costruttore pubblico) e cancella il
+/// file temporaneo.
 fn build_test_net(seed: u64) -> LunaNNUE {
     let mut state = seed ^ 0x9E3779B97F4A7C15;
     let mut next = move || -> i64 {
@@ -35,49 +40,28 @@ fn build_test_net(seed: u64) -> LunaNNUE {
         state as i64
     };
 
-    let mut buf: Vec<u8> = Vec::with_capacity(
-        12 + 4 + L1_SIZE * 2 + HALFKP_INPUT_DIMENSIONS * L1_SIZE * 2
-            + 4 + L2_SIZE * 4 + L2_SIZE * L1_SIZE * 2
-            + L3_SIZE * 4 + L3_SIZE * L2_SIZE
-            + 4 + L3_SIZE,
-    );
+    let feature_weight_count = 768 * NUM_BUCKETS * HIDDEN;
+    let payload = feature_weight_count * 2 + HIDDEN * 2 + 2 * HIDDEN * 2 + 2;
+    let mut buf: Vec<u8> = Vec::with_capacity(payload + TRAILING_PADDING);
 
-    buf.extend_from_slice(&0x7AF32F16u32.to_le_bytes()); // version
-    buf.extend_from_slice(&0u32.to_le_bytes());           // hash (non verificato a fondo, solo warning)
-    buf.extend_from_slice(&0u32.to_le_bytes());           // description length = 0
-
-    buf.extend_from_slice(&0u32.to_le_bytes());           // ft hash
-    for _ in 0..L1_SIZE {
-        buf.extend_from_slice(&((next() % 2000 - 1000) as i16).to_le_bytes());
-    }
-    for _ in 0..HALFKP_INPUT_DIMENSIONS * L1_SIZE {
+    for _ in 0..feature_weight_count {
         buf.extend_from_slice(&((next() % 200 - 100) as i16).to_le_bytes());
     }
+    for _ in 0..HIDDEN {
+        buf.extend_from_slice(&((next() % 2000 - 1000) as i16).to_le_bytes());
+    }
+    for _ in 0..2 * HIDDEN {
+        buf.extend_from_slice(&((next() % 200 - 100) as i16).to_le_bytes());
+    }
+    buf.extend_from_slice(&((next() % 2000 - 1000) as i16).to_le_bytes()); // output_bias
+    buf.extend_from_slice(&[0u8; TRAILING_PADDING]);
 
-    buf.extend_from_slice(&0u32.to_le_bytes());           // network hash
-    for _ in 0..L2_SIZE {
-        buf.extend_from_slice(&((next() % 2000 - 1000) as i32).to_le_bytes());
-    }
-    for _ in 0..L2_SIZE * (L1_SIZE * 2) {
-        buf.push((next() % 200 - 100) as i8 as u8);
-    }
-    for _ in 0..L3_SIZE {
-        buf.extend_from_slice(&((next() % 2000 - 1000) as i32).to_le_bytes());
-    }
-    for _ in 0..L3_SIZE * L2_SIZE {
-        buf.push((next() % 200 - 100) as i8 as u8);
-    }
-    buf.extend_from_slice(&((next() % 2000 - 1000) as i32).to_le_bytes());
-    for _ in 0..L3_SIZE {
-        buf.push((next() % 200 - 100) as i8 as u8);
-    }
-
-    let path = std::env::temp_dir().join(format!("luna_test_halfkp_{}.nnue", seed));
+    let path = std::env::temp_dir().join(format!("luna_test_net_{}.nnue", seed));
     let mut f = std::fs::File::create(&path).unwrap();
     f.write_all(&buf).unwrap();
     drop(f);
 
-    let net = LunaNNUE::load(path.to_str().unwrap()).expect("caricamento rete di test HalfKP fallito");
+    let net = LunaNNUE::load(path.to_str().unwrap()).expect("caricamento rete di test fallito");
     let _ = std::fs::remove_file(&path);
     net
 }

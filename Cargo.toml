@@ -7,7 +7,7 @@ members = [
 
 [package]
 name = "luna"
-version = "2.5.0"
+version = "3.0.0"
 authors = ["Daniele Marpino"]
 edition = "2021"
 description = "Luna, a UCI chess engine written in Rust with NNUE evaluation"
@@ -24,7 +24,6 @@ env_logger = "0.11"  # Debug only
 default = []
 simd = []
 nnue = []
-embedded_nnue = []
 evaluation = []  # Evaluation-tuning feature flag
 
 [profile.release]

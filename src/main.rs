@@ -36,7 +36,20 @@ fn main() {
     let z = get_zobrist_keys();
     let nnue_path = nnue_path_next_to_exe();
     println!("info string Looking for NNUE at: {}", nnue_path);
-    let nnue = LunaNNUE::load(&nnue_path);
+    // External file takes priority if present and valid (e.g. to try a
+    // different/updated net without recompiling); the network embedded in
+    // the binary (see nnue.rs) is always available as a guaranteed
+    // fallback, unconditionally — no feature flag needed, unlike the old
+    // ~21MB HalfKP net this replaced, which was too large to embed by
+    // default. This permanently removes the "external NNUE file wasn't
+    // placed correctly next to the executable" failure class, without
+    // requiring anyone to opt in — very likely the cause of a previous
+    // MCEC tournament result with zero wins.
+    let mut nnue = LunaNNUE::load(&nnue_path);
+    if nnue.is_none() {
+        println!("info string External NNUE not found or invalid, falling back to the network embedded in the binary.");
+        nnue = LunaNNUE::load_embedded();
+    }
     if nnue.is_none() {
         println!("info string NNUE not loaded: '{}' not found or not compatible (using classic PST evaluation).", nnue_path);
     }
@@ -54,7 +67,7 @@ fn main() {
     let mut s = Scacchiera::new_iniziale(z);
     s.refresh_nnue(nnue.as_ref());
 
-    println!("Luna CE v2.0.0");
+    println!("Luna CE v3.0.0");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
@@ -65,7 +78,7 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v2.0.0");
+                println!("id name Luna CE v3.0.0");
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 1024");
                 println!("uciok");
