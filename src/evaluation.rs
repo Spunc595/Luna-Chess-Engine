@@ -68,11 +68,9 @@ pub fn evaluate(board: &Scacchiera, params: &EvalParams) -> i32 {
         }
     }
 
-    // The mop-up bonus (pushing the opponent's king toward the corner when
-    // clearly winning) no longer lives here: it was generalized into
-    // `search::apply_progress_adjustment`, which applies it inside `eval()`
-    // regardless of the evaluation source (this classical PST or NNUE).
-    // Applying it here too would double-count it whenever the network isn't
-    // loaded and we fall back to this function.
+    // No mop-up bonus here (or anywhere else): an earlier version added
+    // one inside `eval()` for both this classical PST and NNUE, but it
+    // measured as a large net loss (-96.6 Elo) and was removed in v3.1.1
+    // — see search.rs's "REMOVED (v3.1.1)" comment for why.
     if board.turno == Colore::Bianco { score } else { -score }
 }

@@ -76,7 +76,7 @@ fn main() {
     let mut s = Scacchiera::new_iniziale(z);
     s.refresh_nnue(nnue.as_ref());
 
-    println!("Luna CE v3.1.0");
+    println!("Luna CE v3.1.1");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
@@ -87,7 +87,7 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v3.1.0");
+                println!("id name Luna CE v3.1.1");
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 1024");
                 println!("option name Threads type spin default 1 min 1 max 64");
@@ -343,8 +343,7 @@ fn main() {
             "quit" => break,
             "eval" => {
                  // search::eval, not a direct call to NNUE/PST: this way
-                 // the debug command reflects exactly what the search sees
-                 // (including the apply_progress_adjustment corrections),
+                 // the debug command reflects exactly what the search sees,
                  // not an intermediate stage.
                  let score = search::eval(&s, nnue.as_ref(), &params);
                  println!("Evaluation: {} cp", score);

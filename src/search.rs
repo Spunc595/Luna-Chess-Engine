@@ -30,7 +30,7 @@ const INFINITY: i32 = 50_000;
 /// Base score for checkmate. The actual score for a mate found at `ply`
 /// moves from the root is `-MATE_SCORE + ply`, so that mates closer to the
 /// root get a higher (stronger) score than those farther away.
-const MATE_SCORE: i32 = 49_000;
+pub const MATE_SCORE: i32 = 49_000;
 
 /// Any score whose absolute value exceeds this threshold is considered
 /// "mate" (or at least at mate distance). Pruning heuristics based on the
@@ -38,7 +38,7 @@ const MATE_SCORE: i32 = 49_000;
 /// comparing a "normal" evaluation with a bound that actually encodes a
 /// mate distance would make no sense and could corrupt mate detection
 /// itself.
-const MATE_THRESHOLD: i32 = MATE_SCORE - MAX_PLY as i32;
+pub const MATE_THRESHOLD: i32 = MATE_SCORE - MAX_PLY as i32;
 
 /// Maximum depth (in remaining ply) within which Reverse Futility Pruning
 /// (static null move pruning) is attempted. Beyond this depth the static
@@ -71,143 +71,36 @@ const ASPIRATION_INITIAL_DELTA: i32 = 25;
 const DELTA_MARGIN: i32 = 200;
 
 // ============================================================================
-// CONVERTING THE ADVANTAGE: passed pawns, mop-up and "no progress" decay
+// REMOVED (v3.1.1): "progress adjustment" (passed pawns + mop-up + rule_50
+// decay stacked onto the static eval)
 // ============================================================================
 //
-// Observed in a real game: with a huge material advantage (25-30 pawn
-// equivalents, e.g. Queen vs Rook+Bishop) the engine fails to convert,
-// shuffling pieces back and forth for hundreds of moves. Cause: neither
-// the NNUE nor the classic PST has any term that makes "moving without
-// purpose" worse than "making real progress" (pushing a passed pawn,
-// capturing, resetting the 50-move counter) when already massively
-// winning — the score stays high and flat either way, so the search has
-// no reason to prefer the second option. These corrections are applied in
-// `eval()` AFTER the static evaluation (NNUE or PST, the source doesn't
-// matter: that's why they live here and not in evaluation.rs, which the
-// neural network completely ignores).
-
-/// Passed pawn bonus, indexed by "steps from promotion" (1 = promotes on
-/// the next move). Grows much more than linearly close to promotion:
-/// starting values, not tuned, but the asymmetry (a push that concretely
-/// brings promotion closer must be worth far more than a passed pawn that
-/// is still far away) is the essential point, not the exact numbers.
-const PASSED_PAWN_BONUS: [i32; 8] = [0, 900, 500, 300, 180, 110, 70, 40];
-
-/// Absolute advantage threshold (centipawns, from the point of view of the
-/// side to move) above which the position is considered "clearly won" for
-/// someone: only in that case does the no-progress decay below come into
-/// play. In a balanced position a high `rule_50` is normal (many drawn
-/// games stay balanced for dozens of moves) and should not be penalized.
-const CLEAR_ADVANTAGE_THRESHOLD: i32 = 300;
-
-/// `rule_50` (= `mezze_mosse`, the half-move counter with no capture or
-/// pawn push) above which decay begins: below this threshold decay is
-/// always 0, so as not to disturb the phase where the advantage is still
-/// being built up with perfectly normal "quiet" moves (maneuvering,
-/// repositioning).
-const PROGRESS_DECAY_START: i32 = 20;
-
-/// Safety limit on the score after the corrections: well below
-/// `MATE_THRESHOLD`, to avoid any risk of a "normal" advantage (however
-/// large) being confused with an encoded mate score.
-const ADJUSTED_EVAL_CLAMP: i32 = 20_000;
+// Added to fix a real observed symptom (huge-material-advantage games not
+// converting, shuffling for hundreds of moves) but with the wrong
+// diagnosis: the actual cause was the transposition table never
+// ply-adjusting mate scores (fixed above, see `TranspositionTable::store`/
+// `probe` in tt.rs), which made the search unable to reliably find and
+// hold onto a mate line it had already seen. This patch instead stacked
+// three flawed corrections onto every eval: an unconditional mop-up bonus
+// triggered by eval magnitude alone (with no game-phase/material guard, so
+// it fired throughout ordinary middlegames, not just bare-king endgames),
+// a hard discontinuity at the trigger threshold (search-destabilizing),
+// and a rule_50-based decay that rescaled the ENTIRE score — including
+// whatever the NNUE/PST had assessed for reasons having nothing to do
+// with conversion — not just a bonus term. Measured via SPRT after the
+// mate-score fix: -96.6 Elo (LOS 100%, H1 accepted at 380 games) with this
+// left in place. Removed entirely rather than re-tuned; a properly
+// phase-guarded, non-discontinuous version would be a new, separate
+// experiment, not a revival of this one.
 
 /// Steps from promotion for a pawn of color `white` on square `sq` (1 =
-/// promotes on the next move). Used both for the bonus in
-/// `apply_progress_adjustment` and to decide the search extension in the
-/// move loop of `negamax` further below.
+/// promotes on the next move). Used by the search extension in the move
+/// loop of `negamax` further below (formerly also by the passed-pawn
+/// bonus removed above).
 #[inline(always)]
 fn promo_distance(sq: usize, white: bool) -> usize {
     let rank = sq / 8;
     if white { 7 - rank } else { rank }
-}
-
-/// "Mop-up" bonus: pushes the opponent's King toward the edge/corner and
-/// keeps our own King close, the standard conversion technique in
-/// endgames with an overwhelming advantage and few/no pawns (typically
-/// Queen or Rook vs a nearly bare King), where there is no passed pawn to
-/// guide the search. Generalizes `evaluation::evaluate_mop_up`, ported
-/// as-is (same formula, same weights) but made applicable even when the
-/// NNUE is doing the evaluating, since that version completely ignores it
-/// — exactly the same gap that had left the passed-pawn bonus inert
-/// before the earlier fix, here for the exact same reason.
-#[inline(always)]
-fn mop_up_bonus(winner_king_sq: usize, loser_king_sq: usize) -> i32 {
-    let l_rank = (loser_king_sq / 8) as i32;
-    let l_file = (loser_king_sq % 8) as i32;
-    let w_rank = (winner_king_sq / 8) as i32;
-    let w_file = (winner_king_sq % 8) as i32;
-
-    let center_dist = (2 * l_rank - 7).abs() + (2 * l_file - 7).abs();
-    let dist_kings = (w_rank - l_rank).abs() + (w_file - l_file).abs();
-
-    center_dist * 25 + (14 - dist_kings) * 20
-}
-
-/// Applies the three corrections described above to the raw static score
-/// `score` (already in the "relative to the side to move" convention used
-/// by negamax, whether it comes from NNUE or the classic PST).
-fn apply_progress_adjustment(board: &Scacchiera, score: i32) -> i32 {
-    let us_white = board.turno == Colore::Bianco;
-    let mut adjusted = score;
-
-    // --- 1. Passed pawn bonus (always active) ---
-    let mut bb_w = board.pezzi[0] & board.colori[0];
-    while bb_w != 0 {
-        let sq = bb_w.trailing_zeros() as usize;
-        if board.pedone_passato(sq, true) {
-            let bonus = PASSED_PAWN_BONUS[promo_distance(sq, true)];
-            adjusted += if us_white { bonus } else { -bonus };
-        }
-        bb_w &= bb_w - 1;
-    }
-    let mut bb_b = board.pezzi[0] & board.colori[1];
-    while bb_b != 0 {
-        let sq = bb_b.trailing_zeros() as usize;
-        if board.pedone_passato(sq, false) {
-            let bonus = PASSED_PAWN_BONUS[promo_distance(sq, false)];
-            adjusted += if us_white { -bonus } else { bonus };
-        }
-        bb_b &= bb_b - 1;
-    }
-
-    // --- 2. Mop-up (only if already clearly winning) ---
-    if adjusted.abs() > CLEAR_ADVANTAGE_THRESHOLD {
-        let white_king_sq = (board.pezzi[5] & board.colori[0]).trailing_zeros() as usize;
-        let black_king_sq = (board.pezzi[5] & board.colori[1]).trailing_zeros() as usize;
-        // Defensive guard: trailing_zeros() on a zero bitboard (missing
-        // King) would return 64, out of range. Should never happen in a
-        // legal position, but costs nothing to check.
-        if white_king_sq < 64 && black_king_sq < 64 {
-            let white_winning = if us_white { adjusted > 0 } else { adjusted < 0 };
-            let bonus = if white_winning {
-                mop_up_bonus(white_king_sq, black_king_sq)
-            } else {
-                mop_up_bonus(black_king_sq, white_king_sq)
-            };
-            // `bonus` is computed in favor of the absolute winner (white
-            // or black): it should be added to `adjusted` (side-to-move
-            // convention) only if the winner is also the side to move,
-            // subtracted otherwise.
-            adjusted += if white_winning == us_white { bonus } else { -bonus };
-        }
-    }
-
-    // --- 3. No-progress decay (only if already massively winning) ---
-    if adjusted.abs() > CLEAR_ADVANTAGE_THRESHOLD && (board.rule_50 as i32) > PROGRESS_DECAY_START {
-        // Scales linearly from 1.0 (rule_50 = PROGRESS_DECAY_START) to 0.0
-        // (rule_50 >= 100): at rule_50 = 100 the position is drawn anyway
-        // by the 50-move rule, so the eval must have already dropped to 0
-        // well before getting there, not abruptly on the last available
-        // move. Without this term, "shuffling" costs nothing: the
-        // position remains equally "won" no matter how many moves go by
-        // without a capture or pawn push.
-        let span = 100 - PROGRESS_DECAY_START;
-        let remaining = (100 - (board.rule_50 as i32).min(100)).max(0);
-        adjusted = adjusted * remaining / span;
-    }
-
-    adjusted.clamp(-ADJUSTED_EVAL_CLAMP, ADJUSTED_EVAL_CLAMP)
 }
 
 #[derive(Clone)]
@@ -376,24 +269,17 @@ impl SearchInfo {
 // never fails just because the network is missing.
 /// `pub` (not only for internal use within this module) because it is
 /// also the correct way to answer the UCI "eval" diagnostic command in
-/// main.rs: calling `LunaNNUE::evaluate_from_accumulator`/`evaluate`
-/// directly from there would silently bypass `apply_progress_adjustment`,
-/// making that debug command unrepresentative of what the search actually
-/// sees.
+/// main.rs.
 #[inline(always)]
 pub fn eval(board: &Scacchiera, nnue: Option<&LunaNNUE>, params: &EvalParams) -> i32 {
-    let raw = match nnue {
+    match nnue {
         // Uses the incremental accumulator maintained by board.rs
         // (esegui_mossa/annulla_mossa) instead of recomputing layer 1 from
         // scratch: only layers 2/3 remain here, at a fixed cost
         // independent of the number of pieces on the board.
         Some(net) => net.evaluate_from_accumulator(&board.nnue_acc, board.turno == Colore::Bianco),
         None => evaluate(board, params),
-    };
-    // Applied AFTER any evaluation source (see the comment above
-    // apply_progress_adjustment): it is the single point common to both
-    // NNUE and the classic PST.
-    apply_progress_adjustment(board, raw)
+    }
 }
 
 /// True if `score` represents (or is close enough to represent) a mate
@@ -554,8 +440,16 @@ pub fn iterative_deepening(
             if report_info {
                 let nps = if elapsed > 0 { info.nodes as u128 * 1000 / elapsed } else { 0 };
 
-                print!("info depth {} score cp {} nodes {} nps {} time {} pv",
-                    depth, score, info.nodes, nps, elapsed);
+                if is_mate_score(score) {
+                    let plies_to_mate = MATE_SCORE - score.abs();
+                    let moves_to_mate = (plies_to_mate + 1) / 2;
+                    let signed_moves = if score > 0 { moves_to_mate } else { -moves_to_mate };
+                    print!("info depth {} score mate {} nodes {} nps {} time {} pv",
+                        depth, signed_moves, info.nodes, nps, elapsed);
+                } else {
+                    print!("info depth {} score cp {} nodes {} nps {} time {} pv",
+                        depth, score, info.nodes, nps, elapsed);
+                }
                 for i in 0..pv_line.len {
                     print!(" {}", pv_line.moves[i].to_uci());
                 }
@@ -635,7 +529,7 @@ fn negamax(
     alpha = mate_alpha;
     beta = mate_beta;
 
-    if let Some(entry) = tt.probe(board.hash, depth, alpha, beta) {
+    if let Some(entry) = tt.probe(board.hash, depth, ply as i32, alpha, beta) {
         if !pv_node { return entry; }
     }
 
@@ -923,14 +817,14 @@ fn negamax(
                         update_history_gravity(&sh.capture_history[tried_attacker][tried.a()][tried_captured], -bonus, CAPTURE_HISTORY_MAX);
                     }
                 }
-                tt.store(board.hash, depth, beta, Bound::Beta, m);
+                tt.store(board.hash, depth, ply as i32, beta, Bound::Beta, m);
                 return beta;
             }
         }
     }
 
     let best_move_to_store = if pv_line.len > 0 { pv_line.moves[0] } else { Mossa::null() };
-    tt.store(board.hash, depth, best_val, flag, best_move_to_store);
+    tt.store(board.hash, depth, ply as i32, best_val, flag, best_move_to_store);
 
     best_val
 }

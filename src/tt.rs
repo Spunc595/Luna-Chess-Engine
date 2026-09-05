@@ -1,4 +1,5 @@
 use crate::board::Mossa;
+use crate::search::MATE_THRESHOLD;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -96,6 +97,31 @@ impl TranspositionTable {
         self.generation = 1;
     }
 
+    /// Converts a mate score from "distance to mate from the current
+    /// search ply" (the convention negamax operates in) to a ply-
+    /// independent form safe to store in the TT: the same physical
+    /// position can be reached again at a DIFFERENT ply (a different move
+    /// order to get there), so a mate score tied to "this many plies from
+    /// THIS particular root" would silently misreport the mate distance
+    /// on a later hit from a different ply. Standard technique, same as
+    /// Stockfish's `value_to_tt`.
+    #[inline(always)]
+    fn score_to_tt(score: i32, ply: i32) -> i32 {
+        if score >= MATE_THRESHOLD { score + ply }
+        else if score <= -MATE_THRESHOLD { score - ply }
+        else { score }
+    }
+
+    /// Inverse of `score_to_tt`: re-expresses a ply-independent TT score
+    /// relative to the CURRENT node's ply (which may differ from the ply
+    /// it was originally stored at).
+    #[inline(always)]
+    fn score_from_tt(score: i32, ply: i32) -> i32 {
+        if score >= MATE_THRESHOLD { score - ply }
+        else if score <= -MATE_THRESHOLD { score + ply }
+        else { score }
+    }
+
     /// Reads the entry at `key`'s bucket, only if the XOR check confirms
     /// it genuinely belongs to `key` (see `Bucket`'s doc comment above).
     #[inline(always)]
@@ -113,10 +139,10 @@ impl TranspositionTable {
 
     // Updated to accept search.rs's parameters
     // Returns Option<value> for cutoff
-    pub fn probe(&self, key: u64, depth: i32, alpha: i32, beta: i32) -> Option<i32> {
+    pub fn probe(&self, key: u64, depth: i32, ply: i32, alpha: i32, beta: i32) -> Option<i32> {
         if let Some(entry) = self.read(key) {
             if entry.depth as i32 >= depth {
-                let score = entry.score; // Mate score handling should go here
+                let score = Self::score_from_tt(entry.score, ply);
                 let bound = entry.bound;
 
                 if bound == Bound::Exact as u8 {
@@ -144,7 +170,8 @@ impl TranspositionTable {
     // `&self`, not `&mut self`: the atomics give interior mutability,
     // which is exactly what lets multiple search threads share one
     // `&TranspositionTable` with no Mutex (see main.rs's "go" handler).
-    pub fn store(&self, key: u64, depth: i32, score: i32, bound: Bound, best_move: Mossa) {
+    pub fn store(&self, key: u64, depth: i32, ply: i32, score: i32, bound: Bound, best_move: Mossa) {
+        let score = Self::score_to_tt(score, ply);
         let idx = (key as usize) & self.mask;
         let bucket = &self.entries[idx];
 
@@ -203,8 +230,40 @@ mod pack_tests {
     fn store_and_probe_round_trip() {
         let tt = TranspositionTable::new(1);
         let key = 0x1234_5678_9ABC_DEF0u64;
-        tt.store(key, 5, -1234, Bound::Exact, Mossa::null());
-        assert_eq!(tt.probe(key, 5, -50_000, 50_000), Some(-1234));
-        assert_eq!(tt.probe(key.wrapping_add(1), 5, -50_000, 50_000), None);
+        tt.store(key, 5, 3, -1234, Bound::Exact, Mossa::null());
+        assert_eq!(tt.probe(key, 5, 3, -50_000, 50_000), Some(-1234));
+        assert_eq!(tt.probe(key.wrapping_add(1), 5, 3, -50_000, 50_000), None);
+    }
+
+    /// A mate score stored at one ply must come back correctly re-based
+    /// when probed from a DIFFERENT ply (the whole point of `score_to_tt`/
+    /// `score_from_tt`): the intrinsic "plies to mate from this exact
+    /// position" (D=2 here) is what must survive unchanged; the score's
+    /// numeric value relative to the root necessarily differs depending
+    /// on which ply the position is reached at (reaching the same good
+    /// position sooner means the mate itself lands sooner too).
+    #[test]
+    fn mate_score_rebased_across_ply() {
+        let tt = TranspositionTable::new(1);
+        let key = 0xDEAD_BEEF_0000_0001u64;
+
+        // D=2: "mate in 2 plies from this position". At the node that
+        // found it, ply=10, negamax's own convention makes the raw score
+        // MATE_SCORE - (ply + D).
+        let ply_at_store = 10;
+        let d = 2;
+        let raw_score_at_store = crate::search::MATE_SCORE - (ply_at_store + d);
+        tt.store(key, 1, ply_at_store, raw_score_at_store, Bound::Exact, Mossa::null());
+
+        // Probed from a different ply (say the same position is reached
+        // sooner via a transposition): must reflect the SAME D, re-based
+        // to the new ply, i.e. MATE_SCORE - (new_ply + D).
+        let ply_at_probe = 4;
+        let got = tt.probe(key, 1, ply_at_probe, -50_000, 50_000).unwrap();
+        assert_eq!(got, crate::search::MATE_SCORE - (ply_at_probe + d));
+
+        // Probed back at the original ply, it must round-trip exactly.
+        let got_at_original_ply = tt.probe(key, 1, ply_at_store, -50_000, 50_000).unwrap();
+        assert_eq!(got_at_original_ply, raw_score_at_store);
     }
 }
