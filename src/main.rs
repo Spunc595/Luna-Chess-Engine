@@ -33,7 +33,25 @@ fn nnue_path_next_to_exe() -> String {
         .unwrap_or_else(|| "luna.nnue".to_string())
 }
 
+/// Same fix as `nnue_path_next_to_exe`, for `book.bin`: a plain relative
+/// path resolves against the process's working directory, which a UCI
+/// GUI/wrapper can launch the engine from anywhere in, not necessarily
+/// the folder the book file was actually placed in next to the binary.
+fn book_path_next_to_exe() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("book.bin")))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "book.bin".to_string())
+}
+
 fn main() {
+    // Force the magic-bitboard/attack tables to build now, not lazily on
+    // whichever call touches them first (previously the engine's very
+    // first search, silently absorbing ~636ms of one-time setup into that
+    // search's own reported time).
+    attacks::init_attack_tables();
+
     let z = get_zobrist_keys();
     let nnue_path = nnue_path_next_to_exe();
     println!("info string Looking for NNUE at: {}", nnue_path);
@@ -58,10 +76,11 @@ fn main() {
     // Initialize the evaluation parameters
     let params = EvalParams::default();
 
-    let mut book = OpeningBook::load("book.bin");
+    let book_path = book_path_next_to_exe();
+    let mut book = OpeningBook::load(&book_path);
     match book {
         Some(_) => println!("✅ Book: Active and loaded!"),
-        None => println!("⚠️ Book: File 'book.bin' not found."),
+        None => println!("⚠️ Book: '{}' not found.", book_path),
     }
 
     let mut tt = TranspositionTable::new(256);
@@ -76,7 +95,7 @@ fn main() {
     let mut s = Scacchiera::new_iniziale(z);
     s.refresh_nnue(nnue.as_ref());
 
-    println!("Luna CE v3.1.1");
+    println!("Luna CE v3.1.2");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
@@ -87,9 +106,9 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v3.1.1");
+                println!("id name Luna CE v3.1.2");
                 println!("id author Daniele Marpino");
-                println!("option name Hash type spin default 256 min 1 max 1024");
+                println!("option name Hash type spin default 256 min 1 max 512");
                 println!("option name Threads type spin default 1 min 1 max 64");
                 println!("uciok");
             }
@@ -111,7 +130,10 @@ fn main() {
             "setoption" => {
                 if parts.len() >= 5 && parts[2] == "Hash" {
                     if let Ok(new_size) = parts[4].parse::<usize>() {
-                        tt = TranspositionTable::new(new_size);
+                        match TranspositionTable::try_new(new_size) {
+                            Some(new_tt) => tt = new_tt,
+                            None => println!("info string Hash {} MB allocation failed, keeping previous table", new_size),
+                        }
                     }
                 } else if parts.len() >= 5 && parts[2] == "Threads" {
                     if let Ok(n) = parts[4].parse::<usize>() {

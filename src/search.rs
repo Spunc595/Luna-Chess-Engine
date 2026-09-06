@@ -502,7 +502,7 @@ fn negamax(
 
     let pv_node = beta - alpha > 1;
 
-    if board.ply > 0 && (board.is_repetition() || board.rule_50 >= 100) {
+    if ply > 0 && (board.is_repetition() || board.rule_50 >= 100) {
         return 0;
     }
 

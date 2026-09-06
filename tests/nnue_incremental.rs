@@ -44,16 +44,22 @@ fn build_test_net(seed: u64) -> LunaNNUE {
     let payload = feature_weight_count * 2 + HIDDEN * 2 + 2 * HIDDEN * 2 + 2;
     let mut buf: Vec<u8> = Vec::with_capacity(payload + TRAILING_PADDING);
 
+    // `.rem_euclid`, not plain `%`: Rust's `%` keeps the dividend's sign,
+    // so a negative `next()` previously produced values well outside the
+    // intended +/-100 / +/-1000 ranges (observed up to +/-299) — harmless
+    // to what this test actually checks (incremental-vs-refresh
+    // consistency, not real evaluation values), but large enough to trip
+    // nnue.rs's new SIMD-safety rejection on output weights.
     for _ in 0..feature_weight_count {
-        buf.extend_from_slice(&((next() % 200 - 100) as i16).to_le_bytes());
+        buf.extend_from_slice(&((next().rem_euclid(200) - 100) as i16).to_le_bytes());
     }
     for _ in 0..HIDDEN {
-        buf.extend_from_slice(&((next() % 2000 - 1000) as i16).to_le_bytes());
+        buf.extend_from_slice(&((next().rem_euclid(2000) - 1000) as i16).to_le_bytes());
     }
     for _ in 0..2 * HIDDEN {
-        buf.extend_from_slice(&((next() % 200 - 100) as i16).to_le_bytes());
+        buf.extend_from_slice(&((next().rem_euclid(200) - 100) as i16).to_le_bytes());
     }
-    buf.extend_from_slice(&((next() % 2000 - 1000) as i16).to_le_bytes()); // output_bias
+    buf.extend_from_slice(&((next().rem_euclid(2000) - 1000) as i16).to_le_bytes()); // output_bias
     buf.extend_from_slice(&[0u8; TRAILING_PADDING]);
 
     let path = std::env::temp_dir().join(format!("luna_test_net_{}.nnue", seed));

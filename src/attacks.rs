@@ -81,6 +81,16 @@ fn get_magics() -> &'static MagicTables {
     MAGICS.get_or_init(build_magic_tables)
 }
 
+/// Forces both `TABLES` and `MAGICS` to initialize right now, instead of
+/// lazily on whichever call happens to touch them first (previously the
+/// very first search, silently absorbing ~636ms of one-time setup into
+/// that search's own reported time/nodes). Call this once at startup,
+/// before the UCI loop, so "go" timings reflect actual search time only.
+pub fn init_attack_tables() {
+    get_tables();
+    get_magics();
+}
+
 #[inline(always)]
 fn magic_index(entry: &MagicEntry, occ: Bitboard) -> usize {
     let blockers = occ & entry.mask;

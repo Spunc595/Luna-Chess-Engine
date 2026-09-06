@@ -206,6 +206,24 @@ impl<'a> Reader<'a> {
 /// of only fixing it for builds that opt in.
 static EMBEDDED_NNUE: &[u8] = include_bytes!("../resources/net.bin");
 
+/// See the SIMD safety gate comment in `parse` below for why this exact
+/// bound (`32767 / QA`, floored) exists.
+const MAX_SAFE_OUTPUT_WEIGHT: i16 = 128;
+
+/// Returns `Some(max_abs_weight)` if any output weight exceeds
+/// `MAX_SAFE_OUTPUT_WEIGHT`, `None` if the whole table is safe. A free
+/// function (not inlined into `parse`) specifically so it can be unit
+/// tested directly against small synthetic weight tables, without having
+/// to construct a full 6.3MB network file just to exercise this check.
+fn max_abs_output_weight_over_limit(output_weights: &[[i16; HIDDEN]; 2]) -> Option<u16> {
+    let max_w = output_weights.iter()
+        .flat_map(|half| half.iter())
+        .map(|w| w.unsigned_abs())
+        .max()
+        .unwrap_or(0);
+    (max_w > MAX_SAFE_OUTPUT_WEIGHT as u16).then_some(max_w)
+}
+
 impl LunaNNUE {
     pub fn load(path: &str) -> Option<Self> {
         let mut file = File::open(path).ok()?;
@@ -265,6 +283,26 @@ impl LunaNNUE {
         // The remaining 62 bytes of trailing padding are intentionally
         // left unread (`r.pos` simply stops here) — the length check
         // above already guarantees the file is exactly the right size.
+
+        // SIMD SAFETY GATE: the AVX2 (`_mm256_mullo_epi16`) and NEON
+        // (`vmulq_s16`) kernels in `flatten` below multiply a clamped
+        // accumulator value (0..=QA) by an output weight using a
+        // TRUNCATING 16-bit multiply, then widen — see flatten_avx2's own
+        // doc comment. That truncation only stays lossless if
+        // `QA * |w| <= i16::MAX`, i.e. `|w| <= 32767 / 255 ≈ 128`. Every
+        // network this engine has ever shipped (akimbo's included, max
+        // observed |w| = 126) comfortably clears this; a differently
+        // trained/quantized network might not, and if it doesn't, x86 and
+        // ARM would silently compute wrong evaluations with no crash to
+        // notice by — rejecting the file outright here is far cheaper
+        // than debugging a "confusing SPRT result" later.
+        if let Some(max_w) = max_abs_output_weight_over_limit(&output_weights) {
+            println!(
+                "⚠️ NNUE: max |output_weight| = {} exceeds the SIMD-safe limit of {} (QA * |w| would overflow the AVX2/NEON kernels' truncating 16-bit multiply). Network rejected.",
+                max_w, MAX_SAFE_OUTPUT_WEIGHT
+            );
+            return None;
+        }
 
         println!(
             "✅ NNUE: loaded ({} input features, {} king buckets, {} hidden neurons).",
@@ -582,5 +620,40 @@ mod simd_tests {
             let dispatched = flatten(&acc, &weights);
             assert_eq!(scalar, dispatched, "dispatcher mismatched from scalar for seed={seed}");
         }
+    }
+}
+
+#[cfg(test)]
+mod safety_gate_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_weights_within_limit() {
+        let weights = [[MAX_SAFE_OUTPUT_WEIGHT; HIDDEN]; 2]; // exactly at the boundary
+        assert_eq!(max_abs_output_weight_over_limit(&weights), None);
+    }
+
+    #[test]
+    fn rejects_weight_one_over_limit() {
+        let mut weights = [[0i16; HIDDEN]; 2];
+        weights[1][500] = MAX_SAFE_OUTPUT_WEIGHT + 1;
+        assert_eq!(max_abs_output_weight_over_limit(&weights), Some((MAX_SAFE_OUTPUT_WEIGHT + 1) as u16));
+    }
+
+    #[test]
+    fn rejects_large_negative_weight_too() {
+        let mut weights = [[0i16; HIDDEN]; 2];
+        weights[0][0] = -(MAX_SAFE_OUTPUT_WEIGHT as i16) - 50;
+        assert_eq!(max_abs_output_weight_over_limit(&weights), Some((MAX_SAFE_OUTPUT_WEIGHT + 50) as u16));
+    }
+
+    #[test]
+    fn rejects_worst_case_i16_min() {
+        // i16::MIN's absolute value doesn't fit in i16 at all (unsigned_abs
+        // is exactly why this uses u16, not i16::abs()) — make sure the
+        // extreme case is handled rather than panicking.
+        let mut weights = [[0i16; HIDDEN]; 2];
+        weights[0][0] = i16::MIN;
+        assert_eq!(max_abs_output_weight_over_limit(&weights), Some(32768));
     }
 }

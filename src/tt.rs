@@ -72,12 +72,21 @@ pub struct TranspositionTable {
     generation: u8,
 }
 
+fn real_size_for(mb_size: usize) -> usize {
+    let size = (mb_size * 1024 * 1024) / std::mem::size_of::<Bucket>();
+    let mut real_size = 1;
+    // `real_size * 2 <= size`, not `real_size <= size`: for any power-
+    // of-two `size` (the common case — Hash is usually given in
+    // round MB values), the old `<=` condition kept doubling one step
+    // past `size` itself, silently allocating double the requested
+    // Hash every time.
+    while real_size * 2 <= size { real_size *= 2; }
+    real_size
+}
+
 impl TranspositionTable {
     pub fn new(mb_size: usize) -> Self {
-        let size = (mb_size * 1024 * 1024) / std::mem::size_of::<Bucket>();
-        let mut real_size = 1;
-        while real_size <= size { real_size *= 2; }
-
+        let real_size = real_size_for(mb_size);
         TranspositionTable {
             // `vec![Bucket {...}; n]` isn't available: atomics deliberately
             // don't implement `Clone` (that would defeat their purpose).
@@ -87,6 +96,22 @@ impl TranspositionTable {
             mask: real_size - 1,
             generation: 1,
         }
+    }
+
+    /// Fallible counterpart to `new`, for the UCI `setoption Hash` path: a
+    /// tournament GUI or mobile host can request more memory than the
+    /// device actually has, and the default allocator aborts the whole
+    /// process on an allocation failure it can't recover from — `new`
+    /// would take the engine down mid-game with no chance to fall back to
+    /// the table it already had. `try_reserve_exact` surfaces the failure
+    /// as a normal `Err` instead, so the caller can just keep the current
+    /// table and report the problem over UCI rather than crashing.
+    pub fn try_new(mb_size: usize) -> Option<Self> {
+        let real_size = real_size_for(mb_size);
+        let mut entries: Vec<Bucket> = Vec::new();
+        entries.try_reserve_exact(real_size).ok()?;
+        entries.extend((0..real_size).map(|_| Bucket { key_xor: AtomicU64::new(0), data: AtomicU64::new(0) }));
+        Some(TranspositionTable { entries, mask: real_size - 1, generation: 1 })
     }
 
     pub fn clear(&mut self) {
