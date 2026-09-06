@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # Debug build first: catches issues release's optimizations/overflow
+      # checks being off can hide (e.g. the movegen.rs subtract-with-overflow
+      # panic that only ever showed up in a debug build).
+      - name: Build (debug)
+        run: cargo build --workspace
+
+      - name: Build (release)
+        run: cargo build --workspace --release
+
+      - name: Test
+        run: cargo test --workspace --release
+
+      - name: Perft
+        run: cargo run --release --example perft_check
