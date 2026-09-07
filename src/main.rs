@@ -201,6 +201,7 @@ fn main() {
                     let mut own_time: Option<u128> = None;
                     let mut own_inc: u128 = 0;
                     let mut movetime_token: Option<u128> = None;
+                    let mut nodes_token: Option<u64> = None;
 
                     // First pass: we only collect the tokens, without
                     // computing `movetime` yet. Needed because winc/binc
@@ -251,6 +252,10 @@ fn main() {
                                 movetime_token = parts[i + 1].parse().ok();
                                 i += 2;
                             }
+                            "nodes" if has_value => {
+                                nodes_token = parts[i + 1].parse().ok();
+                                i += 2;
+                            }
                             // "ponder", "infinite", "searchmoves <...>" and
                             // any unrecognized token: one token at a time,
                             // without consuming a nonexistent value.
@@ -281,6 +286,14 @@ fn main() {
                                 let inc_contribution = own_inc * 8 / 10;
                                 (base + inc_contribution).min(t.saturating_sub(50)).max(1)
                             }
+                            // "go nodes N" with no time info at all (the
+                            // normal case for reproducible, node-capped
+                            // self-play data generation): a generous
+                            // wall-clock safety net, not the usual 5000ms
+                            // default, so the node cap below is what
+                            // actually decides when to stop, not an
+                            // unrelated short timeout.
+                            None if nodes_token.is_some() => 600_000,
                             None => 5000,
                         },
                     };
@@ -298,6 +311,7 @@ fn main() {
                     // stdout+flush.
                     let best_m = if num_threads <= 1 {
                         let mut info = SearchInfo::new(movetime, depth as i32);
+                        info.max_nodes = nodes_token;
                         let (best_m, _score, _depth) = iterative_deepening(&mut s, &mut info, &tt, &shared_history, &z, nnue.as_ref(), &params, 1, true);
                         best_m
                     } else {
@@ -329,6 +343,7 @@ fn main() {
                                     let z_ref = &z;
                                     scope.spawn(move || {
                                         let mut info = SearchInfo::new(movetime, depth as i32);
+                                        info.max_nodes = nodes_token;
                                         // Diversity (round 1, kept simple):
                                         // secondary threads skip the depth-1
                                         // iteration, cheap and largely

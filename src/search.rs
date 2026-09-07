@@ -220,6 +220,12 @@ pub struct SearchInfo {
     /// the same reason `killer_moves` is (see `SharedHistory`'s doc
     /// comment) — kept here, not promoted to `SharedHistory`.
     pub counter_moves: [[Mossa; 64]; 6],
+    /// UCI "go nodes N": stop once `nodes` reaches this count, independent
+    /// of `hard_limit`/wall-clock time. Used for reproducible, machine-
+    /// load-independent self-play data generation (see the NNUE training
+    /// pipeline notes) — `None` means no node cap, the normal case for
+    /// real games under time control.
+    pub max_nodes: Option<u64>,
 }
 
 impl SearchInfo {
@@ -234,6 +240,7 @@ impl SearchInfo {
             stopped: false,
             killer_moves: [[Mossa::null(); 2]; MAX_PLY],
             counter_moves: [[Mossa::null(); 64]; 6],
+            max_nodes: None,
         }
     }
 
@@ -256,6 +263,11 @@ impl SearchInfo {
         let elapsed = self.start_time.elapsed().as_millis();
         if elapsed >= self.hard_limit {
             self.stopped = true;
+        }
+        if let Some(cap) = self.max_nodes {
+            if self.nodes >= cap {
+                self.stopped = true;
+            }
         }
         self.stopped
     }
