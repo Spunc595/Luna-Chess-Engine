@@ -863,6 +863,17 @@ fn quiescence(
     nnue: Option<&LunaNNUE>,
     params: &EvalParams
 ) -> i32 {
+    // Unlike negamax, quiescence can recurse arbitrarily deep through a
+    // long forced-capture chain (common in simplified endgames) WITHOUT
+    // ever returning to a negamax node — the only place that previously
+    // called check_time(). On a pure "go nodes N" search with no external
+    // wall-clock supervisor (e.g. a standalone annotator script, unlike
+    // self-play under cutechess-cli which enforces its own per-move
+    // deadline), that meant the node/time budget was read but never
+    // refreshed once inside quiescence, so a long capture sequence could
+    // run for the full hard_limit (up to 600s under "go nodes" with no
+    // time info) or effectively hang. Same bail-out convention as negamax.
+    if info.check_time() { return 0; }
     info.nodes += 1;
     // NNUE if available, otherwise PST (see eval() above)
     let stand_pat = eval(board, nnue, params);
