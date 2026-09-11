@@ -118,6 +118,11 @@ fn main() {
     // behavior unless a UCI GUI/wrapper explicitly asks for more via
     // "setoption name Threads value N").
     let mut num_threads: usize = 1;
+    // "setoption name UseNNUE value false" (see the "uci"/"setoption"
+    // handlers below): forces classical PST evaluation regardless of
+    // whether a network is loaded. Defaults to true — unchanged behavior
+    // for every existing UCI caller that never sets this option.
+    let mut use_nnue: bool = true;
     let mut s = Scacchiera::new_iniziale(z);
     s.refresh_nnue((*nnue).as_ref());
 
@@ -148,6 +153,17 @@ fn main() {
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 512");
                 println!("option name Threads type spin default 1 min 1 max 64");
+                // Runtime toggle for NNUE evaluation, independent of whether
+                // a network actually loaded. Needed because the embedded
+                // net (see nnue.rs) always loads successfully unless its
+                // bytes are corrupt: "no external NNUE file" is no longer a
+                // way to force classical-only evaluation. Self-play used to
+                // train a TCEC-compliant net needs exactly that — labels
+                // must come from Luna's own search, seeded from classical
+                // PST evaluation, not from a net trained on non-compliant
+                // data — so this needs an explicit, provable switch rather
+                // than an implicit fallback.
+                println!("option name UseNNUE type check default true");
                 println!("uciok");
             }
             "isready" => println!("readyok"),
@@ -202,6 +218,22 @@ fn main() {
                     if let Ok(n) = parts[4].parse::<usize>() {
                         num_threads = n.max(1);
                     }
+                } else if parts.len() >= 5 && parts[2] == "UseNNUE" {
+                    join_pending(&mut search_state);
+                    use_nnue = parts[4] == "true";
+                    // Explicit, greppable proof this took effect — not
+                    // inferred from silence. A preflight check (or the
+                    // shard manifest) can point at this exact line instead
+                    // of assuming the option was honored.
+                    if use_nnue {
+                        println!("info string UseNNUE=true — NNUE evaluation active (if a network is loaded)");
+                    } else {
+                        println!("info string UseNNUE=false — NNUE evaluation DISABLED, using classic PST evaluation only");
+                    }
+                    // Recompute from the (now classical-only, if disabled)
+                    // evaluation source: the accumulator otherwise still
+                    // reflects whatever was loaded at startup.
+                    s.refresh_nnue(if use_nnue { (*nnue).as_ref() } else { None });
                 }
             }
             "position" => {
@@ -216,13 +248,19 @@ fn main() {
                     }
                     // Full recompute only once for the new position; from
                     // here on esegui_mossa keeps the accumulator updated
-                    // incrementally.
-                    s.refresh_nnue((*nnue).as_ref());
+                    // incrementally. Gated on `use_nnue`, same reasoning as
+                    // the "setoption UseNNUE" handler above: with it
+                    // disabled, the accumulator must never be fed real
+                    // network weights, or a stray code path reading it
+                    // directly (instead of going through `eval`/search's
+                    // own use_nnue gate) would silently leak NNUE back in.
+                    let nnue_ref = if use_nnue { (*nnue).as_ref() } else { None };
+                    s.refresh_nnue(nnue_ref);
                     if let Some(m_idx) = parts.iter().position(|&p| p == "moves") {
                         for &m_str in &parts[m_idx + 1..] {
                             let moves = s.genera_mosse_legali(z);
                             for m in moves {
-                                if m.to_uci() == m_str { s.esegui_mossa(&m, z, (*nnue).as_ref()); break; }
+                                if m.to_uci() == m_str { s.esegui_mossa(&m, z, nnue_ref); break; }
                             }
                         }
                     }
@@ -404,7 +442,12 @@ fn main() {
                     let mut board_clone = s.clone();
                     let tt_arc = Arc::clone(&tt);
                     let sh_arc = Arc::clone(&shared_history);
-                    let nnue_arc = Arc::clone(&nnue);
+                    // With UseNNUE disabled, hand the search thread a
+                    // network-free Arc rather than gating each eval call:
+                    // one decision here, made once per "go", instead of a
+                    // use_nnue check that would need to be threaded through
+                    // every downstream call site (and could be missed).
+                    let nnue_arc: Arc<Option<LunaNNUE>> = if use_nnue { Arc::clone(&nnue) } else { Arc::new(None) };
                     let params_arc = Arc::clone(&params);
                     let stop_flag_thread = Arc::clone(&stop_flag);
                     let threads = num_threads;
@@ -489,9 +532,13 @@ fn main() {
             "eval" => {
                  // search::eval, not a direct call to NNUE/PST: this way
                  // the debug command reflects exactly what the search sees,
-                 // not an intermediate stage.
-                 let score = search::eval(&s, (*nnue).as_ref(), &params);
-                 println!("Evaluation: {} cp", score);
+                 // not an intermediate stage. Gated on use_nnue for the
+                 // same reason as everywhere else it's threaded through —
+                 // this is also the preflight probe a self-play harness can
+                 // use to prove UseNNUE=false actually changed the
+                 // evaluation source (compare this output before/after).
+                 let score = search::eval(&s, if use_nnue { (*nnue).as_ref() } else { None }, &params);
+                 println!("Evaluation: {} cp (NNUE {})", score, if use_nnue { "active" } else { "disabled: classic PST" });
             }
             _ => {}
         }
