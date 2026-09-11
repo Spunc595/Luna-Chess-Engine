@@ -5,8 +5,8 @@ use crate::nnue::LunaNNUE;
 use crate::evaluation::{evaluate, EvalParams}; // Imported EvalParams
 use crate::movegen::see;
 use std::time::Instant;
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::{Arc, OnceLock};
 
 pub const MAX_PLY: usize = 64;
 
@@ -226,6 +226,14 @@ pub struct SearchInfo {
     /// pipeline notes) — `None` means no node cap, the normal case for
     /// real games under time control.
     pub max_nodes: Option<u64>,
+    /// Set from the UCI "stop" command, checked alongside the time/node
+    /// limits below. Lets the main thread interrupt an in-progress search
+    /// from outside without touching `SearchInfo` directly (it lives on a
+    /// separate search thread) — a plain `Arc<AtomicBool>` shared between
+    /// the UCI command loop and the search. Defaults to a fresh, never-set
+    /// flag so callers that don't need external stop (tests, the tuner)
+    /// are unaffected.
+    pub stop_signal: Arc<AtomicBool>,
 }
 
 impl SearchInfo {
@@ -241,6 +249,7 @@ impl SearchInfo {
             killer_moves: [[Mossa::null(); 2]; MAX_PLY],
             counter_moves: [[Mossa::null(); 64]; 6],
             max_nodes: None,
+            stop_signal: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -268,6 +277,9 @@ impl SearchInfo {
             if self.nodes >= cap {
                 self.stopped = true;
             }
+        }
+        if self.stop_signal.load(Ordering::Relaxed) {
+            self.stopped = true;
         }
         self.stopped
     }

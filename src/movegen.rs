@@ -206,9 +206,16 @@ pub fn genera_mosse(s: &Scacchiera) -> Vec<Mossa> {
         let to_sq = if us == Colore::Bianco { sq + 8 } else { sq - 8 };
         if to_sq < 64 && (all_pieces & (1 << to_sq)) == 0 {
             add_pawn_move(sq, to_sq, prom_rank, &mut mosse);
-            let double_sq = if us == Colore::Bianco { sq + 16 } else { sq - 16 };
-            if (sq / 8) == start_rank && (all_pieces & (1 << double_sq)) == 0 {
-                mosse.push(Mossa::new(sq, double_sq, MoveFlag::DoublePawnPush, None));
+            // Compute double_sq only once we know sq is on the start rank:
+            // otherwise `sq - 16` underflows in usize for any black pawn
+            // already advanced past its start rank (e.g. one already on
+            // rank 2, a completely ordinary midgame position) before the
+            // start-rank guard below ever gets a chance to discard it.
+            if sq / 8 == start_rank {
+                let double_sq = if us == Colore::Bianco { sq + 16 } else { sq - 16 };
+                if (all_pieces & (1 << double_sq)) == 0 {
+                    mosse.push(Mossa::new(sq, double_sq, MoveFlag::DoublePawnPush, None));
+                }
             }
         }
 
