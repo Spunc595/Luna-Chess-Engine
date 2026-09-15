@@ -11,12 +11,10 @@ pub enum Bound {
 
 #[derive(Clone, Copy, Debug)]
 pub struct TTEntry {
-    pub key: u64,
     pub score: i32,
     pub move_data: u16, // We only store the move's raw data
     pub depth: u8,
     pub bound: u8,      // Bound converted to u8 for compactness
-    pub generation: u8,
 }
 
 /// Packs (score, move_data, depth, bound, generation) into a single u64:
@@ -114,6 +112,18 @@ impl TranspositionTable {
         Some(TranspositionTable { entries, mask: real_size - 1, generation: 1 })
     }
 
+    /// Advances the generation counter: call once per "go", before the
+    /// search starts. Without this, `store`'s `old_generation != self.generation`
+    /// replacement branch never fires — every entry is written under the
+    /// same generation value the table was constructed with, so aging
+    /// silently does nothing and only the depth-based replacement rule
+    /// ever kicks in. Wraps past 255 back to 1, not 0: 0 is the value an
+    /// empty (never-written) slot unpacks to, so a live generation must
+    /// never collide with it.
+    pub fn new_search(&mut self) {
+        self.generation = if self.generation == u8::MAX { 1 } else { self.generation + 1 };
+    }
+
     pub fn clear(&mut self) {
         for bucket in &self.entries {
             bucket.key_xor.store(0, Ordering::Relaxed);
@@ -158,8 +168,8 @@ impl TranspositionTable {
         if key_xor ^ data != key {
             return None;
         }
-        let (score, move_data, depth, bound, generation) = unpack_data(data);
-        Some(TTEntry { key, score, move_data, depth, bound, generation })
+        let (score, move_data, depth, bound, _generation) = unpack_data(data);
+        Some(TTEntry { score, move_data, depth, bound })
     }
 
     // Updated to accept search.rs's parameters
@@ -290,5 +300,45 @@ mod pack_tests {
         // Probed back at the original ply, it must round-trip exactly.
         let got_at_original_ply = tt.probe(key, 1, ply_at_store, -50_000, 50_000).unwrap();
         assert_eq!(got_at_original_ply, raw_score_at_store);
+    }
+
+    /// `new_search()` must actually change what `store` sees as "the
+    /// current generation" — otherwise the generation-mismatch branch in
+    /// `store` (`old_generation != self.generation`) can never fire and
+    /// aging silently does nothing (the bug this test guards against).
+    #[test]
+    fn new_search_advances_generation_and_enables_aging() {
+        let mut tt = TranspositionTable::new(1);
+        let key = 0xC0FF_EE00_0000_0001u64;
+
+        // Deep entry stored under generation 1.
+        tt.store(key, 10, 0, 100, Bound::Exact, Mossa::null());
+        assert_eq!(tt.probe(key, 10, 0, -50_000, 50_000), Some(100));
+
+        // A same-generation, SHALLOWER store must be rejected (depth-based
+        // replacement only) -- sanity check that this test's setup
+        // actually exercises the branch it claims to.
+        tt.store(key, 3, 0, 200, Bound::Exact, Mossa::null());
+        assert_eq!(tt.probe(key, 10, 0, -50_000, 50_000), Some(100));
+
+        // Advance to a new generation: a shallower store must now be
+        // ACCEPTED purely because the generation differs, even though
+        // depth alone would have rejected it above.
+        tt.new_search();
+        tt.store(key, 3, 0, 300, Bound::Exact, Mossa::null());
+        assert_eq!(tt.probe(key, 3, 0, -50_000, 50_000), Some(300));
+    }
+
+    /// Generation must wrap past `u8::MAX` back to 1, not 0: 0 is what an
+    /// empty slot's packed data unpacks to, so a live generation value
+    /// colliding with it would make `store`'s "same generation" check
+    /// treat a genuinely-old entry as current.
+    #[test]
+    fn generation_wraps_to_one_not_zero() {
+        let mut tt = TranspositionTable::new(1);
+        for _ in 0..300 {
+            tt.new_search();
+        }
+        assert_ne!(tt.generation, 0);
     }
 }

@@ -391,7 +391,7 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
         return 13000;
     }
 
-    // 4. Killer moves (medium priority)[cite: 16]
+    // 4. Killer moves (medium priority)
     if !m.is_cattura() && !m.is_promozione() {
         if m.data == killers[0].data && !killers[0].is_null() { return 12000; }
         if m.data == killers[1].data && !killers[1].is_null() { return 11000; }

@@ -448,6 +448,11 @@ fn flatten_scalar(acc: &[i16; HIDDEN], weights: &[i16; HIDDEN]) -> i32 {
     sum
 }
 
+// The AVX2 (`mod simd`) and NEON (`mod simd_aarch64`) kernels below were
+// contributed by Jim Ablett, who also built cross-platform release
+// binaries for the engine — both offered and shared on the TalkChess
+// forum. See the README's Acknowledgments section.
+
 #[inline]
 fn flatten(acc: &[i16; HIDDEN], weights: &[i16; HIDDEN]) -> i32 {
     #[cfg(target_arch = "x86_64")]

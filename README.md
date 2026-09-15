@@ -51,6 +51,8 @@ Luna's default network (`resources/net.bin`) is committed to this repository and
 
 An external `luna.nnue` file placed **next to the executable**, if present and valid, still takes priority over the embedded network — useful for trying a different/updated net without recompiling. Without it, or if a real NNUE ends up unusable for any reason, Luna automatically falls back to its classical evaluation — it never fails to start.
 
+**Which network is actually inside this binary**: as of this release, `resources/net.bin` is akimbo's network (MIT-licensed, see Acknowledgments below), not a self-trained one. Luna also has its own from-scratch, self-trained network lineage (gen1, gen2, ...), bootstrapped entirely from the engine's own search/evaluation with no external label source — see the [`luna-nnue`](https://github.com/Spunc595/Luna-CE-NNUE) repository for the full provenance, compliance declaration, and measurements. That self-trained line isn't yet the one embedded by default: its measured playing strength hasn't been compared against akimbo's yet (that measurement is planned, not done), and switching the shipped default ahead of having that number would mean picking a network's real-world strength by assumption rather than by measurement. This section will be updated if and when that changes.
+
 ## Running
 
 Luna speaks the UCI protocol and works with any compliant GUI or wrapper (Arena, CuteChess, lichess-bot, etc.). Point your GUI at the compiled binary and it's ready to play.
@@ -67,6 +69,8 @@ Luna speaks the UCI protocol and works with any compliant GUI or wrapper (Arena,
 ## Acknowledgments
 
 Luna's search and move-ordering heuristics draw on techniques and ideas documented across the open-source computer chess community, including [Stockfish](https://github.com/official-stockfish/Stockfish), [Reckless](https://github.com/codedeliveryservice/Reckless), and [Viridithas](https://github.com/cosmobobak/viridithas).
+
+Luna's AVX2 (x86_64) and NEON (AArch64) SIMD kernels for NNUE inference were contributed by **Jim Ablett** on the TalkChess forum, who also built and shared cross-platform release binaries for the engine.
 
 Luna's default NNUE architecture and network (`resources/net.bin`) are ported from and use, respectively, [akimbo](https://github.com/jw1912/akimbo) by Jamie Whiting, used under the MIT License:
 

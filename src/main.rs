@@ -131,7 +131,7 @@ fn main() {
     // the engine is idle. See `join_pending` above.
     let mut search_state: Option<(JoinHandle<()>, Arc<AtomicBool>)> = None;
 
-    println!("Luna CE v3.1.3");
+    println!("Luna CE v3.1.4");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
@@ -149,7 +149,7 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v3.1.3");
+                println!("id name Luna CE v3.1.4");
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 512");
                 println!("option name Threads type spin default 1 min 1 max 64");
@@ -273,6 +273,18 @@ fn main() {
                 // "stop" (or waits for "bestmove") before the next "go"
                 // anyway — this is just defensive cleanup for that case.
                 join_pending(&mut search_state);
+
+                // Advance the TT generation once per "go", so `store`'s
+                // aging-based replacement (tt.rs) actually has two
+                // different generation values to compare instead of
+                // always comparing the constructor's value to itself.
+                // Same `Arc::get_mut` access pattern as `clear()` above:
+                // `join_pending` just joined the only other possible
+                // owner of this Arc, so this is safe, uncontended
+                // exclusive access.
+                if let Some(tt_mut) = Arc::get_mut(&mut tt) {
+                    tt_mut.new_search();
+                }
 
                 // Cleared before every search, not just on "ucinewgame":
                 // matches the pre-multi-threading behavior (a fresh
