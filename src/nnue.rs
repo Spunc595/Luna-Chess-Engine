@@ -148,7 +148,18 @@ fn feature_index(perspective_black: bool, own_ksq: usize, piece_white: bool, pc:
 // any risk of a debug-build overflow panic — release builds wrap silently
 // either way, so this only removes a footgun, it doesn't change behavior
 // where it already worked.
+// 64-byte alignment (one cache line): a 32-byte SIMD load only costs more
+// than an aligned one when it straddles two cache lines. On a modern x86
+// core a misaligned-but-single-line load is free, so this buys nothing
+// there; the case it helps is any 32-byte load that would otherwise land
+// on a line boundary within the 4096-byte white/black arrays, which
+// happens for a fraction of accumulator offsets. Small effect, measured
+// separately with a node-count-invariant depth bench (this patch changes
+// speed, not search behavior) rather than with games, whose Elo
+// resolution can't see a change this size. Matches akimbo's own
+// `#[repr(C, align(64))]` on this type.
 #[derive(Clone, Copy, Debug)]
+#[repr(C, align(64))]
 pub struct Accumulator {
     pub white: [i16; HIDDEN],
     pub black: [i16; HIDDEN],
