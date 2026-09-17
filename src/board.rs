@@ -255,8 +255,19 @@ impl Scacchiera {
     /// real game were not draws at all, silently distorting any
     /// line that revisited the same position even once.
     pub fn is_repetition(&self) -> bool {
+        // Bounded by `rule_50`, not the whole game history: a repetition
+        // can never cross an irreversible move (capture or pawn move,
+        // both reset `rule_50` to 0), so the useful window is exactly
+        // `rule_50` half-moves back. Scanning further can never find an
+        // additional match — the previous unbounded scan touched ~90
+        // UndoData entries per node by move 45, almost always to
+        // completion, since the early-exit needs count >= 2, which rarely
+        // happens. `fai_mossa_nulla` deliberately does not touch
+        // `rule_50` (see board.rs), which is what keeps this bound valid
+        // across null moves too.
         let mut count = 0;
-        for undo in self.history.iter().rev() {
+        let limite = self.rule_50 as usize;
+        for undo in self.history.iter().rev().take(limite) {
             if undo.hash == self.hash {
                 count += 1;
             }
