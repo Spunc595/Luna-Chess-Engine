@@ -424,7 +424,11 @@ impl Scacchiera {
         // OTHER perspective (whose own king didn't move) already received
         // a correct incremental update from those same calls above.
         if moved_p == 5 {
-            if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
+            if let Some(net) = nnue {
+                if !crate::nnue::same_feature_mapping(!us_white, from, to) {
+                    self.refresh_nnue_perspective(net, us_white);
+                }
+            }
         }
 
         if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
@@ -499,7 +503,11 @@ impl Scacchiera {
         // now on the restored position (the King has already returned to `from`
         // above).
         if moved_p == 5 {
-            if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
+            if let Some(net) = nnue {
+                if !crate::nnue::same_feature_mapping(!us_white, from, to) {
+                    self.refresh_nnue_perspective(net, us_white);
+                }
+            }
         }
 
         self.turno = Colore::from_index(us);
@@ -589,7 +597,11 @@ impl Scacchiera {
         // Symmetric to esegui_mossa: the King having returned to `from` above implies
         // a full recalculation of its own perspective.
         if final_p == 5 {
-            if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
+            if let Some(net) = nnue {
+                if !crate::nnue::same_feature_mapping(!us_white, from, to) {
+                    self.refresh_nnue_perspective(net, us_white);
+                }
+            }
         }
 
         // 3. Restore counters and hash keys

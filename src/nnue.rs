@@ -106,6 +106,19 @@ fn get_bucket(perspective_black: bool, own_ksq: usize) -> usize {
     BUCKETS[own_ksq ^ perspective_flip(perspective_black, own_ksq)]
 }
 
+/// True if a King move `from` -> `to` leaves this perspective's ENTIRE
+/// feature mapping unchanged: same horizontal-mirror orientation AND same
+/// king-bucket. When it does, the accumulator half needs no refresh at
+/// all -- the King is itself an ordinary feature, already handled
+/// incrementally by remove_piece/add_piece. Only a mirror flip (the king
+/// crossing the d/e file boundary) or a bucket change actually
+/// invalidates every row of that half.
+#[inline(always)]
+pub fn same_feature_mapping(perspective_black: bool, from: usize, to: usize) -> bool {
+    perspective_flip(perspective_black, from) == perspective_flip(perspective_black, to)
+        && get_bucket(perspective_black, from) == get_bucket(perspective_black, to)
+}
+
 /// Base row offset (before adding the piece's own oriented square) into
 /// the `768 * NUM_BUCKETS`-row feature-weight table for a piece of color
 /// `piece_white` and type `pc` (Luna's own 0=Pawn..5=King indexing,
