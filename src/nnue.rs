@@ -158,7 +158,7 @@ fn feature_index(perspective_black: bool, own_ksq: usize, piece_white: bool, pc:
 // speed, not search behavior) rather than with games, whose Elo
 // resolution can't see a change this size. Matches akimbo's own
 // `#[repr(C, align(64))]` on this type.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[repr(C, align(64))]
 pub struct Accumulator {
     pub white: [i16; HIDDEN],
