@@ -1,2 +1,7 @@
+# NOTE for whoever starts distributing binaries (planned: a Linux build from 4.0.0): a DISTRIBUTED binary
+# must NOT be built with `-C target-cpu=native`. It is fine for a build you make for yourself, but in a binary
+# somebody else downloads it demands the instruction set of the machine that built it, and it makes the
+# runtime AVX2 detection in src/nnue.rs pointless: that detection exists for the machines that lack AVX2.
+
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-cpu=native"]

@@ -45,6 +45,8 @@ cargo build --release
 
 The optimized binary is produced at `target/release/luna` (`luna.exe` on Windows).
 
+**About the releases**: each release contains the source code and an Android ARM64 build. For every other platform, compile it yourself with `cargo build --release` as above; a Linux build will be added to the releases starting with 4.0.0.
+
 ### NNUE network
 
 Luna's default network (`resources/net.bin`) is committed to this repository and baked directly into the executable at compile time — a plain `cargo build --release` produces a fully self-contained binary, no extra download or file placement needed. This was a deliberate choice for reliability: some environments (e.g. Android tournament GUIs) only import a single engine file with no guarantee a companion file ends up next to it, and a missing/misplaced external network used to silently degrade Luna to its much weaker classical evaluation.
