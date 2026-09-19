@@ -42,7 +42,10 @@ pawn endgame, `8/5pk1/6p1/8/1P6/P4PKP/8/8 w - - 0 40`. Depth 18, 1 thread,
 
 1. `encoding="utf-8"` in `Popen`: on Windows the default decoding (cp1252)
    crashes on the emoji the engine prints at start-up.
-2. `go depth 18 movetime 600000` instead of a bare `go depth 18`. Without a
+2. `go depth 18 movetime 600000` instead of a bare `go depth 18` (the engine
+   itself was fixed afterwards, `54c97cd`: a bare `go depth N` no longer has a
+   time limit; the explicit movetime stays because it is correct on every
+   build, including the older ones this harness compares). Without a
    time budget the engine assumes 5000 ms (soft limit 3000 ms plus best-move
    stability) and stops one iteration short of the requested depth if the
    machine is slow; on the machine below it stopped at depth 17. The node count
@@ -135,3 +138,29 @@ Read this as a fact about this machine and this run, not as a verdict on the
 patches: on a quieter machine the floor would be smaller and more of the chain
 could become visible. The floor measured here (11.7% and 4.7%) is larger than
 the 4-7% seen in earlier runs, which is itself a sign the machine was noisy.
+
+## `bada048` (D0b): a separate, quieter run
+
+D0b (restore the King's accumulator half on unmake instead of recomputing it)
+was measured in its own run, against the commit before it (`5460686`, the FEN
+validation, which does not touch the search), not against `8b219b4`: the
+times below are **not comparable in absolute value** with the chain tables
+above, only the deltas inside this run are meaningful. Protocol `3 5`, both
+positions. Node count identical, as always: 1,329,589 (middlegame) and
+1,820,774 (endgame).
+
+| position | reference `5460686` t_min / t_med (ms) | `bada048` t_min / t_med (ms) | gain (t_min) | noise floor of this run | identical copy t_min / t_med (ms) |
+|---|---|---|---|---|---|
+| middlegame | 2879 / 3122 | 2621 / 2757 | **+9.0%** | 2.3% | 2813 / 3228 |
+| pawn endgame | 4776 / 4928 | 4356 / 4522 | **+8.8%** | 0.9% | 4818 / 4976 |
+
+Both gains exceed the floor measured by the identical copy **in the same
+run**. It is a single run and the floor is itself an estimate (fewer samples
+under-estimate it), so read it as "clearly distinguishable in this run", not
+as a precise percentage.
+
+**Why the floor is measured on every run and never inherited.** The chain run
+above had a floor of 11.7% and 4.7% with a browser, VS Code and an antivirus
+resident on the machine; this run, on the same machine, had 2.3% and 0.9%. The
+floor is a property of the run, not of the harness, which is why the harness
+runs a byte-identical copy of the reference as an extra participant.
