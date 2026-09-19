@@ -333,6 +333,10 @@ fn main() {
                     let mut own_inc: u128 = 0;
                     let mut movetime_token: Option<u128> = None;
                     let mut nodes_token: Option<u64> = None;
+                    // `depth` already defaults to MAX_PLY, so "absent" cannot be told
+                    // from "assigned" by its value: a separate flag records that the
+                    // command really carried a depth.
+                    let mut depth_token_present = false;
                     let mut movestogo_token: Option<u128> = None;
 
                     // First pass: we only collect the tokens, without
@@ -378,6 +382,7 @@ fn main() {
                             }
                             "depth" if has_value => {
                                 depth = parts[i + 1].parse().unwrap_or(MAX_PLY as i32);
+                                depth_token_present = true;
                                 i += 2;
                             }
                             "movetime" if has_value => {
@@ -442,6 +447,14 @@ fn main() {
                             // actually decides when to stop, not an
                             // unrelated short timeout.
                             None if nodes_token.is_some() => 600_000,
+                            // "go depth N" with no time info at all: UCI says "search N
+                            // plies", so it must not carry a hidden time limit. With the
+                            // usual 5000 ms default the search stopped (soft limit 3000 ms,
+                            // hard limit 5000 ms) short of the requested depth and printed
+                            // `bestmove` with no sign of it, making fixed-depth analysis and
+                            // benchmarks depend on machine speed. Same safety-net treatment
+                            // as "go nodes" above; "stop" still interrupts immediately.
+                            None if depth_token_present => 600_000,
                             None => 5000,
                         },
                     };

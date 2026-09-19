@@ -71,7 +71,10 @@ def run_many(engine, kind, arg, depth, k):
         # 5000 ms budget (soft limit 3000 ms plus best-move stability), so on a
         # slower machine the search can stop one iteration short of `depth` and
         # the node count -- the gate of this benchmark -- would depend on how
-        # fast the machine is, not on the code being measured.
+        # fast the machine is, not on the code being measured. Current builds no
+        # longer do that (a bare `go depth N` has no time limit), but builds
+        # older than that fix still do, and this harness benchmarks chains that
+        # include them; an explicit movetime is correct on every build.
         send(pos); send("go depth %d movetime 600000" % depth)
         last = ""
         while True:
