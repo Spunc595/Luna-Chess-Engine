@@ -103,7 +103,12 @@ fn perspective_flip(perspective_black: bool, own_ksq: usize) -> usize {
 /// (`own_ksq`, NOT yet oriented) selects.
 #[inline(always)]
 fn get_bucket(perspective_black: bool, own_ksq: usize) -> usize {
-    BUCKETS[own_ksq ^ perspective_flip(perspective_black, own_ksq)]
+    // `& 63` is a defensive bound, not part of the mapping: for any real king
+    // square (0..=63) it changes nothing, but a board built without a king
+    // yields `trailing_zeros() == 64` upstream, and that must never index
+    // BUCKETS out of bounds (the UCI layer refuses such positions, this makes
+    // the NNUE path safe even if a Scacchiera is built some other way).
+    BUCKETS[(own_ksq ^ perspective_flip(perspective_black, own_ksq)) & 63]
 }
 
 /// True if a King move `from` -> `to` leaves this perspective's ENTIRE
@@ -444,7 +449,9 @@ impl LunaNNUE {
 #[inline(always)]
 fn king_square(board: &Scacchiera, perspective_white: bool) -> usize {
     let color_idx = if perspective_white { 0 } else { 1 };
-    (board.pezzi[5] & board.colori[color_idx]).trailing_zeros() as usize
+    // An empty bitboard gives 64: clamped to a valid square so that a board
+    // without a king can never index out of bounds (see `get_bucket`).
+    ((board.pezzi[5] & board.colori[color_idx]).trailing_zeros() as usize).min(63)
 }
 
 // ============================================================================

@@ -227,6 +227,126 @@ impl Scacchiera {
         board
     }
 
+    /// Validating counterpart of `from_fen`, used by the UCI `position`
+    /// handler: returns `Err(reason)` instead of building a board that is not a
+    /// chess position (and instead of panicking on a malformed string, which
+    /// `from_fen` can do). `from_fen` itself is unchanged and still trusts its
+    /// input; it is only called from here once the string has been checked.
+    ///
+    /// Checked: field syntax (8 ranks of exactly 8 files, valid piece letters,
+    /// side `w`/`b`, castling `-` or `KQkq` letters, en passant `-` or a square
+    /// on rank 6 (white to move) / 3 (black to move), numeric counters, no extra
+    /// fields); exactly one king per side; no pawns on the first or last rank;
+    /// at most 8 pawns and 16 pieces per side; the side NOT to move is not in
+    /// check (otherwise the side to move could capture a king); an en passant
+    /// square that is empty with the double-pushed pawn behind it.
+    /// NOT checked (accepted as given): castling rights against the king/rook
+    /// squares, and reachability of the position from the initial one.
+    pub fn try_from_fen(fen: &str, z: &ZobristKeys) -> Result<Self, String> {
+        let parts: Vec<&str> = fen.split_whitespace().collect();
+        if parts.is_empty() {
+            return Err("empty FEN".to_string());
+        }
+        if parts.len() > 6 {
+            return Err(format!("{} fields, expected at most 6", parts.len()));
+        }
+
+        let ranks: Vec<&str> = parts[0].split('/').collect();
+        if ranks.len() != 8 {
+            return Err(format!("piece placement has {} ranks, expected 8", ranks.len()));
+        }
+        for (i, rank) in ranks.iter().enumerate() {
+            let mut files = 0usize;
+            for c in rank.chars() {
+                if let Some(d) = c.to_digit(10) {
+                    if !(1..=8).contains(&d) {
+                        return Err(format!("rank {}: invalid empty-square count '{}'", 8 - i, c));
+                    }
+                    files += d as usize;
+                } else if Pezzo::from_char(c).is_some() {
+                    files += 1;
+                } else {
+                    return Err(format!("rank {}: invalid character '{}'", 8 - i, c));
+                }
+                if files > 8 {
+                    return Err(format!("rank {} has more than 8 files", 8 - i));
+                }
+            }
+            if files != 8 {
+                return Err(format!("rank {} has {} files, expected 8", 8 - i, files));
+            }
+        }
+
+        let white_to_move = match parts.get(1) {
+            None | Some(&"w") => true,
+            Some(&"b") => false,
+            Some(other) => return Err(format!("side to move '{}' is neither 'w' nor 'b'", other)),
+        };
+        if let Some(c) = parts.get(2) {
+            if *c != "-" && (c.is_empty() || !c.chars().all(|ch| "KQkq".contains(ch))) {
+                return Err(format!("castling field '{}' is not '-' or letters from KQkq", c));
+            }
+        }
+        let mut ep: Option<usize> = None;
+        if let Some(e) = parts.get(3) {
+            if *e != "-" {
+                let b = e.as_bytes();
+                let want_rank = if white_to_move { b'6' } else { b'3' };
+                if b.len() != 2 || !(b'a'..=b'h').contains(&b[0]) || b[1] != want_rank {
+                    return Err(format!(
+                        "en passant field '{}' is not '-' or a square on rank {}",
+                        e, want_rank as char
+                    ));
+                }
+                ep = Some(((b[1] - b'1') * 8 + (b[0] - b'a')) as usize);
+            }
+        }
+        for (idx, name) in [(4usize, "halfmove clock"), (5usize, "fullmove number")] {
+            if let Some(v) = parts.get(idx) {
+                if v.parse::<u32>().is_err() {
+                    return Err(format!("{} '{}' is not a non-negative integer", name, v));
+                }
+            }
+        }
+
+        // The string is now well-formed, so from_fen cannot panic on it.
+        let board = Self::from_fen(fen, z);
+
+        for (c, name) in [(Colore::Bianco, "white"), (Colore::Nero, "black")] {
+            let ci = c.indice();
+            let kings = (board.pezzi[5] & board.colori[ci]).count_ones();
+            if kings != 1 {
+                return Err(format!("{} has {} kings, expected exactly 1", name, kings));
+            }
+            if (board.pezzi[0] & board.colori[ci]).count_ones() > 8 {
+                return Err(format!("{} has more than 8 pawns", name));
+            }
+            if board.colori[ci].count_ones() > 16 {
+                return Err(format!("{} has more than 16 pieces", name));
+            }
+        }
+        const FIRST_AND_LAST_RANK: Bitboard = 0xFF00_0000_0000_00FF;
+        if board.pezzi[0] & FIRST_AND_LAST_RANK != 0 {
+            return Err("a pawn stands on the first or last rank".to_string());
+        }
+        if board.re_in_scacco(board.turno.opposto()) {
+            return Err("the side not to move is in check".to_string());
+        }
+        if let Some(sq) = ep {
+            let occ = board.occupazione();
+            let (pawn_sq, from_sq, pawn_color) = if white_to_move {
+                (sq - 8, sq + 8, Colore::Nero)
+            } else {
+                (sq + 8, sq - 8, Colore::Bianco)
+            };
+            let pawn_there = board.pezzi[0] & board.colori[pawn_color.indice()] & (1u64 << pawn_sq) != 0;
+            if occ & (1u64 << sq) != 0 || occ & (1u64 << from_sq) != 0 || !pawn_there {
+                return Err("en passant square inconsistent with the pawn placement".to_string());
+            }
+        }
+        Ok(board)
+    }
+
     pub fn new_iniziale(z: &ZobristKeys) -> Self {
         Self::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", z)
     }

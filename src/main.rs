@@ -244,7 +244,17 @@ fn main() {
                     } else if parts[1] == "fen" {
                         let m_idx = parts.iter().position(|&p| p == "moves").unwrap_or(parts.len());
                         let fen_str = parts[2..m_idx].join(" ");
-                        s = Scacchiera::from_fen(&fen_str, z);
+                        // A FEN that is not a chess position is refused and the
+                        // previous position kept, never a panic: a malformed
+                        // string (truncated FEN, missing king, ...) must not be
+                        // able to kill the process, whatever produced it.
+                        match Scacchiera::try_from_fen(&fen_str, z) {
+                            Ok(board) => s = board,
+                            Err(reason) => {
+                                println!("info string invalid FEN, position unchanged: {}", reason);
+                                continue;
+                            }
+                        }
                     }
                     // Full recompute only once for the new position; from
                     // here on esegui_mossa keeps the accumulator updated
