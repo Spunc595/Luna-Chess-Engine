@@ -36,7 +36,7 @@ use crate::board::Scacchiera;
 /// layer's two dot products each run over the full HIDDEN elements (no
 /// concatenation into a single doubled-width buffer like the old
 /// ClippedReLU int8 pipeline needed).
-const HIDDEN: usize = 1024;
+pub const HIDDEN: usize = 1024;
 
 /// Number of king buckets PER PERSPECTIVE, after horizontal mirroring (own
 /// king always mapped onto files a-d). Chosen by akimbo's own `BUCKETS`

@@ -35,6 +35,12 @@ const POSITIONS: &[(&str, &str)] = &[
     ("promotion_available", "8/P7/8/8/8/k7/8/7K w - - 0 1"),
     ("promotion_with_capture_available", "1n6/P7/8/8/8/k7/8/7K w - - 0 1"),
     ("castling_available_both_sides", "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"),
+    // King moves across the d/e file boundary (mapping-changing) that are
+    // ILLEGAL: the black rook on the d-file attacks d1/d2, so Kd1 and Kd2 are
+    // pseudo-legal but rejected by esegui_mossa after it has already built
+    // the accumulator half. Exercises the internal-undo path.
+    ("king_moves_into_check", "3rk3/8/8/8/8/8/8/4K3 w - - 0 1"),
+    ("black_king_moves_into_check", "4k3/8/8/8/8/8/8/3RK3 b - - 0 1"),
 ];
 
 #[derive(Clone, PartialEq, Debug)]
@@ -49,6 +55,10 @@ struct Snapshot {
     mezze_mosse: u32,
     ply: u32,
     nnue_acc: Accumulator,
+    /// Length of the side stack of saved accumulator halves: must come back to
+    /// the same value after any make/unmake pair, including the internal undo
+    /// of an illegal move.
+    king_stack_len: usize,
 }
 
 impl Snapshot {
@@ -64,6 +74,7 @@ impl Snapshot {
             mezze_mosse: board.mezze_mosse,
             ply: board.ply,
             nnue_acc: board.nnue_acc,
+            king_stack_len: board.king_acc_stack.len(),
         }
     }
 
@@ -165,7 +176,7 @@ fn sequence_rollback_restores_exact_intermediate_state() {
     let net = load_real_nnue();
     let mut rng = ChaCha8Rng::seed_from_u64(SEED);
 
-    const SEQUENCES_PER_POSITION: usize = 20; // * 9 positions = 180... see below
+    const SEQUENCES_PER_POSITION: usize = 20;
     const MIN_SEQUENCES_TOTAL: usize = 200;
     let mut sequences_run = 0usize;
 
@@ -175,10 +186,8 @@ fn sequence_rollback_restores_exact_intermediate_state() {
             sequences_run += 1;
         }
     }
-    // POSITIONS.len() * SEQUENCES_PER_POSITION = 9 * 20 = 180 < 200: top
-    // up on the two richest-in-legal-moves fixtures (most branching, most
-    // chance of exercising an under-tested combination) rather than
-    // padding every fixture evenly.
+    // Top-up on the two richest-in-legal-moves fixtures (most branching, most
+    // chance of exercising an under-tested combination): 11 fixtures x 20 + 2 x 10.
     for (name, fen) in [POSITIONS[0], POSITIONS[1]] {
         for _ in 0..10 {
             run_one_sequence(name, fen, &z, &net, &mut rng);
@@ -233,4 +242,49 @@ fn run_one_sequence(name: &str, fen: &str, z: &ZobristKeys, net: &LunaNNUE, rng:
             i + 1, played.len(), played[i].to_uci()
         );
     }
+}
+
+/// C1 on the path the legal-move tests never reach: PSEUDO-legal moves,
+/// including the illegal ones, made with the real net engaged. When
+/// `esegui_mossa` finds the move illegal it undoes it internally
+/// (`annulla_mossa_veloce`); the state -- accumulator and the side stack of
+/// saved King halves included -- must come back exactly, with no unmake call.
+#[test]
+fn illegal_pseudo_legal_moves_restore_exact_state_and_keep_the_stack_balanced() {
+    let z = ZobristKeys::default();
+    let net = load_real_nnue();
+    let mut rejected = 0usize;
+    let mut rejected_mapping_changing_king_moves = 0usize;
+
+    for (name, fen) in POSITIONS {
+        let mut board = Scacchiera::from_fen(fen, &z);
+        board.refresh_nnue(Some(&net));
+        for m in luna::movegen::genera_mosse(&board) {
+            let before = Snapshot::take(&board);
+            before.assert_nnue_engaged(&format!("{name}, before {}", m.to_uci()));
+            let is_king = board.pezzo_in(m.da()) == Some(5);
+            let played = board.esegui_mossa(&m, &z, Some(&net));
+            if played {
+                board.annulla_mossa(&m, &z, Some(&net));
+            } else {
+                rejected += 1;
+                let perspective_black = board.turno == Colore::Nero;
+                if is_king && !luna::nnue::same_feature_mapping(perspective_black, m.da(), m.a()) {
+                    rejected_mapping_changing_king_moves += 1;
+                }
+            }
+            assert_eq!(
+                before, Snapshot::take(&board),
+                "{name}: state differs after pseudo-legal move {} (played={played})",
+                m.to_uci()
+            );
+        }
+    }
+    // Non-vacuity: the fixtures really contain rejected moves, and among them
+    // King moves that change the mapping, i.e. the ones that push to the stack.
+    assert!(rejected > 0, "no pseudo-legal move was rejected: the internal-undo path was not exercised");
+    assert!(
+        rejected_mapping_changing_king_moves > 0,
+        "no rejected King move changed the feature mapping: the stack path was not exercised"
+    );
 }

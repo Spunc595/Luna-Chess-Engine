@@ -1,6 +1,6 @@
 use std::fmt;
 use crate::zobrist::ZobristKeys;
-use crate::nnue::{Accumulator, LunaNNUE};
+use crate::nnue::{Accumulator, LunaNNUE, HIDDEN};
 
 // Basic types
 pub type Bitboard = u64;
@@ -179,6 +179,17 @@ pub struct Scacchiera {
     /// it simply stays unused at zero: `search::eval()` in that
     /// case still falls back to the classic PST.
     pub nnue_acc: Accumulator,
+    /// Side stack of accumulator halves, one entry per King move (with the
+    /// net engaged) that changes the mover's feature mapping: `esegui_mossa`
+    /// saves the mover's half BEFORE touching it, and unmake restores it
+    /// instead of recomputing it from scratch (the value to restore is
+    /// simply the one from before the move). Deliberately NOT inside
+    /// `UndoData`: that would add ~2 KB to every move, not just these.
+    /// Pushed and popped under the same condition (`king_move_changes_mapping`),
+    /// so it stays balanced -- including on the path where `esegui_mossa`
+    /// finds the move illegal and undoes it internally
+    /// (`annulla_mossa_veloce`).
+    pub king_acc_stack: Vec<[i16; HIDDEN]>,
 }
 
 impl Scacchiera {
@@ -222,6 +233,7 @@ impl Scacchiera {
             hash: 0, mezze_mosse, history: Vec::with_capacity(256), ply: 0,
             rule_50: mezze_mosse,
             nnue_acc: Accumulator::zero(),
+            king_acc_stack: Vec::with_capacity(16),
         };
         board.hash = board.get_hash(z);
         board
@@ -499,6 +511,18 @@ impl Scacchiera {
             cattura_p: self.pezzo_in(to),
         };
 
+        // King move that changes the mover's feature mapping (see
+        // `nnue::same_feature_mapping`): its half gets recomputed below, and
+        // unmake will need the value it had BEFORE this move. Saved here,
+        // before anything touches that half; restored (not recomputed) by
+        // `restore_king_half`, under the exact same condition.
+        let king_saves_half = moved_p == 5
+            && nnue.is_some()
+            && !crate::nnue::same_feature_mapping(!us_white, from, to);
+        if king_saves_half {
+            self.king_acc_stack.push(if us_white { self.nnue_acc.white } else { self.nnue_acc.black });
+        }
+
         self.pezzi[moved_p] &= !(1 << from);
         self.colori[us] &= !(1 << from);
         self.hash ^= z.pezzi[us][moved_p][from];
@@ -543,12 +567,8 @@ impl Scacchiera {
         // by a full recalculation from scratch on the final position. The
         // OTHER perspective (whose own king didn't move) already received
         // a correct incremental update from those same calls above.
-        if moved_p == 5 {
-            if let Some(net) = nnue {
-                if !crate::nnue::same_feature_mapping(!us_white, from, to) {
-                    self.refresh_nnue_perspective(net, us_white);
-                }
-            }
+        if king_saves_half {
+            if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
         }
 
         if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
@@ -618,14 +638,15 @@ impl Scacchiera {
             }
         }
 
-        // Symmetric to the refresh in esegui_mossa: if the piece that moved was the
-        // King, its own perspective must be recalculated from scratch here too,
-        // now on the restored position (the King has already returned to `from`
-        // above).
+        // Symmetric to the save in esegui_mossa: if the piece that moved was the
+        // King and its feature mapping changed, its half is restored from the
+        // side stack -- AFTER the inverse incremental updates above (they also
+        // touch that half, on stale mapping assumptions; the restore overwrites
+        // them, restoring before them would not).
         if moved_p == 5 {
             if let Some(net) = nnue {
                 if !crate::nnue::same_feature_mapping(!us_white, from, to) {
-                    self.refresh_nnue_perspective(net, us_white);
+                    self.restore_king_half(net, us_white);
                 }
             }
         }
@@ -650,6 +671,21 @@ impl Scacchiera {
         let mut half = if white { self.nnue_acc.white } else { self.nnue_acc.black };
         net.refresh_one_perspective(&mut half, self, white);
         if white { self.nnue_acc.white = half; } else { self.nnue_acc.black = half; }
+    }
+
+    /// Undo of `king_saves_half` in `esegui_mossa`: puts back the mover's
+    /// accumulator half saved before the King move instead of recomputing it.
+    /// An empty stack would mean a make/unmake imbalance (a bug, caught by
+    /// tests/board_invariants.rs); the fallback recomputes the half from the
+    /// position, which is always correct and only slower, so a bug there can
+    /// never silently corrupt an evaluation.
+    fn restore_king_half(&mut self, net: &LunaNNUE, white: bool) {
+        match self.king_acc_stack.pop() {
+            Some(half) => {
+                if white { self.nnue_acc.white = half; } else { self.nnue_acc.black = half; }
+            }
+            None => self.refresh_nnue_perspective(net, white),
+        }
     }
 
     // --- NEW METHOD: official Unmake Move (used in search) ---
@@ -714,12 +750,14 @@ impl Scacchiera {
             }
         }
 
-        // Symmetric to esegui_mossa: the King having returned to `from` above implies
-        // a full recalculation of its own perspective.
+        // Symmetric to esegui_mossa: the King having returned to `from` above; if
+        // its feature mapping had changed, the half saved before the move is
+        // restored (after the inverse incremental updates above, which also touch
+        // it -- see annulla_mossa_veloce).
         if final_p == 5 {
             if let Some(net) = nnue {
                 if !crate::nnue::same_feature_mapping(!us_white, from, to) {
-                    self.refresh_nnue_perspective(net, us_white);
+                    self.restore_king_half(net, us_white);
                 }
             }
         }
