@@ -1,0 +1,137 @@
+# Benchmarks
+
+Speed measurements of Luna, and the harness that produces them
+(`scripts/bench_suite.py`). Everything here is **speed at unchanged
+search behaviour**: it says nothing about playing strength. The only number
+that counts as Elo is an SPRT, and no Elo is attributed to an NPS gain
+anywhere in this file.
+
+## The harness in one page
+
+```
+python scripts/bench_suite.py <reference-build> <build> [<build> ...] <rounds> <k>
+```
+
+* **The gate is the node count, not the time.** At fixed depth, a change
+  that preserves the search visits exactly the same nodes. The harness checks
+  this two ways: every build must be deterministic with itself, and every
+  build must match the reference (the first one given). A build that visits a
+  different number of nodes has changed the search, its times are not
+  comparable, and the run stops (exit code 1) after the first round.
+* **NPS and time are one measurement**, `NPS = nodes / time`, not two
+  independent confirmations.
+* The timer is the search time the engine itself reports (process start-up,
+  network parse and TT allocation, ~500 ms, must not dilute it). `k`
+  searches per process, `ucinewgame` between them.
+* The estimator is the **minimum**: noise on a shared machine is one-sided.
+  The median is printed as a check.
+* Builds are **interleaved** by round, because machine speed drifts over
+  minutes.
+* A **byte-identical copy of the reference** runs as an extra participant.
+  Its difference from its own original is the noise floor of *that run, on
+  that position, on that machine*. Nothing smaller than the floor is a
+  result. The floor is itself an estimate and varies from run to run; with few
+  samples it is **under**-estimated (fewer draws, not a more precise harness).
+
+Positions: a middlegame reached by 90 half-moves of engine self-play (long
+game history behind it, so repetition/history costs are visible) and a
+pawn endgame, `8/5pk1/6p1/8/1P6/P4PKP/8/8 w - - 0 40`. Depth 18, 1 thread,
+256 MB hash.
+
+### Two adaptations of the original script, both necessary
+
+1. `encoding="utf-8"` in `Popen`: on Windows the default decoding (cp1252)
+   crashes on the emoji the engine prints at start-up.
+2. `go depth 18 movetime 600000` instead of a bare `go depth 18`. Without a
+   time budget the engine assumes 5000 ms (soft limit 3000 ms plus best-move
+   stability) and stops one iteration short of the requested depth if the
+   machine is slow; on the machine below it stopped at depth 17. The node count
+   is the gate, so it must not depend on how fast the machine is. With the
+   budget forced the node counts are 1,329,589 and 1,820,774.
+
+### The gate has been seen to bite
+
+A mutant of the reference with `RFP_MARGIN_PER_PLY` changed from 110 to 115
+(`search.rs:49`), built in a separate copy and given to the harness together
+with the reference:
+
+```
+FERMO -- mediogioco: ./luna_mutant.exe visita 1,039,347 nodi, il riferimento
+./luna_ce2edb7.exe ne visita 1,329,589 (differenza -290,242).
+Il cancello di questo benchmark e' l'identita' del conteggio nodi: ...
+exit code = 1
+```
+
+## Chain of changes, measured
+
+Machine: AMD Ryzen 3 3200U (2 cores / 4 threads, mobile), Windows, laptop on
+AC power, HP power plan. **Not a quiet machine**: when it was inspected
+right after the run, a browser, VS Code (with an installer running) and an
+antivirus were resident; their load during the run was not controlled. Protocol `3 5` (3 rounds of 5 searches per build),
+both positions, one run.
+
+Builds (each from a clean archive of the commit, `cargo build --release`):
+
+| commit | change |
+|---|---|
+| `8b219b4` | v3.1.4 (reference) |
+| `1239e5c` | + accumulator aligned to 64 bytes |
+| `427a68b` | + `is_repetition()` bounded by `rule_50` |
+| `a9bdac3` | + perft and make/unmake invariant test suites |
+| `ce2edb7` | + no accumulator refresh on King moves that keep the feature mapping |
+
+`a9bdac3` adds test files and **one line in `src/nnue.rs`** (a `PartialEq`
+derive on `Accumulator`, needed by the invariant suite): it is not a
+tests-only commit, but it adds no executed code, and its node counts are
+identical. The binaries of identical sources are not byte-identical on
+Windows (the build directory is embedded in the PDB path), so byte identity
+could not be used as a check; the node counts and the timing floor are.
+
+**Node count, identical on the whole chain:** 1,329,589 (middlegame),
+1,820,774 (endgame). This is the exact result; it carries no noise.
+
+### Middlegame, depth 18 (floor from the identical copy: **11.7%**)
+
+| build | t_min (ms) | t_med (ms) | vs reference | vs predecessor |
+|---|---|---|---|---|
+| `8b219b4` | 3089 | 3624 | — | — |
+| `1239e5c` | 3175 | 3839 | -2.8% | -2.8% |
+| `427a68b` | 3536 | 3811 | -14.5% | -11.4% |
+| `a9bdac3` | 3405 | 3749 | -10.2% | +3.7% |
+| `ce2edb7` | 3294 | 3544 | -6.6% | +3.3% |
+| identical copy of `8b219b4` | 3449 | 3924 | -11.7% | — |
+
+### Pawn endgame, depth 18 (floor: **4.7%**)
+
+| build | t_min (ms) | t_med (ms) | vs reference | vs predecessor |
+|---|---|---|---|---|
+| `8b219b4` | 5475 | 6550 | — | — |
+| `1239e5c` | 5814 | 6773 | -6.2% | -6.2% |
+| `427a68b` | 5624 | 6450 | -2.7% | +3.3% |
+| `a9bdac3` | 5651 | 6599 | -3.2% | -0.5% |
+| `ce2edb7` | 4964 | 5902 | +9.3% | +12.2% |
+| identical copy of `8b219b4` | 5732 | 6645 | -4.7% | — |
+
+(positive = faster than the reference / predecessor.)
+
+### What exceeds the floor and what does not
+
+* **Middlegame: nothing usable.** The floor is 11.7%; the only delta beyond it
+  is `427a68b` at -14.5%, i.e. *slower* than the reference, for a change that
+  removes work. That is noise, not a regression: `a9bdac3` runs the same
+  executed code as `427a68b` and differs from it by 3.7% within the same run.
+* **Endgame: two deltas exceed the 4.7% floor.**
+  * `ce2edb7` (the King-refresh change) is +9.3% against the reference and
+    +12.2% against its predecessor. This is the only result of the chain that
+    is distinguishable from noise *in the expected direction*.
+  * `1239e5c` is -6.2%, beyond the floor but in the wrong direction for a
+    change that only aligns a struct. It is consistent with the floor being
+    under-estimated: the identical copy itself sits at -4.7%.
+* Everything else is inside the floor and is **not a result**: the
+  middlegame gains of the alignment, the repetition bound and the King-refresh
+  change cannot be separated from zero by this run.
+
+Read this as a fact about this machine and this run, not as a verdict on the
+patches: on a quieter machine the floor would be smaller and more of the chain
+could become visible. The floor measured here (11.7% and 4.7%) is larger than
+the 4-7% seen in earlier runs, which is itself a sign the machine was noisy.

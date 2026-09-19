@@ -4,3 +4,6 @@
 /.claude
 training_data.txt
 /.vscode
+
+# Output of scripts/bench_suite.py
+bench_results.json
