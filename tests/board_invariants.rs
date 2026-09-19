@@ -16,6 +16,13 @@ use rand_chacha::ChaCha8Rng;
 /// Fixed seed for every deterministic sequence in this suite (C2). Chosen
 /// once, reported here so a failure is reproducible by re-running this
 /// exact file, not by chasing a random seed that only failed once.
+///
+/// The seed reproduces a run ONLY together with the exact fixture list below.
+/// Adding fixtures changes the order of draws for EVERY sequence, not just the
+/// new ones: when the list grew from 9 to 11 fixtures (200 -> 240 sequences)
+/// the 240 were not a superset of the earlier 200, and seed 20260917 stopped
+/// reproducing the runs made before that change. To investigate a failure
+/// reported at some commit, run the suite AT THAT COMMIT.
 const SEED: u64 = 20260917;
 
 // Positions covering: plain start, a densely tactical middlegame
