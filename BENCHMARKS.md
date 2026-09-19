@@ -67,26 +67,35 @@ exit code = 1
 
 ## Release summary: `v3.1.4` -> `v3.1.5`, one run
 
-The release figure. **One run, one machine, one session**, `v3.1.4` (the tag) against
-`03a30f3` (the tip of `main` when the release was cut: the eleven commits after the tag plus the
-version bump), each built from a clean archive, interleaved, with the byte-identical copy of the reference as the noise floor **of this very
-run**. Protocol `3 5`, both positions, depth 18, 1 thread, 256 MB hash, 2026-09-19.
+The release figure. **One run, one machine, one session**: the binaries built from the tags
+`v3.1.4` and `v3.1.5` (each from a clean `git archive` of its tag, `cargo build --release`;
+sha256 of the measured files `aaa7b03c...b4ee` and `8bf9e0d8...b93e`), interleaved, with the
+byte-identical copy of the reference as the noise floor **of this very run**. Protocol `3 5`, both
+positions, depth 18, 1 thread, 256 MB hash, 2026-09-19.
 
 Node counts are identical in both positions (**1,329,589** and **1,820,774**): the search is
 the same, only its speed differs. That is the gate; nothing here is a claim about strength.
 
 | position | `v3.1.4` t_min / t_med (ms) | `v3.1.5` t_min / t_med (ms) | time reduction (t_min) | noise floor of this run (identical copy) |
 |---|---|---|---|---|
-| middlegame | 2842 / 3157 | 2585 / 2694 | **9.0%** | 2.4% (copy t_min 2910 / t_med 3101) |
-| pawn endgame | 5059 / 5975 | 4183 / 4894 | **17.3%** | 5.8% (copy t_min 5354 / t_med 6166) |
+| middlegame | 2770 / 2872 | 2447 / 2554 | **11.7%** | 2.0% (copy t_min 2825 / t_med 2909) |
+| pawn endgame | 5099 / 5145 | 4141 / 4271 | **18.8%** | 0.5% (copy t_min 5071 / t_med 5220) |
 
-Both reductions are larger than the floor measured in the same run. That is what can be said:
-an estimate of the time saved on this machine and these two positions at fixed depth, with a
-floor that is itself an estimate from few samples (it is under-estimated when samples are few).
-**No Elo is attributed to it**: time was measured, strength was not, and there is no SPRT on
-these changes. The machine was the usual noisy one (browser, editor and antivirus resident, a
-VS Code installer process present, no other benchmark or build running; the lichess bot runs on a
-different machine).
+Both reductions are larger than the floor measured in the same run, which was quiet this time
+(hence the small floors). That is what can be said: an estimate of the time saved on this machine
+and these two positions at fixed depth; the floor is itself an estimate from few samples (it is
+under-estimated when samples are few). **No Elo is attributed to it**: time was measured, strength
+was not, and there is no SPRT on these changes. Instead, the two binaries were checked to be
+**semantically identical**: at fixed nodes (20,000, 1 thread, transposition table cleared) all
+2,000 positions of `eval_set.epd` give the same depth, node count, score and best move, and 24
+self-play games at fixed nodes from 24 openings (141 plies on average, 16 of them with repeated
+positions) are identical move by move for both binaries. A mutant with one search constant changed
+(`RFP_MARGIN_PER_PLY` 110 -> 115) diverges on 398 of 400 positions and on 23 of 24 games, so the
+comparison does detect a change of search.
+
+An earlier run of the same comparison, made the same day with the release commit built from a
+scratch copy instead of from the tag, gave 9.0% (floor 2.4%) and 17.3% (floor 5.8%) on a noisier
+machine: it is superseded by the row above and is not to be combined with it.
 
 This row replaces nothing: the tables below stay, because they show which steps of the chain
 were resolvable above their own floor and which were not. **Do not add their deltas to the row
