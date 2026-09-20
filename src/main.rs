@@ -338,6 +338,14 @@ fn main() {
                     // command really carried a depth.
                     let mut depth_token_present = false;
                     let mut movestogo_token: Option<u128> = None;
+                    // UCI "go infinite": search until "stop" (or the depth/
+                    // node limit, if also given), never on a clock. Needs
+                    // its own flag: it carries no value, so it would
+                    // otherwise fall into the catch-all `_` branch below and
+                    // be silently ignored, leaving `movetime` to default to
+                    // the plain 5000 ms case as if no token had been given
+                    // at all (see the movetime match below).
+                    let mut infinite_token = false;
 
                     // First pass: we only collect the tokens, without
                     // computing `movetime` yet. Needed because winc/binc
@@ -397,14 +405,32 @@ fn main() {
                                 movestogo_token = parts[i + 1].parse().ok();
                                 i += 2;
                             }
-                            // "ponder", "infinite", "searchmoves <...>" and
-                            // any unrecognized token: one token at a time,
+                            "infinite" => {
+                                infinite_token = true;
+                                i += 1;
+                            }
+                            // "ponder", "searchmoves <...>" and any
+                            // unrecognized token: one token at a time,
                             // without consuming a nonexistent value.
                             _ => { i += 1; }
                         }
                     }
 
-                    let movetime = match movetime_token {
+                    let movetime = if infinite_token {
+                        // Not "5000 ms because no other token matched" (the
+                        // pre-fix bug: this token used to fall into the
+                        // catch-all `_` branch above and be silently
+                        // dropped, so "go infinite" behaved exactly like a
+                        // bare "go" with no clock info at all). A generous
+                        // wall-clock ceiling, same idea as the "go nodes"/
+                        // "go depth" safety net below: what actually ends
+                        // the search is the "stop" command (checked every
+                        // node via `stop_signal`, independent of this
+                        // value) or, if also given, the depth/node limit —
+                        // never this timer.
+                        24 * 60 * 60 * 1000
+                    } else {
+                        match movetime_token {
                         // "go movetime N": explicit fixed budget, not
                         // touched by any wtime/winc calculation.
                         Some(mt) => mt,
@@ -457,6 +483,7 @@ fn main() {
                             None if depth_token_present => 600_000,
                             None => 5000,
                         },
+                        }
                     };
 
                     // The search itself now runs on its own thread instead
