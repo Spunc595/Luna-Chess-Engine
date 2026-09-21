@@ -87,8 +87,10 @@ def run_many(engine, kind, arg, depth, k):
     return res
 
 
-def check_nodes(acc, ref, position):
-    """Both halves of the gate. Raises on the first violation."""
+def check_nodes(acc, ref, position, cross_build=True):
+    """Both halves of the gate. Raises on the first violation. With cross_build=False (`--no-node-gate`, for a change
+    that is MEANT to alter the search) only the first half is enforced: every build must still be deterministic with
+    itself, but node counts may differ between builds and each build's own count is used for its NPS."""
     ref_nodes = acc[ref]["nodes"]
     if len(ref_nodes) != 1:
         raise SystemExit(
@@ -100,7 +102,7 @@ def check_nodes(acc, ref, position):
             raise SystemExit(
                 f"\nFERMO -- {position}: {e} non e' deterministica: nodi {sorted(a['nodes'])}.")
         got = next(iter(a["nodes"]))
-        if got != expected:
+        if cross_build and got != expected:
             raise SystemExit(
                 f"\nFERMO -- {position}: {e} visita {got:,} nodi, il riferimento {ref} ne "
                 f"visita {expected:,} (differenza {got - expected:+,}).\n"
@@ -112,7 +114,11 @@ def check_nodes(acc, ref, position):
 
 
 def main():
-    engines, rounds, k = sys.argv[1:-2], int(sys.argv[-2]), int(sys.argv[-1])
+    argv = sys.argv[1:]
+    cross_build = True
+    if argv and argv[0] == "--no-node-gate":
+        cross_build, argv = False, argv[1:]
+    engines, rounds, k = argv[:-2], int(argv[-2]), int(argv[-1])
     ref = engines[0]
     tmpdir = tempfile.mkdtemp(prefix="luna_bench_")
     control = os.path.join(tmpdir, "luna_controllo")
@@ -127,11 +133,12 @@ def main():
                     for n, t in run_many(e, kind, arg, depth, k):
                         acc[e]["nodes"].add(n); acc[e]["t"].append(t)
                 if r == 0:
-                    check_nodes(acc, ref, name)      # abort early, not after every round
-            nodi = check_nodes(acc, ref, name)
+                    check_nodes(acc, ref, name, cross_build)      # abort early, not after every round
+            check_nodes(acc, ref, name, cross_build)
             out[name] = {}
             for e in participants:
                 t = sorted(acc[e]["t"])
+                nodi = next(iter(acc[e]["nodes"]))     # this build's own (deterministic) node count
                 label = CONTROL if e == control else e
                 out[name][label] = dict(nodi=nodi, campioni=len(t), t_min=t[0],
                                         t_med=t[len(t) // 2],
@@ -145,15 +152,18 @@ def main():
         base = d[ref]
         floor = abs(100.0 * (base["t_min"] - d[CONTROL]["t_min"]) / base["t_min"])
         print(f"\n=== {pos} — depth 18, 1 thread, {rounds}x{k} campioni interlacciati ===")
-        print(f"  nodi (identici su tutte le build, asseriti): {base['nodi']:,}")
-        print(f"  {'build':12s} {'t_min':>7s} {'t_med':>7s} {'NPS_min':>9s} {'vs rif':>8s} {'vs prec':>8s}")
+        if cross_build:
+            print(f"  nodi (identici su tutte le build, asseriti): {base['nodi']:,}")
+        else:
+            print("  nodi: NON asseriti identici (--no-node-gate): ogni build ha il proprio conteggio, deterministico")
+        print(f"  {'build':12s} {'nodi':>10s} {'t_min':>7s} {'t_med':>7s} {'NPS_min':>9s} {'vs rif':>8s} {'vs prec':>8s}")
         prev = None
         for e, v in d.items():
             vb = 100.0 * (base["t_min"] - v["t_min"]) / base["t_min"]
             vp = 0.0 if prev is None else 100.0 * (prev["t_min"] - v["t_min"]) / prev["t_min"]
             tag = "  <- controllo (copia del riferimento)" if e == CONTROL else ""
             name = CONTROL if e == CONTROL else e.replace("./luna_", "")
-            print(f"  {name:12s} {v['t_min']:7d} {v['t_med']:7d} {v['nps_min']:9d} "
+            print(f"  {name:12s} {v['nodi']:10,d} {v['t_min']:7d} {v['t_med']:7d} {v['nps_min']:9d} "
                   f"{vb:+7.1f}% {vp:+7.1f}%{tag}")
             if e != CONTROL:
                 prev = v

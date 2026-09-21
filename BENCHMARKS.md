@@ -200,3 +200,29 @@ above had a floor of 11.7% and 4.7% with a browser, VS Code and an antivirus
 resident on the machine; this run, on the same machine, had 2.3% and 0.9%. The
 floor is a property of the run, not of the harness, which is why the harness
 runs a byte-identical copy of the reference as an extra participant.
+
+
+## Two changes that did NOT pay: D1 and D3 (2026-09-21)
+
+Measured with `scripts/bench_suite.py`, protocol `3 5`, both positions, depth 18, 1 thread, against the tip of `main`
+(`a907c7a`, v3.1.6), each build from a clean archive, with the byte-identical copy as the noise floor of the same run.
+Both branches are kept on the remote and are **not merged**: a negative result that gets lost is a result to redo.
+
+| change | branch (commit) | node count | middlegame | pawn endgame | verdict |
+|---|---|---|---|---|---|
+| D1: a fixed-capacity `MoveList` on the stack instead of the three heap allocations per node (`genera_mosse`, `genera_mosse_legali`, the buffer of `sort_by_cached_key`) | `d1-movelist` (`a66529b`) | identical (1,329,589 / 1,820,774) | +1.1% (floor 1.3%) | -1.4% (floor 1.5%) | **no measurable effect: revoked.** The three allocations per node do not weigh. |
+| D3: lazy legality in `negamax` (test a move's legality when the loop reaches it; checkmate/stalemate after the loop) | `d3-lazy-legality` (`d1c477b`) | identical | **-22.9%** (NPS 409k against 503k; floor 1.9%) | **-7.2%** (floor 1.7%) | **regression: revoked for now.** |
+
+D3 is correct: on the 2,000 positions of `eval_set.epd` at 20,000 nodes it gives the same depth, nodes, score and best
+move as the base on every one, and the mate/stalemate/single-reply/pinned-piece cases agree. It is slower because of what
+`genera_mosse_legali` already did on purpose: it tests legality with `esegui_mossa(.., None)`, i.e. WITHOUT propagating the
+NNUE accumulator (see the comment next to it: every move there is made and immediately undone, nobody reads the
+accumulator in between, and with a real network a King move would otherwise cost a full refresh for nothing). Lazy legality
+in `negamax` discovers the illegality by calling `esegui_mossa` WITH the accumulator, and for a King move that means a
+`refresh_one_perspective` (measured earlier at about 2,813 ns against 473 ns for an ordinary move) before the move is
+refused; most illegal moves are King moves. D3 traded a cheap rejection for the most expensive make in the engine. It
+becomes interesting again only if making a move gets cheap (for example with a deferred accumulator update).
+
+The lesson, also written in the project protocol: **a count is not a cost.** The analysis that proposed D1 and D3 counted
+events (6,989,115 legality make/unmake for 4,202,684 legal moves, of which 1,924,684 reached) and deduced a time from
+them; the count was right, the deduction was not, because those tests had already been made cheap on purpose.
