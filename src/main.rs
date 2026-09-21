@@ -192,9 +192,9 @@ fn main() {
                 // astronomically unlikely, but it's still wasted memory and
                 // poor hygiene between consecutive games (the normal case
                 // on lichess-bot, which sends "ucinewgame" before every new
-                // game). Killer moves and the history heuristic instead
-                // live in `SearchInfo`, recreated from scratch on every
-                // "go": no need to touch them here.
+                // game). The history tables are cleared below for the same
+                // reason: they persist across the "go" commands of a game.
+                // Killer moves live in `SearchInfo`, recreated on every "go".
                 match Arc::get_mut(&mut tt) {
                     Some(tt_mut) => tt_mut.clear(),
                     // `join_pending` just joined the only other possible
@@ -296,16 +296,10 @@ fn main() {
                     tt_mut.new_search();
                 }
 
-                // Cleared before every search, not just on "ucinewgame":
-                // matches the pre-multi-threading behavior (a fresh
-                // `SearchInfo`, history included, was created on every
-                // single "go"). Persisting history across moves within a
-                // game is a DIFFERENT idea ("persist-heuristics") already
-                // SPRT-tested on its own and found neutral — keeping that
-                // variable out of this change avoids conflating "does
-                // multi-threading help" with "does persisting history
-                // across moves help", which would muddy the comparison.
-                shared_history.clear();
+                // The history tables are NOT cleared here: they accumulate across the moves of a game and are
+                // cleared on "ucinewgame" only (like the transposition table, which survives from one "go" to the
+                // next through `new_search` above). Killers and counter-moves live in `SearchInfo`, which is still
+                // created from scratch on every "go".
 
                 let mut mossa_trovata = false;
                 if let Some(ref mut b) = book {
