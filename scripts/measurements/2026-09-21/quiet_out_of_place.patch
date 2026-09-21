@@ -1,7 +1,7 @@
-diff --git a/a/src/nnue.rs b/b/src/nnue.rs
+diff --git a/src/nnue.rs b/src/nnue.rs
 index dea934e..f9a52f4 100644
---- a/a/src/nnue.rs
-+++ b/b/src/nnue.rs
+--- a/src/nnue.rs
++++ b/src/nnue.rs
 @@ -421,6 +421,17 @@ impl LunaNNUE {
          self.add_row(&mut acc.black, feature_index(true, black_ksq, color_white, piece_type_luna, sq));
      }

@@ -1,3 +1,5 @@
 # Shell scripts are stored and exported with LF: a script with CRLF line endings does not run on Linux
 # (scripts/sprt_match.sh arrived on the match server with CRLF and its line continuations broke).
 *.sh text eol=lf
+# Patches are applied with git apply: CRLF in a patch makes it fail on the very files it was made from.
+*.patch text eol=lf
