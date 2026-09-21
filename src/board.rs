@@ -802,7 +802,7 @@ impl Scacchiera {
         self.history.pop();
     }
     
-    pub fn genera_mosse(&self) -> Vec<Mossa> {
+    pub fn genera_mosse(&self) -> crate::movegen::MoveList {
         crate::movegen::genera_mosse(self)
     }
 
@@ -817,18 +817,21 @@ impl Scacchiera {
     // a result that is never observed: pure waste. The search (search.rs)
     // later calls esegui_mossa/annulla_mossa a second time, this time
     // with the real `nnue`, only for the moves it actually decides to explore.
-    pub fn genera_mosse_legali(&mut self, z: &ZobristKeys) -> Vec<Mossa> {
-        let mosse = crate::movegen::genera_mosse(self);
-        let mut legali = Vec::with_capacity(mosse.len());
-
-        for m in mosse {
+    pub fn genera_mosse_legali(&mut self, z: &ZobristKeys) -> crate::movegen::MoveList {
+        let mut mosse = crate::movegen::genera_mosse(self);
+        // Filter in place: the legal moves are written over the front of the same list (one list, on the stack).
+        let mut kept = 0;
+        for i in 0..mosse.len() {
+            let m = mosse[i];
             if self.esegui_mossa(&m, z, None) {
-                // If the move is valid, undo it and save it in the list
+                // If the move is valid, undo it and keep it
                 self.annulla_mossa(&m, z, None);
-                legali.push(m);
+                mosse[kept] = m;
+                kept += 1;
             }
         }
-        legali
+        mosse.truncate(kept);
+        mosse
     }
 
     pub fn to_fen(&self) -> String {

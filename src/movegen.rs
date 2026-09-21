@@ -185,8 +185,90 @@ const PST_KING: [i32; 64] = [
      20, 30, 10,  0,  0, 10, 30, 20
 ];
 
-pub fn genera_mosse(s: &Scacchiera) -> Vec<Mossa> {
-    let mut mosse = Vec::with_capacity(64);
+/// Upper bound on the moves of one position, pseudo-legal included: the maximum of LEGAL moves is 218, and the pseudo-legal
+/// list can hold a few more (pinned pieces, king moves into check, both kinds of promotion). 320 leaves a wide margin;
+/// `push` panics (bounds check) rather than writing out of the array if it were ever exceeded.
+pub const MAX_MOVES: usize = 320;
+
+/// Fixed-capacity move list living on the stack: replaces the `Vec<Mossa>` that each search node used to allocate (one in
+/// `genera_mosse`, one more in `genera_mosse_legali`, and the temporary buffer of `sort_by_cached_key`).
+#[derive(Clone)]
+pub struct MoveList {
+    moves: [Mossa; MAX_MOVES],
+    len: usize,
+}
+
+impl MoveList {
+    #[inline(always)]
+    pub fn new() -> Self {
+        MoveList { moves: [Mossa::null(); MAX_MOVES], len: 0 }
+    }
+
+    #[inline(always)]
+    pub fn push(&mut self, m: Mossa) {
+        self.moves[self.len] = m;
+        self.len += 1;
+    }
+
+    /// Keeps the first `n` moves.
+    #[inline(always)]
+    pub fn truncate(&mut self, n: usize) {
+        if n < self.len { self.len = n; }
+    }
+
+    /// Keeps the moves for which `f` is true, in their original order (like `Vec::retain`).
+    pub fn retain<F: FnMut(&Mossa) -> bool>(&mut self, mut f: F) {
+        let mut kept = 0;
+        for i in 0..self.len {
+            let m = self.moves[i];
+            if f(&m) {
+                self.moves[kept] = m;
+                kept += 1;
+            }
+        }
+        self.len = kept;
+    }
+}
+
+impl std::ops::Deref for MoveList {
+    type Target = [Mossa];
+    #[inline(always)]
+    fn deref(&self) -> &[Mossa] { &self.moves[..self.len] }
+}
+
+impl std::ops::DerefMut for MoveList {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut [Mossa] { &mut self.moves[..self.len] }
+}
+
+/// By-value iteration (moves are `Copy`), so that `for m in list` and `list.into_iter()` keep working as with a `Vec`.
+pub struct MoveListIntoIter {
+    list: MoveList,
+    pos: usize,
+}
+
+impl Iterator for MoveListIntoIter {
+    type Item = Mossa;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Mossa> {
+        if self.pos < self.list.len {
+            let m = self.list.moves[self.pos];
+            self.pos += 1;
+            Some(m)
+        } else {
+            None
+        }
+    }
+}
+
+impl IntoIterator for MoveList {
+    type Item = Mossa;
+    type IntoIter = MoveListIntoIter;
+    fn into_iter(self) -> MoveListIntoIter { MoveListIntoIter { list: self, pos: 0 } }
+}
+
+pub fn genera_mosse(s: &Scacchiera) -> MoveList {
+    let mut mosse = MoveList::new();
     let us = s.turno;
     let them = us.opposto();
 
@@ -270,7 +352,7 @@ pub fn genera_mosse(s: &Scacchiera) -> Vec<Mossa> {
     mosse
 }
 
-fn genera_arrocco(s: &Scacchiera, mosse: &mut Vec<Mossa>, all: u64) {
+fn genera_arrocco(s: &Scacchiera, mosse: &mut MoveList, all: u64) {
     let us = s.turno;
     if s.in_scacco() { return; }
 
@@ -303,7 +385,7 @@ fn genera_arrocco(s: &Scacchiera, mosse: &mut Vec<Mossa>, all: u64) {
     }
 }
 
-fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>) {
+fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut MoveList) {
     let rank = to / 8;
     if rank == prom_rank {
         for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
@@ -314,7 +396,7 @@ fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>
     }
 }
 
-fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>) {
+fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut MoveList) {
     let rank = to / 8;
     if rank == prom_rank {
         for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
@@ -328,7 +410,7 @@ fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mos
 // Updated to also receive killer moves and the history heuristic
 // (history[color][from][to], see search.rs::SearchInfo::history).
 pub fn ordina_mosse(
-    mosse: &mut Vec<Mossa>,
+    mosse: &mut MoveList,
     board: &Scacchiera,
     tt_move: Mossa,
     killers: &[Mossa; 2],
@@ -336,7 +418,26 @@ pub fn ordina_mosse(
     counter_move: Mossa,
     capture_history: &[[[AtomicI32; 6]; 64]; 6],
 ) {
-    mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers, history, counter_move, capture_history));
+    // Stable insertion sort on keys computed ONCE per move, all on the stack: same order as the former
+    // `sort_by_cached_key(|m| -score)` (ascending key = descending score, ties keeping generation order), so the search
+    // visits the same moves in the same order, but without the temporary heap buffer that call allocated.
+    let n = mosse.len();
+    let mut keys = [0i32; MAX_MOVES];
+    for i in 0..n {
+        keys[i] = -score_move(&mosse[i], board, tt_move, killers, history, counter_move, capture_history);
+    }
+    for i in 1..n {
+        let key = keys[i];
+        let mv = mosse[i];
+        let mut j = i;
+        while j > 0 && keys[j - 1] > key {
+            keys[j] = keys[j - 1];
+            mosse[j] = mosse[j - 1];
+            j -= 1;
+        }
+        keys[j] = key;
+        mosse[j] = mv;
+    }
 }
 
 fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
