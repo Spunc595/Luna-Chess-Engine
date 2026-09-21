@@ -1,0 +1,156 @@
+diff --git a/src/board.rs b/src/board.rs
+index e7095ca..b0c33dc 100644
+--- a/src/board.rs
++++ b/src/board.rs
+@@ -491,11 +491,17 @@ impl Scacchiera {
+     }
+ 
+     pub fn esegui_mossa(&mut self, m: &Mossa, z: &ZobristKeys, nnue: Option<&LunaNNUE>) -> bool {
++        use crate::nnue::prof::*;
++        if nnue.is_none() { return self.esegui_mossa_inner(m, z, nnue); }
++        let old = set_ctx(0); let t0 = tsc(); let r = self.esegui_mossa_inner(m, z, nnue); wt(0, tsc() - t0); set_ctx(old); r
++    }
++    fn esegui_mossa_inner(&mut self, m: &Mossa, z: &ZobristKeys, nnue: Option<&LunaNNUE>) -> bool {
+         let from = m.da(); let to = m.a();
+         let flag = m.move_flag();
+         let us = self.turno.indice(); let them = 1 - us;
+         let moved_p = self.pezzo_in(from).unwrap_or(0);
+         let us_white = us == 0;
++        if nnue.is_some() { crate::nnue::prof::count(crate::nnue::prof::MAKE_PROP); if moved_p == 5 { crate::nnue::prof::count(crate::nnue::prof::KING_MAKE); } }
+ 
+         // Squares of the two kings BEFORE any mutation from this move:
+         // for the perspective whose king does not move on this move
+@@ -689,7 +695,12 @@ impl Scacchiera {
+     }
+ 
+     // --- NEW METHOD: official Unmake Move (used in search) ---
+-    pub fn annulla_mossa(&mut self, m: &Mossa, _z: &ZobristKeys, nnue: Option<&LunaNNUE>) {
++    pub fn annulla_mossa(&mut self, m: &Mossa, z: &ZobristKeys, nnue: Option<&LunaNNUE>) {
++        use crate::nnue::prof::*;
++        if nnue.is_none() { return self.annulla_mossa_inner(m, z, nnue); }
++        let old = set_ctx(1); let t0 = tsc(); self.annulla_mossa_inner(m, z, nnue); wt(1, tsc() - t0); set_ctx(old);
++    }
++    fn annulla_mossa_inner(&mut self, m: &Mossa, _z: &ZobristKeys, nnue: Option<&LunaNNUE>) {
+         // Retrieve the irreversible data lost during the move
+         let u = self.history.pop().expect("Critical error: history empty during unmake_move");
+ 
+diff --git a/src/nnue.rs b/src/nnue.rs
+index dea934e..3dbf57f 100644
+--- a/src/nnue.rs
++++ b/src/nnue.rs
+@@ -2,6 +2,28 @@ use std::fs::File;
+ use std::io::Read;
+ use crate::board::Scacchiera;
+ 
++// INSTRUMENTATION (scratch build, never committed): time spent in the accumulator functions, by rdtsc.
++pub mod prof {
++    use std::cell::UnsafeCell;
++    pub const ADD: usize = 0; pub const REM: usize = 1; pub const REFRESH1: usize = 2; pub const EVAL: usize = 3;
++    pub const MAKE_PROP: usize = 4; pub const KING_MAKE: usize = 5; pub const DISCARD: usize = 15;
++    thread_local! { pub static T: UnsafeCell<[u64; 32]> = UnsafeCell::new([0; 32]); }
++    // per context (0 make, 1 unmake, 2 other): [ctx][id] ticks and calls; [ctx][16 + id]
++    thread_local! { pub static U: UnsafeCell<[u64; 96]> = UnsafeCell::new([0; 96]); }
++    thread_local! { pub static CTX: std::cell::Cell<usize> = std::cell::Cell::new(2); }
++    thread_local! { pub static WT: UnsafeCell<[u64; 8]> = UnsafeCell::new([0; 8]); }   // 0/1 make ticks/calls, 2/3 unmake ticks/calls
++    thread_local! { pub static TRACE: UnsafeCell<Vec<u32>> = UnsafeCell::new(Vec::new()); }
++    #[inline(always)] pub fn set_ctx(c: usize) -> usize { CTX.with(|x| x.replace(c)) }
++    #[inline(always)] pub fn wt(i: usize, ticks: u64) { WT.with(|t| unsafe { let a = &mut *t.get(); a[2*i] += ticks; a[2*i+1] += 1; }); }
++    pub fn get_u(ctx: usize, id: usize) -> (u64, u64) { U.with(|t| unsafe { let a = &*t.get(); (a[ctx*32 + id], a[ctx*32 + 16 + id]) }) }
++    pub fn get_wt(i: usize) -> (u64, u64) { WT.with(|t| unsafe { let a = &*t.get(); (a[2*i], a[2*i+1]) }) }
++    #[inline(always)] pub fn tsc() -> u64 { unsafe { core::arch::x86_64::_rdtsc() } }
++    // ticks in [id], calls in [16 + id]
++    #[inline(always)] pub fn add(id: usize, ticks: u64) { T.with(|t| unsafe { let a = &mut *t.get(); a[id] += ticks; a[16 + id] += 1; }); let c = CTX.with(|x| x.get()); U.with(|t| unsafe { let a = &mut *t.get(); a[c*32 + id] += ticks; a[c*32 + 16 + id] += 1; }); }
++    #[inline(always)] pub fn count(id: usize) { T.with(|t| unsafe { (&mut *t.get())[16 + id] += 1; }); }
++    pub fn get(id: usize) -> (u64, u64) { T.with(|t| unsafe { let a = &*t.get(); (a[id], a[16 + id]) }) }
++}
++
+ // ============================================================================
+ // FILE FORMAT: Akimbo-style king-bucketed HalfKA network
+ // ============================================================================
+@@ -366,6 +388,9 @@ impl LunaNNUE {
+     /// changes, invalidating every active feature at once) or to
+     /// initialize a new position.
+     pub fn refresh_one_perspective(&self, half: &mut [i16; HIDDEN], board: &Scacchiera, perspective_white: bool) {
++        let t0 = prof::tsc(); self.refresh_one_perspective_inner(half, board, perspective_white); prof::add(prof::REFRESH1, prof::tsc() - t0);
++    }
++    fn refresh_one_perspective_inner(&self, half: &mut [i16; HIDDEN], board: &Scacchiera, perspective_white: bool) {
+         for i in 0..HIDDEN { half[i] = self.feature_bias[i]; }
+ 
+         let perspective_black = !perspective_white;
+@@ -417,6 +442,11 @@ impl LunaNNUE {
+     /// either perspective.
+     #[inline]
+     pub fn add_piece(&self, acc: &mut Accumulator, color_white: bool, piece_type_luna: usize, sq: usize, white_ksq: usize, black_ksq: usize) {
++        prof::TRACE.with(|t| unsafe { let v = &mut *t.get(); if v.len() < 6_000_000 { v.push((color_white as u32) | ((piece_type_luna as u32) << 1) | ((sq as u32) << 4) | ((white_ksq as u32) << 10) | ((black_ksq as u32) << 16) | 0); } });
++        let t0 = prof::tsc(); self.add_piece_inner(acc, color_white, piece_type_luna, sq, white_ksq, black_ksq); prof::add(prof::ADD, prof::tsc() - t0);
++    }
++    #[inline]
++    fn add_piece_inner(&self, acc: &mut Accumulator, color_white: bool, piece_type_luna: usize, sq: usize, white_ksq: usize, black_ksq: usize) {
+         self.add_row(&mut acc.white, feature_index(false, white_ksq, color_white, piece_type_luna, sq));
+         self.add_row(&mut acc.black, feature_index(true, black_ksq, color_white, piece_type_luna, sq));
+     }
+@@ -425,6 +455,10 @@ impl LunaNNUE {
+     /// from square `sq`.
+     #[inline]
+     pub fn remove_piece(&self, acc: &mut Accumulator, color_white: bool, piece_type_luna: usize, sq: usize, white_ksq: usize, black_ksq: usize) {
++        let t0 = prof::tsc(); self.remove_piece_inner(acc, color_white, piece_type_luna, sq, white_ksq, black_ksq); prof::add(prof::REM, prof::tsc() - t0);
++    }
++    #[inline]
++    fn remove_piece_inner(&self, acc: &mut Accumulator, color_white: bool, piece_type_luna: usize, sq: usize, white_ksq: usize, black_ksq: usize) {
+         self.sub_row(&mut acc.white, feature_index(false, white_ksq, color_white, piece_type_luna, sq));
+         self.sub_row(&mut acc.black, feature_index(true, black_ksq, color_white, piece_type_luna, sq));
+     }
+@@ -436,6 +470,9 @@ impl LunaNNUE {
+     /// trained, and what makes the result already correctly signed for
+     /// search.rs's negamax convention.
+     pub fn evaluate_from_accumulator(&self, acc: &Accumulator, side_to_move_white: bool) -> i32 {
++        let t0 = prof::tsc(); let r = self.evaluate_from_accumulator_inner(acc, side_to_move_white); prof::add(prof::EVAL, prof::tsc() - t0); r
++    }
++    fn evaluate_from_accumulator_inner(&self, acc: &Accumulator, side_to_move_white: bool) -> i32 {
+         let (us, them) = if side_to_move_white { (&acc.white, &acc.black) } else { (&acc.black, &acc.white) };
+ 
+         let sum = flatten(us, &self.output_weights[0]) + flatten(them, &self.output_weights[1]);
+diff --git a/src/search.rs b/src/search.rs
+index 07f4172..f8f6ffd 100644
+--- a/src/search.rs
++++ b/src/search.rs
+@@ -395,6 +395,7 @@ pub fn iterative_deepening(
+     // different searches of the same "go" command.
+     report_info: bool,
+ ) -> (Mossa, i32, i32) {
++    let prof_t0 = crate::nnue::prof::tsc(); let prof_wall = std::time::Instant::now();
+     let mut best_move = Mossa::null();
+     let mut score = 0;
+     let mut last_best_move = Mossa::null();
+@@ -489,6 +490,31 @@ pub fn iterative_deepening(
+         if !legali.is_empty() { best_move = legali[0]; }
+     }
+ 
++    if report_info {
++        use crate::nnue::prof::*;
++        let total_ticks = tsc() - prof_t0;
++        let wall_ns = prof_wall.elapsed().as_nanos() as f64;
++        let tpn = total_ticks as f64 / wall_ns; // ticks per ns
++        // overhead of one wrapped call (two tsc reads + the counter update), measured the same way
++        let n = 400_000u64; let a = tsc();
++        for _ in 0..n { let t0 = tsc(); add(DISCARD, tsc() - t0); }
++        let over = (tsc() - a) as f64 / n as f64;
++        let (add_t, add_c) = get(ADD); let (rem_t, rem_c) = get(REM); let (r1_t, r1_c) = get(REFRESH1); let (ev_t, ev_c) = get(EVAL);
++        let (_, mk) = get(MAKE_PROP); let (_, km) = get(KING_MAKE);
++        let net = |t: u64, c: u64| (t as f64 - over * c as f64).max(0.0);
++        {
++            let mut parts = String::new();
++            for c in 0..3 { for id in 0..4 { let (t, n) = get_u(c, id); parts += &format!(" u{}_{}_t={} u{}_{}_c={}", c, id, t, c, id, n); } }
++            for i in 0..2 { let (t, n) = get_wt(i); parts += &format!(" w{}_t={} w{}_c={}", i, t, i, n); }
++            eprintln!("PROFX{}", parts);
++            if let Ok(path) = std::env::var("LUNA_TRACE") {
++                TRACE.with(|t| unsafe { let v = &*t.get(); let bytes: Vec<u8> = v.iter().flat_map(|x| x.to_le_bytes()).collect(); let _ = std::fs::write(&path, bytes); });
++            }
++        }
++        eprintln!("PROF wall_ns={} tpn={:.4} over_ticks={:.1} add_c={} add_t={} rem_c={} rem_t={} r1_c={} r1_t={} ev_c={} ev_t={} make_prop={} king_make={} add_net={:.0} rem_net={:.0} r1_net={:.0} ev_net={:.0}",
++            wall_ns as u64, tpn, over, add_c, add_t, rem_c, rem_t, r1_c, r1_t, ev_c, ev_t, mk, km, net(add_t, add_c), net(rem_t, rem_c), net(r1_t, r1_c), net(ev_t, ev_c));
++    }
++
+     (best_move, score, last_completed_depth)
+ }
+ 

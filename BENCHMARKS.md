@@ -226,3 +226,74 @@ becomes interesting again only if making a move gets cheap (for example with a d
 The lesson, also written in the project protocol: **a count is not a cost.** The analysis that proposed D1 and D3 counted
 events (6,989,115 legality make/unmake for 4,202,684 legal moves, of which 1,924,684 reached) and deduced a time from
 them; the count was right, the deduction was not, because those tests had already been made cheap on purpose.
+
+
+## Where the search time goes: the NNUE accumulator (2026-09-21)
+
+Measured on a throwaway instrumented copy of `main` (`scripts/measurements/2026-09-21/`), 1 thread, over the 2 suite
+positions at depth 18 and 40 sampled evaluation-set positions at depth 12 (42 searches, 31.5 s), rdtsc timers with the
+measured per-call overhead subtracted (without the subtraction the totals are 3.5 points higher). Percentages are of the
+total search time.
+
+| | share of search time | calls | ns per call |
+|---|---|---|---|
+| incremental updates (`add_piece` + `remove_piece`) called from `esegui_mossa` | **16.6%** | 22.75 M | 230 |
+| the same, called from `annulla_mossa` (the unmake re-applies the inverse updates) | **15.6%** | 22.68 M | 216 |
+| `refresh_one_perspective` (King moves; the unmake restores from `king_acc_stack`, no refresh) | 7.3% | 1.23 M | 1,866 |
+| `evaluate_from_accumulator` | 5.7% | 9.05 M | - |
+| whole `esegui_mossa` / whole `annulla_mossa` | 28.2% / 18.5% | 10.07 M / 10.06 M | 882 / 578 |
+
+Accumulator work in total: 39.3%. The unmake is about **half** of the incremental part (48.4%). Only 10.2% of the
+propagated makes are not followed by an `evaluate` (evaluate/make = 0.898), so deferring the update until the evaluation
+is worth at most about 4% of the time on this set (2.7% on the eval-set positions, 10.8% in the pawn endgame).
+
+**It is not the memory.** One `add_piece` (two 2 KB weight rows, one per perspective, and a read-modify-write of the 4 KB
+accumulator) costs 220-225 ns with the SAME rows every time (hot in L1), 252-261 ns with random rows and fixed kings (3 MB
+working set), 313-338 ns with random rows over the whole 6.3 MB table, and 240-246 ns replaying the rows of a real search.
+The in-search figure (216-230 ns) is the hot figure. The loop is vectorised with AVX2 (`vpaddw` on ymm, four vectors per
+iteration; the build uses `target-cpu=native` on this machine) and still takes 220 ns hot. A plausible reading, NOT
+verified, is that it is bound by the L1 load/store ports (about 12 KB moved per call on a Ryzen 3 3200U, which executes
+256-bit operations as two 128-bit halves), not by cache misses or DRAM.
+
+**What that leaves on the table.** Micro-benchmark of a quiet move's make + unmake: today, four in-place calls, 850-870 ns
+with hot rows and 904-919 ns with random rows; writing the make out of place into the next ply's accumulator
+(`dst = src - row(from) + row(to)`, one pass per perspective) and making the unmake an index decrement, 160-166 ns and
+190-210 ns. A raw copy of one 4 KB accumulator is 80-90 ns. If the whole incremental share fell in that ratio (about a
+fifth) it would go from 31.7% to about 7% of the search time. That is an **upper bound from a tight loop on quiet moves**:
+captures (three rows), promotions, castling and the cache pressure of the real search are not in it, and, per the lesson
+above, a micro-benchmark is not a cost in the engine: it has to be measured as nodes per second on the suite once
+implemented. Nothing was implemented in this round.
+
+
+## G4 (continuation history, 1 ply): set aside, not rejected (2026-09-21)
+
+Branch `g4-continuation-history` (`4c995e4`) is kept on the remote and was NOT sent to the SPRT. Counters on `main` and on
+g4, 42 searches (2 suite positions at depth 16, 40 evaluation-set positions at depth 12), tables cold as in the engine
+(`main.rs` cleared the history on every `go`):
+
+- The contribution of the table to a quiet move's score (already halved) is non-zero for 29.7% of the 42.0 M quiet moves
+  scored, with median 4 among the non-zero values, against a median of 54 for the main history (which is non-zero for 92.6%).
+- The cutoff move is the first move tried in 87.2% (base) / 87.0% (g4) of the beta cutoffs; restricted to quiet-move
+  cutoffs, 74.15% (base) / 72.31% (g4), mean index 1.032 / 1.118. A game replayed in one process (42 searches): 69.90% /
+  69.74%. The differences are within what these samples can resolve; the ordering of the quiet moves does not improve.
+- No indexing or sign defect (the update happens after the unmake, the piece is read on the move's own origin square; the
+  sentinel for "no previous move" is `None`, never read and never written: 3,899 updates skipped against 410,490 written).
+- Why it does nothing: the table has 6 x 64 x 6 x 64 = 147,456 entries against 8,192 for the main history, and about
+  410,000 updates per search reach fewer than 3 per entry. It is starved, and clearing every table on every `go` is what
+  starves it. It is re-measured (same counters) after the verdict of G5, which stops clearing the history.
+
+
+## G5: the history tables persist across the moves of a game (registered 2026-09-21)
+
+Branch `g5-history-persists` (`6b8dda8`): one line removed from the `go` command in `main.rs` (`shared_history.clear()`),
+the clear stays in `ucinewgame`. Killers and counter-moves are untouched.
+
+A comment next to the removed line said that persisting the history had already been SPRT-tested and found neutral. The
+only record of that test is in the old match folder: 2,000 games, Elo +3.5 +/- 15.0, LOS 67.5%, LLR -0.26 (bounds +/-2.94),
+draw ratio 3%, on an engine of 14 August: an inconclusive result with an interval of +/-15 Elo, not a neutral one. G5 is
+therefore tested again, on the current engine and harness.
+
+Consequence for the benchmark harness: two identical `go` in one process already differed (the transposition table
+survives from one `go` to the next: 1,035,929 then 668,137 nodes on `main`); with G5 the second search also carries the
+history (653,500). `scripts/bench_suite.py` already sends `ucinewgame` between the searches of a position (it clears
+both), so its node-count gate is unaffected.

@@ -1,0 +1,22 @@
+diff --git a/a/src/nnue.rs b/b/src/nnue.rs
+index dea934e..f9a52f4 100644
+--- a/a/src/nnue.rs
++++ b/b/src/nnue.rs
+@@ -421,6 +421,17 @@ impl LunaNNUE {
+         self.add_row(&mut acc.black, feature_index(true, black_ksq, color_white, piece_type_luna, sq));
+     }
+ 
++
++    /// THROWAWAY (measurement only): make of a quiet move written out of place, dst = src - row(from) + row(to), one pass per half.
++    pub fn quiet_out_of_place(&self, dst: &mut Accumulator, src: &Accumulator, color_white: bool, piece: usize, from: usize, to: usize, white_ksq: usize, black_ksq: usize) {
++        let (fw, tw) = (feature_index(false, white_ksq, color_white, piece, from) * HIDDEN, feature_index(false, white_ksq, color_white, piece, to) * HIDDEN);
++        let (fb, tb) = (feature_index(true, black_ksq, color_white, piece, from) * HIDDEN, feature_index(true, black_ksq, color_white, piece, to) * HIDDEN);
++        let w = &self.feature_weights;
++        let (rfw, rtw, rfb, rtb) = (&w[fw..fw + HIDDEN], &w[tw..tw + HIDDEN], &w[fb..fb + HIDDEN], &w[tb..tb + HIDDEN]);
++        for i in 0..HIDDEN { dst.white[i] = src.white[i].wrapping_sub(rfw[i]).wrapping_add(rtw[i]); }
++        for i in 0..HIDDEN { dst.black[i] = src.black[i].wrapping_sub(rfb[i]).wrapping_add(rtb[i]); }
++    }
++
+     /// Exact inverse of `add_piece`: to be called when a piece DISAPPEARS
+     /// from square `sq`.
+     #[inline]
