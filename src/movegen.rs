@@ -339,9 +339,16 @@ pub fn ordina_mosse(
     mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers, history, counter_move, capture_history));
 }
 
+/// Score of the transposition-table move: above ANY other score `score_move` can return, so that the TT move
+/// really is tried first. The highest other score is a winning/even capture of a queen by a pawn with a saturated
+/// capture history: 20000 + 900*10 - 100 + CAPTURE_HISTORY_MAX (12800) = 41700, which used to exceed the old value
+/// of 30000. Raised well beyond that rather than capping the capture history: one constant, no change to the
+/// ordering of everything else.
+const TT_MOVE_SCORE: i32 = 1_000_000;
+
 fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
-    // 1. TT move (highest priority)
-    if m.data == tt_move.data && !m.is_null() { return 30000; }
+    // 1. TT move (highest priority: see TT_MOVE_SCORE)
+    if m.data == tt_move.data && !m.is_null() { return TT_MOVE_SCORE; }
 
     // 2. Captures, scored with SEE (see above) instead of plain MVV-LVA:
     // a capture with SEE >= 0 (favorable or even) stays above killer
