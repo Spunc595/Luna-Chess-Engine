@@ -614,24 +614,13 @@ fn negamax(
         }
     }
 
-    let mut legal_moves = board.genera_mosse_legali(z);
-    if legal_moves.is_empty() {
-        // FIX: this used to use `board.ply` (the game's ABSOLUTE ply,
-        // which keeps growing for the whole game) instead of `ply` (the
-        // ply RELATIVE to the root of THIS search, as documented by the
-        // comment on MATE_SCORE above: "mate found at `ply` moves from
-        // the root"). In a still-young game the two values nearly
-        // coincide (`board.ply` small), masking the problem; but in a
-        // long game (board.ply beyond ~64, i.e. past full move 32 —
-        // anything but rare, observed several times in real games during
-        // this session) the resulting mate score (±(MATE_SCORE -
-        // board.ply)) drifts away from ±MATE_SCORE by well more than
-        // MATE_THRESHOLD, and `is_mate_score()` no longer recognizes it
-        // as such: RFP/Futility remain active near a real mate, and the
-        // mate distance pruning logic below would have no correct
-        // foundation to operate on.
-        return if in_check { -MATE_SCORE + (ply as i32) } else { 0 };
-    }
+    // LAZY LEGALITY (D3): pseudo-legal moves only. The legality of each move is tested when the loop reaches it, by
+    // `esegui_mossa` itself (it refuses and undoes an illegal move), instead of making and unmaking EVERY move up front
+    // just to build the legal list: on a typical search only about a quarter of the legal moves are ever reached before a
+    // cutoff. The order among the legal moves is unchanged (illegal moves only sit between them), and `moves_searched`
+    // already counts only the legal moves actually tried, so PVS, LMR and futility see exactly what they saw before.
+    // Checkmate/stalemate is therefore detected after the loop: no legal move was found.
+    let mut legal_moves = board.genera_mosse();
 
     let safe_ply = if ply < MAX_PLY { ply } else { MAX_PLY - 1 };
 
@@ -845,6 +834,26 @@ fn negamax(
                 return beta;
             }
         }
+    }
+
+    // No legal move at all (every pseudo-legal move was refused by `esegui_mossa`): checkmate or stalemate, returned
+    // BEFORE the transposition-table store exactly as when the legal list used to be empty up front.
+    if moves_searched == 0 {
+        // FIX: this used to use `board.ply` (the game's ABSOLUTE ply,
+        // which keeps growing for the whole game) instead of `ply` (the
+        // ply RELATIVE to the root of THIS search, as documented by the
+        // comment on MATE_SCORE above: "mate found at `ply` moves from
+        // the root"). In a still-young game the two values nearly
+        // coincide (`board.ply` small), masking the problem; but in a
+        // long game (board.ply beyond ~64, i.e. past full move 32 —
+        // anything but rare, observed several times in real games during
+        // this session) the resulting mate score (±(MATE_SCORE -
+        // board.ply)) drifts away from ±MATE_SCORE by well more than
+        // MATE_THRESHOLD, and `is_mate_score()` no longer recognizes it
+        // as such: RFP/Futility remain active near a real mate, and the
+        // mate distance pruning logic below would have no correct
+        // foundation to operate on.
+        return if in_check { -MATE_SCORE + (ply as i32) } else { 0 };
     }
 
     let best_move_to_store = if pv_line.len > 0 { pv_line.moves[0] } else { Mossa::null() };
