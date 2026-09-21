@@ -339,6 +339,12 @@ pub fn ordina_mosse(
     mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers, history, counter_move, capture_history));
 }
 
+/// Attacker value used ONLY to order captures (MVV-LVA) when the attacker is the King. The King's material value is
+/// 20000, which cancelled the whole 20000 base of a capture: a King capture scored `victim*10 + caphist`, the same as
+/// an ordinary quiet move. Any value above the queen keeps the King the least preferred attacker among equals, without
+/// erasing the capture category.
+const KING_ATTACKER_ORDER_VALUE: i32 = 1000;
+
 fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
     // 1. TT move (highest priority)
     if m.data == tt_move.data && !m.is_null() { return 30000; }
@@ -370,7 +376,10 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
         if see_value >= 0 {
             let victim_val = if m.move_flag() == MoveFlag::EnPassant { 100 }
                              else { Pezzo::from_index(captured).valore() };
-            let attacker_val = Pezzo::from_index(attacker).valore();
+            let attacker_val = match Pezzo::from_index(attacker) {
+                Pezzo::Re => KING_ATTACKER_ORDER_VALUE,
+                p => p.valore(),
+            };
             return 20000 + victim_val * 10 - attacker_val + cap_hist;
         } else {
             return -2000 + see_value + cap_hist;
