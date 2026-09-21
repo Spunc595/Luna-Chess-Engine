@@ -177,6 +177,19 @@ pub struct SharedHistory {
     /// `capture_history[pezzo_attaccante][a][pezzo_catturato]`, same
     /// gravity/malus mechanism applied to captures.
     pub capture_history: [[[AtomicI32; 6]; 64]; 6],
+    /// Continuation history, 1 ply: `[prev_piece][prev_to][piece][to]` flattened (see `cont_index`), the bonus of a
+    /// quiet move `piece -> to` as an answer to the opponent's last move `prev_piece -> prev_to`. On the heap: at
+    /// 6*64*6*64*4 bytes = 590 KB it must not sit on a thread stack.
+    pub cont_history: Vec<AtomicI32>,
+}
+
+/// Number of continuation-history entries for one previous move (all `piece x to` answers).
+pub const CONT_SUBTABLE: usize = 6 * 64;
+
+/// Index of the first entry of the sub-table of a previous move `prev_piece -> prev_to`.
+#[inline(always)]
+pub fn cont_base(prev_piece: usize, prev_to: usize) -> usize {
+    (prev_piece * 64 + prev_to) * CONT_SUBTABLE
 }
 
 impl SharedHistory {
@@ -184,6 +197,7 @@ impl SharedHistory {
         SharedHistory {
             history: std::array::from_fn(|_| std::array::from_fn(|_| std::array::from_fn(|_| AtomicI32::new(0)))),
             capture_history: std::array::from_fn(|_| std::array::from_fn(|_| std::array::from_fn(|_| AtomicI32::new(0)))),
+            cont_history: (0..6 * 64 * CONT_SUBTABLE).map(|_| AtomicI32::new(0)).collect(),
         }
     }
 
@@ -198,6 +212,7 @@ impl SharedHistory {
                 for cell in row { cell.store(0, Ordering::Relaxed); }
             }
         }
+        for cell in &self.cont_history { cell.store(0, Ordering::Relaxed); }
     }
 }
 
@@ -647,7 +662,16 @@ fn negamax(
         Mossa::null()
     };
 
-    crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply], &sh.history, counter_move, &sh.capture_history);
+    // Continuation-history sub-table of the previous move (None at the root and after a null move: the sentinel for
+    // "no previous move"). `board` still has `prev_move` applied here, so its piece is on its destination square.
+    let cont_start = if !prev_move.is_null() {
+        Some(cont_base(board.pezzo_in(prev_move.a()).unwrap_or(0), prev_move.a()))
+    } else {
+        None
+    };
+    let cont_slice = cont_start.map(|b| &sh.cont_history[b..b + CONT_SUBTABLE]);
+
+    crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply], &sh.history, counter_move, &sh.capture_history, cont_slice);
 
     // Futility Pruning parameters for this node: invariant for the whole
     // duration of the move loop, computed once outside the loop.
@@ -800,6 +824,16 @@ fn negamax(
                         update_history_gravity(&sh.history[side][tried.da()][tried.a()], -bonus, HISTORY_MAX);
                     }
 
+                    // --- CONTINUATION HISTORY (1 ply): same bonus/malus, indexed by the previous move too ---
+                    if let Some(b) = cont_start {
+                        let piece = board.pezzo_in(m.da()).unwrap_or(0);
+                        update_history_gravity(&sh.cont_history[b + piece * 64 + m.a()], bonus, HISTORY_MAX);
+                        for &tried in &quiets_tried[..quiets_tried_count.saturating_sub(1)] {
+                            let tp = board.pezzo_in(tried.da()).unwrap_or(0);
+                            update_history_gravity(&sh.cont_history[b + tp * 64 + tried.a()], -bonus, HISTORY_MAX);
+                        }
+                    }
+
                     // --- COUNTER-MOVE HEURISTIC ---
                     // We register `m` as a response to `prev_move` only if
                     // a previous move really existed (not at the root, not
@@ -901,7 +935,7 @@ fn quiescence(
     // `score_move` will never be reached for these elements. We still
     // pass the real table (instead of a dummy one) so as not to introduce
     // a second parameter type just for this call site.
-    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history, None);
 
     for m in moves {
         // --- SEE PRUNING (objectively losing captures) ---

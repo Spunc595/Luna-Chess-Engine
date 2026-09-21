@@ -335,11 +335,16 @@ pub fn ordina_mosse(
     history: &[[[AtomicI32; 64]; 64]; 2],
     counter_move: Mossa,
     capture_history: &[[[AtomicI32; 6]; 64]; 6],
+    cont_history: Option<&[AtomicI32]>,
 ) {
-    mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers, history, counter_move, capture_history));
+    mosse.sort_by_cached_key(|m| -score_move(m, board, tt_move, killers, history, counter_move, capture_history, cont_history));
 }
 
-fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
+/// Highest score a quiet move can get with the continuation history added: kept below the counter-move (10000) and the
+/// killers (11000/12000), which must stay stronger signals than any aggregated statistic (see search.rs::HISTORY_MAX).
+const QUIET_SCORE_MAX: i32 = 9900;
+
+fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6], cont_history: Option<&[AtomicI32]>) -> i32 {
     // 1. TT move (highest priority)
     if m.data == tt_move.data && !m.is_null() { return 30000; }
 
@@ -429,8 +434,15 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
         _ => 0
     };
     let history_score = history[board.turno.indice()][m.da()][m.a()].load(Ordering::Relaxed);
+    // Continuation history (1 ply): how well this piece/destination has answered the piece/destination of the
+    // opponent's last move. `cont_history` is the 6*64 sub-table of that last move, `None` at the root and after a
+    // null move (no previous move). Half weight: it is a second, noisier statistic on top of the main history.
+    let cont_score = match cont_history {
+        Some(c) => c[piece_type * 64 + to_sq].load(Ordering::Relaxed) / 2,
+        None => 0,
+    };
 
-    1000 + pst_score + history_score
+    (1000 + pst_score + history_score + cont_score).min(QUIET_SCORE_MAX)
 }
 
 #[cfg(test)]
