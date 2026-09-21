@@ -31,6 +31,7 @@ def main():
     score = (w + dr / 2) / n if n else float("nan")
     elo = 400 * math.log10(score / (1 - score)) if 0 < score < 1 else float("nan")
     print(f"games: {n}   A: +{w} ={dr} -{l}   score {score:.4f}   Elo(A-B) ~ {elo:+.1f}")
+    print(f"draw rate: {dr / n:.4f}" if n else "draw rate: n/a")
     time_losses = sum(v for k, v in term.items() if "time" in k.lower())
     print(f"GAMES LOST ON TIME: {time_losses}   " + ("(match VALID on this criterion)" if time_losses == 0 else "(MATCH INVALID: the machine was overloaded)"))
     print("terminations: " + ", ".join(f"{k}: {v}" for k, v in sorted(term.items())))
