@@ -345,6 +345,12 @@ pub fn ordina_mosse(
 /// erasing the capture category.
 const KING_ATTACKER_ORDER_VALUE: i32 = 1000;
 
+/// Cap on the capture-history contribution to a capture with SEE < 0. Without it the total could reach
+/// -2000 + see + 12800 = about 10800, above the best quiet move (about 9242) and above the counter-move (10000), while
+/// the comment below says such captures are demoted BELOW quiet moves. With the cap the total is at most
+/// -2000 + (-1) + 1000 = -1001, always below the neutral quiet score of 1000.
+const LOSING_CAPTURE_HISTORY_CAP: i32 = 1000;
+
 fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2], history: &[[[AtomicI32; 64]; 64]; 2], counter_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
     // 1. TT move (highest priority)
     if m.data == tt_move.data && !m.is_null() { return 30000; }
@@ -382,7 +388,7 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
             };
             return 20000 + victim_val * 10 - attacker_val + cap_hist;
         } else {
-            return -2000 + see_value + cap_hist;
+            return -2000 + see_value + cap_hist.min(LOSING_CAPTURE_HISTORY_CAP);
         }
     }
 
