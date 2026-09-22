@@ -297,3 +297,40 @@ Consequence for the benchmark harness: two identical `go` in one process already
 survives from one `go` to the next: 1,035,929 then 668,137 nodes on `main`); with G5 the second search also carries the
 history (653,500). `scripts/bench_suite.py` already sends `ucinewgame` between the searches of a position (it clears
 both), so its node-count gate is unaffected.
+
+
+## Block A: an accumulator save/restore stack, first cut — held, not a win (2026-09-22)
+
+Branch `acc-a-stack` (`b646f8c`), pushed and NOT merged. `king_acc_stack` (King moves only) replaced by `acc_stack`, a
+stack of whole accumulators (4 KB, both perspectives) pushed by `esegui_mossa` before touching `nnue_acc` and popped by
+`annulla_mossa`/`annulla_mossa_veloce`, on EVERY move now, not just King moves. Unmake becomes a pop + one 4 KB copy
+instead of re-applying the inverse of every incremental update; the make side of `esegui_mossa` is UNCHANGED (still the
+same `add_piece`/`remove_piece` calls as before).
+
+**Correctness**: node counts on `bench_suite.py` are identical to `main` on both suite positions (the gate). 55 tests
+pass, including a new one in `tests/board_invariants.rs`: after every move of a random sequence, `board.nnue_acc` is
+checked against a FULL `refresh_nnue` recomputed at that exact position (ground truth, not just round-trip symmetry —
+a bug where every push agrees with its own pop but both disagree with the truth would still pass every existing
+round-trip assertion in that file).
+
+**Speed, `bench_suite.py`, protocol `3 5`, depth 18, 1 thread, against `main`:**
+
+| position | `acc-a-stack` vs `main` (t_min) | noise floor of this run |
+|---|---|---|
+| middlegame | +2.4% | 0.8% |
+| pawn endgame | **-2.4%** | 0.0% |
+
+Mixed sign, and neither position comes close to the plan's own honest estimate (10-15%) or its floor for entering
+(5%). **Held: not sent to SPRT, not merged.**
+
+**Why the gain didn't show up.** The design only sped up the unmake side (pop + one copy instead of several
+incremental calls); it added a NEW cost to the make side that wasn't there before for most moves — a push that used to
+happen only for King moves that change the feature mapping now happens on every move. For the pawn endgame position
+(49% King moves per the earlier accumulator-time measurement) that added push cost on already-expensive King-move
+makes appears to outweigh what the now-cheap unmake saves. The micro-benchmark that motivated this block (`stackbench.rs`,
+160-210 ns per cycle against 850-920 ns today) fused the SUBTRACT and ADD of a quiet move into one pass per perspective
+on the MAKE side too; this first cut left the make side untouched, which is very likely most of the gap between the
+micro-benchmark's ratio and what was actually measured here. A fused make side (and captures/castling/promotions each
+needing their own fused variant, not just the quiet case the micro-benchmark covered) is the natural next step, but
+was not written this round: reporting a number honestly, per the project's own rule, instead of assuming the
+micro-benchmark's ratio would transfer.
