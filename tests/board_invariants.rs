@@ -62,10 +62,10 @@ struct Snapshot {
     mezze_mosse: u32,
     ply: u32,
     nnue_acc: Accumulator,
-    /// Length of the side stack of saved accumulator halves: must come back to
+    /// Length of the stack of saved whole accumulators: must come back to
     /// the same value after any make/unmake pair, including the internal undo
     /// of an illegal move.
-    king_stack_len: usize,
+    acc_stack_len: usize,
 }
 
 impl Snapshot {
@@ -81,7 +81,7 @@ impl Snapshot {
             mezze_mosse: board.mezze_mosse,
             ply: board.ply,
             nnue_acc: board.nnue_acc,
-            king_stack_len: board.king_acc_stack.len(),
+            acc_stack_len: board.acc_stack.len(),
         }
     }
 
@@ -234,6 +234,19 @@ fn run_one_sequence(name: &str, fen: &str, z: &ZobristKeys, net: &LunaNNUE, rng:
         board.esegui_mossa(&m, z, Some(&net));
         played.push(m);
         intermediate_snapshots.push(Snapshot::take(&board));
+
+        // Ground truth, not just round-trip symmetry: the accumulator kept by acc_stack's
+        // push/pop must match a FULL recomputation from this exact position, not merely return
+        // to where it started. A bug that made every push/pop agree with each other but disagree
+        // with the truth would still pass every round-trip assertion in this file; only this
+        // check would catch it.
+        let mut ground_truth = board.clone();
+        ground_truth.refresh_nnue(Some(net));
+        assert_eq!(
+            board.nnue_acc, ground_truth.nnue_acc,
+            "{name}: accumulator after move {} of the sequence disagrees with a full refresh at the same position, seed={SEED}",
+            played.len()
+        );
     }
 
     // Unmake in reverse order, checking after each unmake against the
