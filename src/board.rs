@@ -192,7 +192,23 @@ pub struct Scacchiera {
     /// internally via `annulla_mossa_veloce`), just unconditionally instead of only for King
     /// moves. Deliberately NOT inside `UndoData`: that would add 4 KB to every move, not just the
     /// ones actually played with a network loaded.
-    pub acc_stack: Vec<Accumulator>,
+    // THROWAWAY (measurement only, this whole branch — Block A's decisive cache-footprint test):
+    // `AccSlot` wraps `Accumulator` with 12 KB of inert padding, quadrupling the stride between
+    // `acc_stack` entries (4 KB -> 16 KB). Push/pop still copy exactly the same 4 KB of real
+    // payload as `acc-a-stack`; only the memory layout changes. If NPS moves with this, the
+    // earlier drop was cache footprint; if it doesn't, it wasn't. See BENCHMARKS.md, Block A.
+    pub acc_stack: Vec<AccSlot>,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C, align(64))]
+pub struct AccSlot {
+    pub acc: Accumulator,
+    pub _pad: [u8; 12288],
+}
+impl AccSlot {
+    #[inline(always)]
+    fn wrap(acc: Accumulator) -> Self { AccSlot { acc, _pad: [0u8; 12288] } }
 }
 
 impl Scacchiera {
@@ -517,7 +533,7 @@ impl Scacchiera {
         // Whole accumulator saved BEFORE anything below touches it: unmake (`annulla_mossa` /
         // `annulla_mossa_veloce`) restores it by popping instead of re-deriving it. See the field
         // doc comment on `acc_stack` for why this replaced the earlier King-only save.
-        if nnue.is_some() { self.acc_stack.push(self.nnue_acc); }
+        if nnue.is_some() { self.acc_stack.push(AccSlot::wrap(self.nnue_acc)); }
 
         // King move that changes the mover's feature mapping (see
         // `nnue::same_feature_mapping`): its half gets recomputed below with a full refresh. Only
@@ -632,7 +648,7 @@ impl Scacchiera {
         // (illegal, now-undone) move, replacing every board-mutation branch above's own inverse
         // net.remove_piece/add_piece calls with a single restore. See `acc_stack`'s doc comment.
         if nnue.is_some() {
-            self.nnue_acc = self.acc_stack.pop().expect("acc_stack empty during the internal undo of an illegal move: make/unmake imbalance");
+            self.nnue_acc = self.acc_stack.pop().expect("acc_stack empty during the internal undo of an illegal move: make/unmake imbalance").acc;
         }
 
         self.turno = Colore::from_index(us);
@@ -708,7 +724,7 @@ impl Scacchiera {
         // add_piece calls (and the King's separate half-restore) with a single restore. See
         // `acc_stack`'s doc comment.
         if nnue.is_some() {
-            self.nnue_acc = self.acc_stack.pop().expect("acc_stack empty during unmake: make/unmake imbalance");
+            self.nnue_acc = self.acc_stack.pop().expect("acc_stack empty during unmake: make/unmake imbalance").acc;
         }
 
         // 3. Restore counters and hash keys
