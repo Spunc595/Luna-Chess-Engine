@@ -334,3 +334,37 @@ micro-benchmark's ratio and what was actually measured here. A fused make side (
 needing their own fused variant, not just the quiet case the micro-benchmark covered) is the natural next step, but
 was not written this round: reporting a number honestly, per the project's own rule, instead of assuming the
 micro-benchmark's ratio would transfer.
+
+
+## Block C: which variant of the two remaining comments is in today's code (2026-09-23)
+
+Re-read `src/search.rs:586` (the "improving" flag in reverse futility pruning) and `:603` (the null-move reduction
+bonus tied to how much the static eval exceeds beta), against the question that was missing before: is today's code
+the variant that was tried, or the one that was kept?
+
+Both comments say the same thing, word for word in structure: "was tried and discarded" (586) and "was tried and
+reverted" (603). Both mean the tested addition was REMOVED; today's code is the plain variant, without either. So in
+both cases the tested claim ("tried X, found neutral/negative, so we don't do it") leaves X genuinely **untested** by
+this project's own standard (the harness it was tried on had a 1.6-2.9% draw rate, the same broken batch as G5's old
+"persist-heuristics" result) — **the candidate for both is to add X back** and measure it with a real SPRT, not to
+remove anything. Not queued this round; recorded so the direction is no longer missing.
+
+## Block A, decisive test: the cache-footprint hypothesis confirmed — closed (2026-09-23)
+
+Pre-registered before running it (see `piano-ricerca.md`): pad `acc_stack`'s entries from 4 KB to 16 KB with inert
+bytes, same push/pop code, same 4 KB of real payload copied either way (branch `acc-a-cache-test`, `a81b917`, on top of
+`acc-a-stack`). If NPS moves with the padding, the earlier drop was cache footprint; if it doesn't, it wasn't.
+
+`bench_suite.py`, protocol `3 5`, depth 18, 1 thread, `main` / `acc-a-stack` / the padded probe, node counts identical
+on all three (55 tests still green):
+
+| position | `acc-a-stack` vs `main` | padded probe vs `main` | padded probe vs `acc-a-stack` | floor of this run |
+|---|---|---|---|---|
+| middlegame | +4.4% | **-9.8%** | **-14.9%** | 1.3% |
+| pawn endgame | -1.9% | **-10.8%** | **-8.7%** | 5.4% |
+
+Both comparisons against the padded probe are far past the floor, in both positions, in the same direction. **The
+padding made it worse. Per the pre-registered rule, Block A closes for good**: a fused make (`dest = src +/- rows` in
+one pass, same footprint as `acc-a-stack`) would not save anything either, since the mechanism the padding isolated —
+the stack leaving L1 for a 4 KB-per-slot layout, let alone a bigger one — is exactly what a fused make does not fix.
+`acc-a-stack` and `acc-a-cache-test` stay on the remote, not merged, as the record of why.
