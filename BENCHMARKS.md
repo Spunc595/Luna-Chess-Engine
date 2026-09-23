@@ -568,3 +568,33 @@ cutting lines that mattered) -- only the SPRT, and D2's pre-registered rule for 
 queued, and D2's own point -- an SPRT rejection here would not necessarily mean the correction is wrong, it could mean
 the margins above need retuning first (pre-registered in `piano-ricerca.md`, Block D2). That call is not mine to make
 unilaterally.
+
+
+## Note on the queue (2026-09-23, after D3 was queued)
+
+**G3 runs without the 23-September stop-rule.** Verified by reading, not assumed: `sprt_match3.sh` hard-codes
+`elo0=0 elo1=10 alpha=0.05 beta=0.05` and the 6,000-round (12,000-game) cap as literal arguments to `cutechess-cli`
+and to itself (no config file anywhere under `~/sprt2`); `queue3.sh` was written and started before the stop-rule
+existed and cannot be edited while it is live (the same fd-reading trap PROTOCOLLO.md already documents). G3 will
+therefore run to the old cap-only rule -- 12,000 games or an SPRT bound crossing, nothing else. An external watchdog
+that would SIGTERM G3's own `cutechess-cli` to enforce the new rule was considered and rejected: it is exactly the
+kind of intervention on a live queue this project has already decided not to do (one was briefly running, `--detect
+g3` mode of `sprt_stop_rule.sh`, and was stopped before it could ever act). Accepted as a known limitation; G3's own
+referto will say explicitly that it ran under the pre-23-September rule, not the current one.
+
+**The D3 -> G5 handoff, file by file** (no step depends on a string another script constructed -- every gate is a
+plain file-existence check):
+
+| writer | file | reader | when |
+|---|---|---|---|
+| `queue3.sh` (untouched) | `queue_done` | `queue_d3.sh` | end of the G1->G2->G3 loop |
+| `queue_d3.sh` | `d3_verdict` (text: `H1_ACCEPTED` / `H0_ACCEPTED` / `INCONCLUSIVE_AT_CAP` / `STOP_RULE (...)`) | `queue5.sh` | after its own report, before closing |
+| `queue_d3.sh` | `queue_d3_done` OR `queue_d3_stopped` | `queue5.sh` | normal close, or a sources/build/time-loss gate failing |
+| `queue5.sh` | reads `d3_verdict` only if `queue_d3_done` exists, to pick the base (head+D3 iff `H1_ACCEPTED`) | -- | -- |
+
+If D3 is ended by the stop-rule: `sprt_stop_rule.sh` sends SIGTERM only to the `cutechess-cli` process (matched by
+`-pgnout`), never to `sprt_match3.sh`; that script has no `set -e`, so it still reaches `touch done` normally.
+`queue_d3.sh` sees no error, reads `stop_rule_verdict.txt`, writes `d3_verdict = "STOP_RULE (...)"` and closes with
+`queue_d3_done` -- `queue5.sh` proceeds exactly as on an ordinary rejection (base stays `head`, without D3). If
+instead a gate fails, `queue_d3.sh` writes `queue_d3_stopped` with no `d3_verdict`, and `queue5.sh` stops and waits
+for a decision rather than starting.
