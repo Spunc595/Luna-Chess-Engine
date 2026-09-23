@@ -490,11 +490,15 @@ Spearman against Stockfish.
 - paired bootstrap of the difference (scaled - raw), 10,000 resamples, seed `20260923`: 95% CI **[-0.0015, +0.0005]**
   -- **contains zero.**
 
-Per the pre-registered reading: this does not resolve it, and does not stop it either. 2,000 positions do not have the
-resolution to see this specific effect in Spearman (which only cares about rank, and the scale mostly compresses
-magnitude without moving many ranks on a static, mixed-phase set); the structural argument stands on its own -- the
-network is trained inside akimbo with this factor active, so its raw output is half a formula, not a calibrated
-standalone value. Proceeds to the SPRT via D3.
+**Correction to how this was first read (2026-09-23): the interval is not "too imprecise to tell", it is precise and
+zero.** At width 0.002 there is no room for a real rank effect to be hiding in it -- Luna orders these 2,000 positions
+against Stockfish depth 8 exactly as well with the scale as without it. But that is not evidence against the patch,
+because **Spearman-vs-Stockfish was the wrong quantity to check it with**: akimbo's factor was never tuned to agree
+with Stockfish's ranking, it was tuned to play stronger *inside akimbo's own search*. The patch's actual claim was
+never "orders positions better" -- it is "the network was trained inside akimbo with this factor active, and Luna
+uses it raw, i.e. half of a formula". D1 neither confirms nor touches that claim in either direction; it rules out a
+*different* hypothesis (a static ranking improvement) that the patch never made. Proceeds to the SPRT via D3 on the
+structural argument, not because D1 was inconclusive.
 
 Multiplier (`mat_factor`) distribution over the same 2,000 positions, as computed by akimbo's own formula
 (`700 + (knights+bishops)*450 + rooks*650 + queens*1250) / 32)`, `src/position.rs::scale` / `src/consts.rs::SEE_VALS`,
@@ -545,10 +549,14 @@ suite position drops from 1710 cp to 1168 cp under both engines identically.
 **Node counts, as expected, changed** (`bench_suite.py --no-node-gate`, the node-count-identical gate does not apply
 to a semantic change; protocol `3 5`, depth 18, 1 thread, against `main`):
 
-| position | nodes, `main` | nodes, `d3-material-scale` | change | wall time | floor of this run |
-|---|---|---|---|---|---|
-| middlegame | 1,329,589 | 1,267,397 | -4.7% | -5.3% (faster) | 0.1% |
-| pawn endgame | 1,820,774 | 1,543,499 | **-15.2%** | +18.0% (faster) | 0.6% |
+Both columns below use the SAME convention: positive = `d3-material-scale` is smaller/faster than `main` (matching
+`bench_suite.py`'s own "vs rif" sign), so a bigger positive number in either column means a bigger change in the same
+direction, not opposite ones.
+
+| position | node count change (+ = fewer nodes) | wall-time change (+ = faster) | floor of this run |
+|---|---|---|---|
+| middlegame | +4.7% | +5.3% | 0.1% |
+| pawn endgame | **+15.2%** | +18.0% | 0.6% |
 
 Both changes are far past the floor. Fewer nodes and less time in both positions, more so in the pawn endgame --
 where material is lowest and the scale factor is closest to its 0.684 floor, shrinking evaluations the most and
