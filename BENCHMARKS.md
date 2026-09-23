@@ -471,3 +471,92 @@ three-step compatibility/copy/Spearman test in the plan does not apply: there is
 
 **No adoption, no merge, no Oracle queue entry from this block.** Only the material-scale finding of B2b is a real,
 actionable candidate, and it was deliberately left unqueued pending a decision.
+
+
+## Block D: the material scale on the network output (2026-09-23)
+
+Corrects the 0.8522 figure quoted throughout `BENCHMARKS.md`/`RESULTS.md`: it is not akimbo's own evaluation, it is
+akimbo's network evaluated WITHOUT akimbo's own post-network scale (see Block B and the `RESULTS.md` correction in
+Luna-CE-NNUE, `e59f893`).
+
+### D1 -- static filter before spending Oracle
+
+Paired comparison on the 2,000 positions of `results/akimbo_vs_stockfish.csv` (same set, same Stockfish depth-8
+reference already used for the 0.8522 figure): applying the scale to the raw akimbo-network output before computing
+Spearman against Stockfish.
+
+- rho, raw (today's number, recomputed on this CSV): **0.8522**
+- rho, with the material scale applied: **0.8518**
+- paired bootstrap of the difference (scaled - raw), 10,000 resamples, seed `20260923`: 95% CI **[-0.0015, +0.0005]**
+  -- **contains zero.**
+
+Per the pre-registered reading: this does not resolve it, and does not stop it either. 2,000 positions do not have the
+resolution to see this specific effect in Spearman (which only cares about rank, and the scale mostly compresses
+magnitude without moving many ranks on a static, mixed-phase set); the structural argument stands on its own -- the
+network is trained inside akimbo with this factor active, so its raw output is half a formula, not a calibrated
+standalone value. Proceeds to the SPRT via D3.
+
+Multiplier (`mat_factor`) distribution over the same 2,000 positions, as computed by akimbo's own formula
+(`700 + (knights+bishops)*450 + rooks*650 + queens*1250) / 32)`, `src/position.rs::scale` / `src/consts.rs::SEE_VALS`,
+verified by reading the source, not assumed):
+
+| min | 10th | 20th | 30th | 40th | median | 60th | 70th | 80th | 90th | max |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 700 | 747 | 775 | 803 | 832 | 860 | 887 | 915 | 943 | 957 | 971 |
+
+As a fraction of 1024: 0.684 (min, effectively bare kings) to 0.948 (max, this set's most piece-heavy position),
+median 0.840.
+
+### D2 -- centipawn constants the search compares against a valuation (read before writing the patch)
+
+All of `src/search.rs`'s constants, and which of them are added to or compared against an actual NNUE output
+(`static_eval`/`stand_pat`), not a search bound (`alpha`/`beta`, which move with the tree and are not separately
+tunable numbers) and not a move-ordering score (a different, unrelated scale, capped at 41,700 -- see `movegen.rs`):
+
+| constant | file:line | value | where it meets a valuation |
+|---|---|---|---|
+| `RFP_MARGIN_PER_PLY` | `search.rs:49` | 110 | `margin = RFP_MARGIN_PER_PLY * depth`; `static_eval - margin >= beta` (search.rs:591-593) |
+| `FUTILITY_MARGIN_PER_PLY` | `search.rs:54` | 130 | `static_eval + FUTILITY_MARGIN_PER_PLY * depth`, compared to `alpha` (search.rs:655) |
+| `ASPIRATION_INITIAL_DELTA` | `search.rs:70` | 25 | initial half-width of the aspiration window around the previous iteration's score (search.rs:409) |
+| `DELTA_MARGIN` | `search.rs:71` | 200 | `stand_pat + Queen_value + DELTA_MARGIN < alpha`, quiescence delta pruning (search.rs:887, 935) |
+| `Pezzo::Regina.valore()` | `board.rs:47` | 900 | added directly to `stand_pat` in the same delta-pruning check (search.rs:887) |
+
+Not in this list, and not touched by this patch: `MATE_SCORE`/`INFINITY`/`MATE_THRESHOLD` (sentinels far outside any
+real evaluation, never meant to be on the network's scale) and `HISTORY_MAX`/`CAPTURE_HISTORY_MAX` (move-ordering
+score units, a separate, unrelated scale). No razoring exists in this engine (searched for it; not found).
+
+**These five did not get retuned this round** -- D3 is one expression, not a retuning pass, per the plan.
+
+### D3 -- the patch
+
+Branch `d3-material-scale` (`d12d089`), one change: `nnue.rs::evaluate_from_accumulator` now takes `board: &Scacchiera`
+and applies `raw * (700 + material/32) / 1024` after the network's own output, before the existing +/-15000 clamp --
+ported line-for-line from akimbo's `Position::scale`. `material` counts knights/bishops/rooks/queens of BOTH colours
+(pawns and kings do not count), matching akimbo's own `self.bb[Piece].count_ones()` (no colour mask). Never touches a
+mate score: this function is never called to produce one (`search::eval`'s only other branch, the classical PST path
+used with NNUE off, is untouched).
+
+Verified against the real akimbo binary (not just the Python reimplementation): the patched engine and akimbo's own
+`eval` UCI command agree **exactly, 0 mismatches, on all 2,000 positions** of `eval_set.epd` -- e.g. the pawn-endgame
+suite position drops from 1710 cp to 1168 cp under both engines identically.
+
+55 tests still green (`cargo test --release`).
+
+**Node counts, as expected, changed** (`bench_suite.py --no-node-gate`, the node-count-identical gate does not apply
+to a semantic change; protocol `3 5`, depth 18, 1 thread, against `main`):
+
+| position | nodes, `main` | nodes, `d3-material-scale` | change | wall time | floor of this run |
+|---|---|---|---|---|---|
+| middlegame | 1,329,589 | 1,267,397 | -4.7% | -5.3% (faster) | 0.1% |
+| pawn endgame | 1,820,774 | 1,543,499 | **-15.2%** | +18.0% (faster) | 0.6% |
+
+Both changes are far past the floor. Fewer nodes and less time in both positions, more so in the pawn endgame --
+where material is lowest and the scale factor is closest to its 0.684 floor, shrinking evaluations the most and
+making the fixed centipawn margins of D2 relatively wider, so the search prunes more. This is exactly the mechanism
+D2 warned about, observed directly: node count alone does not say whether that extra pruning is safe (it could be
+cutting lines that mattered) -- only the SPRT, and D2's pre-registered rule for reading it, can say that.
+
+**Not queued on Oracle.** Per the plan's point 5: waiting for these numbers (D1, D2) to be seen before anything is
+queued, and D2's own point -- an SPRT rejection here would not necessarily mean the correction is wrong, it could mean
+the margins above need retuning first (pre-registered in `piano-ricerca.md`, Block D2). That call is not mine to make
+unilaterally.
