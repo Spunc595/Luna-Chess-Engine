@@ -368,3 +368,106 @@ padding made it worse. Per the pre-registered rule, Block A closes for good**: a
 one pass, same footprint as `acc-a-stack`) would not save anything either, since the mechanism the padding isolated —
 the stack leaving L1 for a 4 KB-per-slot layout, let alone a bigger one — is exactly what a fused make does not fix.
 `acc-a-stack` and `acc-a-cache-test` stay on the remote, not merged, as the record of why.
+
+
+## Block B: which akimbo network, does Luna reproduce it, and is there a newer one (2026-09-23)
+
+Correction to `piano-ricerca.md`'s "External check -- MCEC" section: the claim "at equal network the gap between Luna
+and akimbo must be search" is withdrawn. It rested on two unverified legs (which akimbo version, and whether Luna's
+independently-ported inference actually reproduces akimbo's). Both are now checked below. What still stands, and
+never depended on akimbo, is the internal comparison that justifies not switching networks today: gen3's static
+Spearman against Stockfish is 0.7005, the embedded network's is 0.8522.
+
+### B1 -- which version
+
+`resources/net.bin` (sha256 `b3faa88a...9c194`, 6,297,664 bytes) is byte-for-byte identical to the `resources/net.bin`
+on akimbo's `main` branch today (`jw1912/akimbo`, last pushed 2025-08-26, not archived). Walking the commit history of
+that one path in akimbo's repo: it was introduced by commit `f65305c843` ("Joined the Dark Side (#208)", 2024-03-27)
+and has not changed since -- akimbo has had no network update in over two years, even though other parts of the
+engine kept receiving commits into 2025. That commit is **one commit after** the `v1.0.0` tag (2024-03-26): the
+tagged release still has the previous network (`6f1059c...`, different hash, same 6,297,664 bytes), so the network
+Luna embeds was never part of a tagged akimbo release -- it is a `main`-branch commit, matched by content, not by a
+version number anywhere in Luna's own files.
+
+Every commit that ever changed `resources/net.bin` in akimbo's history, with the file size at that commit (source of
+the architecture progression; PR titles are akimbo's own):
+
+| commit | date | PR | size (bytes) |
+|---|---|---|---|
+| `354857a5` | 2023-08-15 | NNUE (#109) | 49,346 |
+| `6f7ec003` | 2023-08-16 | 50/50 Score/WDL Split (#112) | 49,346 |
+| `bf208939` | 2023-08-16 | Data Generated with Soft Node Limit (#113) | 49,346 |
+| `291ed32b` | 2023-08-16 | Shuffle Data (#115) | 49,346 |
+| `4f79b823` | 2023-08-18 | Increase Hidden Layer Size to 64 (#119) | 98,690 |
+| `f19a94d7` | 2023-08-18 | Increase Hidden Layer Size to 256 (#120) | 394,754 |
+| `85d381c2` | 2023-08-19 | More Data, Epoch 20 (#121) | 394,754 |
+| `9501ac5b` | 2023-09-04 | Datagen Improvements (#124) | 98,690 |
+| `7c648fbc` | 2023-09-04 | New Net (#125) | 98,690 |
+| `61ffa0a1` | 2023-09-05 | New Net (#126) | 394,754 |
+| `c06f71bc` | 2023-09-06 | New Net, Epoch 40 (#127) | 394,754 |
+| `c6e42e01` | 2023-09-08 | New Net, Different LR Schedule (#128) | 394,754 |
+| `129f41e6` | 2023-09-19 | Net Name + Misc (#137) | (unreadable via the API) |
+| `fe087ef7` | 2023-10-05 | New Data (#151) | 394,816 |
+| `f7e7d729` | 2023-10-10 | New Net (#152) | 789,568 |
+| `3941ed13` | 2023-10-14 | Output Buckets (#155) | 803,904 |
+| `8965b9b0` | 2023-10-26 | New Net (#160) | 803,904 |
+| `b72b2bf0` | 2024-03-22 | Support EVALFILE (#203) | 4,723,264 |
+| `6f1059cc` | 2024-03-26 | Network with HL = 1024 (#206), tagged `v1.0.0` | 6,297,664 |
+| `f65305c8` | 2024-03-27 | **Joined the Dark Side (#208) -- this is Luna's network** | 6,297,664 |
+
+### B2a -- Python vs Rust round-trip, on scale, and the old result withdrawn
+
+Wrote a from-scratch Python re-implementation of `nnue.rs`'s forward pass (`accumulate` from `feature_set.py`'s
+indices, SCReLU flatten, the same `QA=255 QB=64 QAB SCALE=400` and the same truncating-toward-zero integer division
+as Rust's `/` on `i32`, which Python's `//` does not do on its own), reading the raw quantized `net.bin` directly --
+no training-time float model involved, so this is not the same code path as the old `verify.py`/
+`verify_python_indexing.rs`.
+
+Result on all 2,000 positions of `results/eval_set.epd` (the set has 2,000, not 10,000 -- `piano-ricerca.md`
+overstated its size; every position was used): **exact match, 0 difference, on all 2,000 positions.** The earlier
+37.07 cp max / 12.84 cp mean discrepancy (on 20 positions) was a bug in that old, now-missing verification path, not
+a defect in `nnue.rs`: this from-scratch reimplementation reproduces the engine bit-for-bit. Not "random error", not
+"proportional to eval" -- there is no error to classify.
+
+### B2b -- against the akimbo binary itself: a real, exactly-quantified defect
+
+Built akimbo from source at commit `f65305c843` (`EVALFILE=resources/net.bin cargo build --release`, confirmed
+byte-identical network). Its `eval` UCI command computes a genuine static evaluation from scratch (`eval_from_scratch`
+-> a fresh `EvalTable::default()`, i.e. every feature added from an empty board -- equivalent to a full refresh, not
+search), so the `go depth 1` fallback in the plan was not needed.
+
+**Feature indexing, bucket table and the output formula are identical** between `nnue.rs`/`feature_set.py` and
+akimbo's `network.rs` (`BUCKETS` table, `get_base_index`, `out()`'s `(sum/QA + output_bias) * SCALE/QAB`) -- verified
+by reading both sources side by side, not assumed. The two engines diverge because of one thing Luna does not have:
+akimbo's `Position::scale()` rescales the raw NNUE output by a **material factor** AFTER the network, before
+returning it as `eval`:
+
+```
+mat = 700 + (knights*450 + bishops*450 + rooks*650 + queens*1250) / 32     (integer division)
+eval_returned = eval_raw * mat / 1024
+```
+
+On the 2,000 positions: raw (Luna) vs akimbo's scaled eval, mean |difference| 93.0 cp, max 1269 cp, mean signed
+difference -3.5 cp (so on average close to zero, but the per-position spread is large -- this is exactly reading 3 of
+B2a's own classification, "proportional to |eval| / phase", now correctly attributed). Reversing the formula --
+`raw * mat / 1024` computed independently in Python from each position's own piece counts -- reproduces akimbo's
+returned value **exactly, 0 difference, on all 2,000 positions**. `mat` ranges 700 (bare kings) to 971 (this set's
+most piece-heavy position) over these 2,000 positions.
+
+**Reading (per the plan's own rule): this is a defect, not a rounding artifact, and correcting it costs no
+training.** It is not present in Luna's inference (which matches akimbo's raw network exactly, per B2b's own
+indexing check) and not modeled by `feature_set.py`/`model.py` either -- both the engine and the training pipeline
+are missing the same post-network scale term. `mat` is a simple function of the four non-pawn, non-king piece counts,
+computable from `Scacchiera` with no network change; adding it to `evaluate_from_accumulator` (or `search::eval`,
+matching where akimbo applies it -- after the network, before any use) is a candidate for its own single-change SPRT,
+the same discipline as G1/G2/G3. Not written or queued this round: `piano-ricerca.md` asked for the numbers, not the
+patch.
+
+### B3 -- is there a newer akimbo network
+
+No: per B1, the network already embedded in Luna (`f65305c843`, 2024-03-27) **is** the newest one on akimbo's `main`
+branch as of its last push (2025-08-26) -- there has been no network update to compare against in over two years. The
+three-step compatibility/copy/Spearman test in the plan does not apply: there is nothing newer to test.
+
+**No adoption, no merge, no Oracle queue entry from this block.** Only the material-scale finding of B2b is a real,
+actionable candidate, and it was deliberately left unqueued pending a decision.
