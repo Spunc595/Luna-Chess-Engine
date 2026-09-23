@@ -598,3 +598,24 @@ If D3 is ended by the stop-rule: `sprt_stop_rule.sh` sends SIGTERM only to the `
 `queue_d3_done` -- `queue5.sh` proceeds exactly as on an ordinary rejection (base stays `head`, without D3). If
 instead a gate fails, `queue_d3.sh` writes `queue_d3_stopped` with no `d3_verdict`, and `queue5.sh` stops and waits
 for a decision rather than starting.
+
+
+## Fix: an unrelated crash was indistinguishable from reaching the cap (2026-09-23)
+
+`sprt_match3.sh` has no `set -e`: it reaches `touch done` whether `cutechess-cli` finished normally, was stopped by
+`sprt_stop_rule.sh`, OR died for a completely unrelated reason (killed by the OS, a crash, anything). `stop_rule_verdict.txt`
+already carries the moment and the interval that triggered an intentional stop (`sprt_stop_rule.sh`, written BEFORE
+the SIGTERM it sends), so an intentional stop was always distinguishable -- but `queue_d3.sh`/`queue5.sh` (v1,
+superseded below) labelled EVERY other case that hadn't crossed an SPRT bound as `INCONCLUSIVE_AT_CAP`, without
+checking whether the games count had actually reached the 12,000-game cap. An early, unrelated death would have been
+silently reported as "reached the cap", which it hadn't.
+
+Fixed in `queue_d3v2.sh` and `queue5v2.sh` (superseding `queue_d3.sh`/`queue5.sh`/`queue4.sh`/`queue4b.sh`, none
+edited in place): the verdict is now `STOP_RULE (...)` if the marker exists, `H1_ACCEPTED`/`H0_ACCEPTED` if an SPRT
+bound was actually crossed, `INCONCLUSIVE_AT_CAP` only if the games count genuinely reached 12,000, and otherwise
+`INCOMPLETE_UNEXPLAINED` -- which is NOT written to `d3_verdict`/passed downstream: it gates the chain shut
+(`queue_d3_stopped`/`queue5_stopped`, no `_done`) exactly like a time-loss or a sources/build failure, instead of
+letting `queue5v2.sh` proceed on a result that was never actually produced.
+
+The old `queue_d3.sh`/`queue5.sh` were stopped (SIGTERM, both still only in their wait loop, no work started) and
+replaced by `queue_d3v2.sh`/`queue5v2.sh`, launched detached the same way. `queue3.sh` (G2, live) was not touched.
