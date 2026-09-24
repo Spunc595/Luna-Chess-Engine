@@ -70,6 +70,17 @@ const NULL_MOVE_BASE_REDUCTION: i32 = 3;
 const ASPIRATION_INITIAL_DELTA: i32 = 25;
 const DELTA_MARGIN: i32 = 200;
 
+/// Block C (`piano-ricerca.md`, 2026-09-24): flat bonus subtracted from the RFP margin when
+/// `improving` is true. A reasonable starting value (same order as `RFP_MARGIN_PER_PLY` for one
+/// ply), not tuned specifically for Luna -- the SPRT is what decides it, same as every other
+/// constant in this file marked that way.
+const IMPROVING_RFP_BONUS: i32 = 70;
+/// Block C: divisor and cap for the NMP reduction bonus tied to how far the static eval exceeds
+/// beta (`(static_eval - beta) / NMP_EVAL_DIVISOR`, capped at `NMP_EVAL_BONUS_CAP`). Values in the
+/// same range as Stockfish's own classic formula for this bonus.
+const NMP_EVAL_DIVISOR: i32 = 200;
+const NMP_EVAL_BONUS_CAP: i32 = 3;
+
 // ============================================================================
 // REMOVED (v3.1.1): "progress adjustment" (passed pawns + mop-up + rule_50
 // decay stacked onto the static eval)
@@ -209,6 +220,15 @@ pub struct SearchInfo {
     pub nodes: u64,
     pub stopped: bool,
     pub killer_moves: [[Mossa; 2]; MAX_PLY],
+    /// Static eval recorded at each ply of the CURRENT branch being searched, written whenever
+    /// `negamax` actually computes one (`can_prune` true) and left at the sentinel `i32::MIN`
+    /// otherwise (in check, at a PV node, or at mate-distance bounds) or when a ply was never
+    /// visited by this branch. `improving` (see `negamax`, Block C, `piano-ricerca.md`) compares
+    /// against `[ply - 2]`: same side to move, two plies apart. A stale value from an earlier,
+    /// unrelated branch of the tree at the same ply/depth combination can leak in here (this array
+    /// is not reset between siblings) -- a known simplification, the same one the abandoned first
+    /// attempt made (see the comment this replaces); it is what the SPRT below actually measures.
+    pub static_eval_history: [i32; MAX_PLY],
     /// Counter-move heuristic: `counter_moves[pezzo][a]`, indexed by the
     /// piece and destination square of the LAST move played (by the
     /// opponent, the one that brought us to this position), not by ply
@@ -247,6 +267,7 @@ impl SearchInfo {
             nodes: 0,
             stopped: false,
             killer_moves: [[Mossa::null(); 2]; MAX_PLY],
+            static_eval_history: [i32::MIN; MAX_PLY],
             counter_moves: [[Mossa::null(); 64]; 6],
             max_nodes: None,
             stop_signal: Arc::new(AtomicBool::new(false)),
@@ -574,21 +595,28 @@ fn negamax(
     // altogether.
     let can_prune = !pv_node && !in_check && !is_mate_score(alpha) && !is_mate_score(beta);
     let static_eval = if can_prune { eval(board, nnue, params) } else { 0 };
+    let safe_ply_early = if ply < MAX_PLY { ply } else { MAX_PLY - 1 };
+    if can_prune { info.static_eval_history[safe_ply_early] = static_eval; }
+    // "Improving": the static eval at this node is better than it was two plies ago for the same
+    // side to move (`piano-ricerca.md`, Block C -- re-added, see BENCHMARKS.md for why the earlier
+    // "tried and discarded" comment this replaces was itself resting on an unreliable harness).
+    // The ancestor slot's sentinel (`i32::MIN`) means "not computed on this branch": treated as
+    // not improving, never as an ordering claim about a value that was never recorded.
+    let improving = can_prune && safe_ply_early >= 2 && {
+        let past = info.static_eval_history[safe_ply_early - 2];
+        past != i32::MIN && static_eval > past
+    };
 
     // --- REVERSE FUTILITY PRUNING (Static Null Move Pruning) ---
     // If even after granting a safety margin proportional to depth the
     // static evaluation still remains above beta, the position is so
     // favorable that the node can be cut without even generating moves.
     //
-    // NOTE: an "improving" flag (static eval better than 2 ply ago) to
-    // narrow this margin was tried and discarded — two different tunings
-    // (depth-scaled, then a fixed bonus) both turned out statistically
-    // neutral on an SPRT test of a few thousand games. It's not ruled out
-    // that the idea might pay off with a different tuning or combined
-    // with something else, but for now it doesn't justify the extra
-    // complexity (one more array in `SearchInfo`, one write per node).
+    // `improving` narrows the margin by a flat bonus: a position whose static eval is trending up
+    // needs a smaller safety margin to trust a cutoff, the same direction the abandoned first
+    // attempt used ("to narrow this margin").
     if can_prune && new_depth <= RFP_MAX_DEPTH {
-        let margin = RFP_MARGIN_PER_PLY * new_depth;
+        let margin = RFP_MARGIN_PER_PLY * new_depth - if improving { IMPROVING_RFP_BONUS } else { 0 };
         if static_eval - margin >= beta {
             return static_eval - margin;
         }
@@ -598,11 +626,12 @@ fn negamax(
     if allow_null && can_prune && new_depth >= 3 && static_eval >= beta
         && has_non_pawn_material(board, board.turno)
     {
-        // NOTE: a reduction bonus tied to how much the static eval
-        // exceeds beta (idea taken from Stockfish) was tried and reverted
-        // — SPRT test of over 2000 games, neutral/slightly negative
-        // result (-3 Elo, within noise but with no positive signal).
-        let r = NULL_MOVE_BASE_REDUCTION + new_depth / 4;
+        // Reduction bonus tied to how much the static eval exceeds beta (idea taken from
+        // Stockfish, re-added -- see BENCHMARKS.md, Block C, for why the earlier "tried and
+        // reverted" comment this replaces was resting on an unreliable harness): the further above
+        // beta the position already sits, the more the reduction can afford to grow, capped so a
+        // single very lopsided static eval cannot skip an unreasonable number of plies.
+        let r = NULL_MOVE_BASE_REDUCTION + new_depth / 4 + ((static_eval - beta) / NMP_EVAL_DIVISOR).min(NMP_EVAL_BONUS_CAP);
         let undo = board.fai_mossa_nulla(z);
         let mut null_pv = PvLine::new();
         let null_val = -negamax(board, new_depth - 1 - r, ply + 1, -beta, -beta + 1, info, tt, sh, z, nnue, params, false, &mut null_pv, Mossa::null());
