@@ -46,12 +46,19 @@ pub const MATE_THRESHOLD: i32 = MATE_SCORE - MAX_PLY as i32;
 /// generating moves.
 const RFP_MAX_DEPTH: i32 = 8;
 /// Safety margin per ply of RFP (unit: centipawn-equivalents).
-const RFP_MARGIN_PER_PLY: i32 = 110;
+/// Compensated for D3 (BENCHMARKS.md, Block D4): D3's material scale shrinks NNUE evaluations by a
+/// factor that reaches 0.684 at low material, which makes this fixed centipawn margin relatively
+/// wider than it was before D3 and prunes more (measured: node count -4.7%/-15.2% on the suite).
+/// 110 / 0.840 (the measured MEDIAN of D3's multiplier over eval_set.epd) = 131, rounded, restores
+/// the pruning behaviour to roughly where it was before D3, so this SPRT isolates "is the margin
+/// itself better retuned" from "does the D3 package as a whole help" (already answered: yes).
+const RFP_MARGIN_PER_PLY: i32 = 131;
 
 /// Maximum depth within which Futility Pruning on quiet moves is active.
 const FUTILITY_MAX_DEPTH: i32 = 6;
-/// Safety margin per ply of Futility Pruning.
-const FUTILITY_MARGIN_PER_PLY: i32 = 130;
+/// Safety margin per ply of Futility Pruning. Compensated for D3, same derivation as
+/// `RFP_MARGIN_PER_PLY` above: 130 / 0.840 = 155, rounded.
+const FUTILITY_MARGIN_PER_PLY: i32 = 155;
 
 /// Minimum depth and minimum number of moves already searched before LMR
 /// can activate. The first moves (TT-move, good captures: already at the
@@ -66,9 +73,13 @@ const LMR_MIN_MOVE_COUNT: i32 = 4;
 const NULL_MOVE_BASE_REDUCTION: i32 = 3;
 
 /// Initial delta (centipawn-equivalents) of the aspiration window, and
-/// safety margin for Delta Pruning in quiescence.
-const ASPIRATION_INITIAL_DELTA: i32 = 25;
-const DELTA_MARGIN: i32 = 200;
+/// safety margin for Delta Pruning in quiescence. Compensated for D3, same derivation as
+/// `RFP_MARGIN_PER_PLY` above (BENCHMARKS.md, Block D4): 25 / 0.840 = 30, 200 / 0.840 = 238,
+/// rounded. `Pezzo::Regina.valore()` (used alongside `DELTA_MARGIN` in the same quiescence check)
+/// is NOT touched: it is material, not a margin compared against a valuation, and scaling it would
+/// change capture ordering, unrelated to this patch.
+const ASPIRATION_INITIAL_DELTA: i32 = 30;
+const DELTA_MARGIN: i32 = 238;
 
 // ============================================================================
 // REMOVED (v3.1.1): "progress adjustment" (passed pawns + mop-up + rule_50
