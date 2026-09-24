@@ -643,3 +643,31 @@ G5's own base and verdict independently** from its results directory and `d3_ver
 cap / `INCOMPLETE_UNEXPLAINED` logic already used for D3 and G5 (2026-09-23 fix). Runs against whichever base G5
 actually leaves behind (`base+D3+G5` if G5 is accepted, `base+D3` otherwise). Confirmed the D4 branch's sources
 differ from D3's only in `src/search.rs` before deploying. `queue3.sh` and the live G5 match were not touched.
+
+
+## Budget clauses (2026-09-24)
+
+**Clause 1 (8,000-game cap, from the test after G5).** G5 itself is excluded (already running under the old
+12,000-game cap when this was written). `queue_d4.sh` (v1, already queued behind G5 but not yet started) was
+replaced -- not edited in place -- by `queue_d4v2.sh`: `CAP_GAMES=8000`, `sprt_match3.sh` called with 4000 rounds
+(8,000 games) instead of 6000. The old `queue_d4.sh` was only in its wait loop (no work started) when stopped.
+
+**Clause 2 (grouping).** Block C (`search.rs:586`'s "improving" flag and `search.rs:603`'s NMP eval-beta reduction
+bonus, both previously found to be "tried and discarded/reverted" on the broken August harness -- see the Block C
+section above) written together, one commit, one branch, one future SPRT: `c-improving-and-nmp-bonus` (`b76ae6b`),
+on top of `main`. 54 tests green. **Attribution price accepted and declared per the clause**: if the group passes,
+which of the two acted (or whether both did) is not separated by this test. Re-added the "improving" bookkeeping the
+original abandoned attempt needed (`SearchInfo::static_eval_history`, one `i32` per ply, sentinel `i32::MIN` for an
+unvisited/un-pruned ancestor) and the NMP bonus `((static_eval - beta) / 200).min(3)`, both flagged in their own
+comments as re-additions, not new ideas. **Not queued yet**: per the reordered priority, Block C runs after Block 6,
+which is not built yet.
+
+**Clause 3 (G4, pre-registered before G5's verdict).** If G5 is accepted: re-run Measure A on G4 identically. If G5
+is rejected or hits the cap: G4 closes, no SPRT, branch kept. Not yet actionable -- G5 has not resolved.
+
+**Reordered priority, queued so far**: G5 (running) -> D4 (`queue_d4v2.sh`, waiting, 8,000-game cap) -> G2
+re-measurement on whatever base D4 leaves (`queue_g2remeasure.sh`, waiting, 8,000-game cap, re-derives the chain's
+base independently rather than parsing a log line -- 2026-09-23 rule). Block 6 (final fixed-length estimate match)
+and Block C (queued after it) are NOT yet built/queued: Block 6 needs its own match mechanism (fixed 4,000 games at
+20+0.2 against the FIXED `v3.1.6`/`base`, not an SPRT, no mobile base, Elo estimate with a confidence interval, not a
+verdict) and is next in line to be prepared, before it is actually needed.
