@@ -671,3 +671,69 @@ base independently rather than parsing a log line -- 2026-09-23 rule). Block 6 (
 and Block C (queued after it) are NOT yet built/queued: Block 6 needs its own match mechanism (fixed 4,000 games at
 20+0.2 against the FIXED `v3.1.6`/`base`, not an SPRT, no mobile base, Elo estimate with a confidence interval, not a
 verdict) and is next in line to be prepared, before it is actually needed.
+
+
+## Unattended night run: readiness checklist (2026-09-24)
+
+Written before a five-hour gap with nobody watching. Everything below was already in place or built and verified
+before this note; nothing new was launched against the live G5 match.
+
+**Part 0 (stop-rule marker).** Already in place from the 2026-09-23 fix (`sprt_stop_rule.sh` writes
+`stop_rule_verdict.txt`, timestamp plus the triggering Elo interval, BEFORE the SIGTERM it sends). Verified present
+in the deployed copy on Oracle by reading it again, not assumed.
+
+**Part 1 (D4).** Branch `d4-margin-retune` (`bd484b2`): `RFP_MARGIN_PER_PLY` 110->131, `FUTILITY_MARGIN_PER_PLY`
+130->155, `ASPIRATION_INITIAL_DELTA` 25->30, `DELTA_MARGIN` 200->238 (all / 0.840). `Pezzo::Regina.valore()`
+untouched. **Correction to the earlier report: 54 tests green, not 55** -- re-ran the suite on this branch just now
+to check the exact count rather than trust the number carried over from an unrelated branch (`acc-a-stack`, which has
+an extra ground-truth test D4 does not); zero warnings. No fifth cp-vs-valuation constant found beyond D2's original
+four.
+
+**Part 2 (the three G5 outcomes).** Re-checked `queue_d4v2.sh`'s own logic: `bv` (the base D4 tests against) is set
+to `${g5bv}_g5` ONLY when the independently re-derived G5 verdict is exactly `H1_ACCEPTED`; every other outcome
+(rejected, capped, stopped by the rule) leaves `bv = g5bv` unchanged. This already implements "head changes only on
+acceptance" correctly for all three outcomes, not a binary accepted/not-accepted -- confirmed by reading the deployed
+script, not by re-deriving it from memory.
+
+**Part 3 (the chain, and where it stops).** `queue_g2remeasure.sh` re-verified: it waits on `queue_d4_done` /
+`queue_d4_stopped` only (file existence), re-derives D4's own base+verdict independently (not parsed from a
+`queue.log` line), and runs `g2-king-capture-order`'s isolated `movegen.rs` diff on top. Confirmed AGAIN, by reading
+(not assuming): `diff -rq --strip-trailing-cr build_g2/src build_base/src` on Oracle reports exactly one file,
+`src/movegen.rs` -- no overlap with D3/D4/G5's `nnue.rs`/`search.rs`/`main.rs`. Nothing is queued after
+`queue_g2b_done`/`queue_g2b_stopped`: the chain genuinely stops there. Full marker table:
+
+| writer | file | reader |
+|---|---|---|
+| `queue3.sh` | `queue_done` / `queue_stopped` | `queue_d4v2.sh` |
+| `queue_d4v2.sh` | `d4_verdict`, `queue_d4_done` / `queue_d4_stopped` | `queue_g2remeasure.sh` |
+| `queue_g2remeasure.sh` | `g2b_verdict`, `queue_g2b_done` / `queue_g2b_stopped` | nobody -- end of the automated chain |
+
+**Clause 3 (G4).** Still not actionable: G5 has not resolved (888 games, LLR -2.25 of -2.94, drifting toward
+rejection but not there yet). Whichever branch fires, applying it (re-measuring G4's Measure A, or closing the
+branch with a reason recorded here) is a documentation/PC-side step, not something the Oracle queue can do by
+itself -- it will be done and written up the next time this session reads G5's outcome, not by anything running
+unattended tonight.
+
+**Part 4 (Block 6, prepared, NOT launched).** `block6_match.sh` staged on Oracle (new file, not run): a
+`sprt_match3.sh` variant with `tc=20+0.2` instead of `10+0.1`, no `-sprt` flag (fixed length, `-rounds 2000` = 4,000
+games by default), identical adjudication and book-absence checks. No new report script needed: cutechess-cli's own
+periodic "Elo difference: X +/- Y, LOS: Z%, DrawRatio: W%" line (from `-ratinginterval 100`, independent of `-sprt`)
+is exactly the unbiased Elo-with-CI figure this block exists to produce, and `sprt_report.py` already extracts the
+LAST such line unchanged. `v3.1.6` (`base`, `a907c7a`) is already built, sha256
+`bec600414d9ce1db738cadc32f31a905b862d8b55453866a2383b20201eaca06`. **Not queued to any trigger**: per the plan, it
+needs the DEFINITIVE head (D4, the G2 re-measurement, and Block C can all still move it), so launching it is a
+manual decision, not automated tonight.
+
+**Part 5 (PC, already done, not new work tonight).**
+- Block A's fill-in-the-cache probe: already run and closed for good on 2026-09-23 (padded-cell test degraded
+  -8.7%/-14.9%, past the pre-registered rule) -- see the Block A section above. Nothing pending.
+- Block C's "which variant is today's code": already answered (both `search.rs:586` and `:603` were "tried and
+  discarded/reverted", so both are add-back candidates) AND already written and tested as one grouped patch,
+  `c-improving-and-nmp-bonus` (`b76ae6b`), per Clause 2 -- ahead of what this note asked for, done in the prior
+  session turn. Queued after Block 6 per the priority order, not yet queued to Oracle.
+
+**Housekeeping note, not part of the plan**: `examples/verify_python_indexing.rs` is an untracked, orphaned file
+(its `verify_net.bin` dependency does not exist) that keeps needing its one `evaluate_from_accumulator` call site
+patched to match whichever branch's signature is checked out, because git does not touch untracked files on
+checkout. It has broken `cargo test` twice this session on branch switches. Not deleted without asking; flagged here
+so it is not a silent recurring fix.
