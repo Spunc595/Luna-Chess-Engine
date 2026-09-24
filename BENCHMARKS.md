@@ -737,3 +737,27 @@ manual decision, not automated tonight.
 patched to match whichever branch's signature is checked out, because git does not touch untracked files on
 checkout. It has broken `cargo test` twice this session on branch switches. Not deleted without asking; flagged here
 so it is not a silent recurring fix.
+
+
+## G5: REJECTED, and Clause 3 closes G4 (2026-09-24)
+
+G5 (`g5-history-persists`, `6b8dda8`) measured on `base_d3` (base+D3): 961 games, +187 =557 -217, score 0.4844, Elo
+**-10.8**, LLR -3.00 (past the H0 bound -2.94), draw rate 57.96%, 0 games lost on time, H0 accepted. `head` stays
+`base_d3` (unchanged, per the three-outcome rule: it only moves on acceptance).
+
+So history tables persisting across a game's `go` commands, tested for real this time (54-58% draw rate, not the old
+3% broken harness that called it "neutral"), is a real regression here, not just an unresolved question. The
+original abandoned test's "inconclusive" reading (Part 2 correction, 2026-09-23) undersold how uncertain that old
+number was; this one is decisive.
+
+**Clause 3 (pre-registered 2026-09-24, before G5's verdict): G5 rejected -> G4 closes.** Branch
+`g4-continuation-history` stays on the remote, not merged, not re-measured, no SPRT queued. The diagnosis stands:
+the table is 18x larger than the main history (147,456 vs 8,192 cells) and starved by the history clearing on every
+`go` -- exactly what G5 would have removed. With G5 rejected, the tables keep clearing every `go`, so the starvation
+does not go away and re-running Measure A would only re-confirm a "no" already known, at the cost of Oracle time
+this project no longer has spare (see Clause 1 budget note). Closed for now, not forever: revisit only if a future,
+different mechanism for persisting or seeding continuation-history state is proposed.
+
+**Chain continuing on its own**: D4 (margin retune) is now running against `base_d3` (unaffected by G5's rejection,
+since `head` did not move) -- 1,134 games so far, Elo +4.0 +/- 13.7, LOS 69.0%, LLR -0.31, 0 time losses, no verdict
+yet. G2's re-measurement is queued behind it, unstarted.
