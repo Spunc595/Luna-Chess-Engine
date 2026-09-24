@@ -619,3 +619,27 @@ letting `queue5v2.sh` proceed on a result that was never actually produced.
 
 The old `queue_d3.sh`/`queue5.sh` were stopped (SIGTERM, both still only in their wait loop, no work started) and
 replaced by `queue_d3v2.sh`/`queue5v2.sh`, launched detached the same way. `queue3.sh` (G2, live) was not touched.
+
+
+## Block D4: margin retuning after D3, queued (2026-09-24)
+
+Branch `d4-margin-retune` (`bd484b2`), on top of `d3-material-scale` (`d12d089`). One change, `src/search.rs`: the
+four centipawn margins the search compares against a valuation (see Block D2's inventory), divided by 0.840 (D3's
+measured median multiplier on `eval_set.epd`):
+
+| constant | before | compensated |
+|---|---|---|
+| `RFP_MARGIN_PER_PLY` | 110 | 131 |
+| `FUTILITY_MARGIN_PER_PLY` | 130 | 155 |
+| `ASPIRATION_INITIAL_DELTA` | 25 | 30 |
+| `DELTA_MARGIN` | 200 | 238 |
+
+`Pezzo::Regina.valore()` (900) untouched: material, not a margin, scaling it would change capture ordering, unrelated
+to this patch. 54 tests green.
+
+Queued on Oracle as `queue_d4.sh`: waits on `queue5_done`/`queue5_stopped` (file existence only), then **re-derives
+G5's own base and verdict independently** from its results directory and `d3_verdict` -- not by parsing a line
+`queue5v2.sh` printed to `queue.log` -- via a `verdict_of()` helper duplicating the same STOP_RULE / bound-crossing /
+cap / `INCOMPLETE_UNEXPLAINED` logic already used for D3 and G5 (2026-09-23 fix). Runs against whichever base G5
+actually leaves behind (`base+D3+G5` if G5 is accepted, `base+D3` otherwise). Confirmed the D4 branch's sources
+differ from D3's only in `src/search.rs` before deploying. `queue3.sh` and the live G5 match were not touched.
