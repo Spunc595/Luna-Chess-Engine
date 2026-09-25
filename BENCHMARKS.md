@@ -872,5 +872,45 @@ base it was measured on.
   `engine.polyglot` section: `enabled: true`, `book.standard: engines/book.bin`, `selection: best_move`,
   `max_depth: 35`, `min_weight: 1`. The file is a well-formed Polyglot book (50,032 bytes = 3,127 entries of 16 bytes;
   python-chess reads 3,127 entries, start position: e2e4 65520, d2d4 39312, g1f3 17035, c2c4 9172). It is used by
-  `lichess-bot`, not by Luna, so the engine's own "book not found" is correct and irrelevant: the alarm about a bot
-  playing without a book was false.
+  `lichess-bot`, not by Luna, so the engine's own "book not found" is correct and irrelevant. The earlier claim that
+  the bot played without a book was a false alarm: see "False alarm" below.
+
+
+## False alarm: "the bot plays without a book" (recorded 2026-09-25)
+
+**It was false.** For three days `piano-ricerca.md` and the notes of this project said that
+the lichess bot had been playing **without an opening book**, and that nobody had noticed. The bot has a book, and
+uses it.
+
+**What the claim rested on.** A deduction about where files sit: the `book.bin` in the bot's `engines/` folder is
+50,032 bytes and binary, the engine reports it as "Book: ... not found" (it looks for its own TEXT format, one FEN
+plus one UCI move per line, and cannot read a binary Polyglot file), and the working text book (216,086 bytes, 3,183
+positions) sits in the folder above, where the engine does not look. From those three facts it was concluded that the
+bot had no book.
+
+**What that deduction skipped.** There are two separate mechanisms and only one had been considered. Luna's own book
+is the text file the engine loads by itself from next to its executable. The bot's book is a different thing:
+`lichess-bot` reads a Polyglot file through its own `engine.polyglot` section of `config.yml` (`enabled: true`,
+`book.standard: engines/book.bin`, `selection: best_move`, `max_depth: 35`, `min_weight: 1`) and plays the book move
+itself, before the engine is ever asked. The 50,032 bytes are 3,127 entries of 16 bytes exactly, python-chess reads
+all 3,127, and the start position offers e2e4 (65,520), d2d4 (39,312), g1f3 (17,035), c2c4 (9,172). The engine's "not
+found" is correct and irrelevant to the bot.
+
+**Who actually observed it.** Not the analysis. Daniele, watching the bot's games on lichess, saw it playing book
+moves. The behaviour was visible from the outside the whole time; the wrong conclusion came from reading the
+folders instead of reading the games.
+
+**The lesson, which is worth more than the correction.** A deduction about file locations is not an observation of
+behaviour. "The book is in the wrong place" was a statement about paths; "the bot plays without a book" is a
+statement about moves, and only the moves could confirm it. It is the same class of error as *a count is not a cost*
+(`PROTOCOLLO.md`, section 4): a true fact about a proxy (how many events, where a file is) read as a fact about the
+thing that matters (how long it takes, what the bot plays). Before writing that a system does or does not do
+something, look at it doing or not doing it, and mark in the text which of the two the claim is: *inferred from the
+files* or *observed in the games*.
+
+**What stays true and what does not.** The `luna.nnue` left next to the executable on the PC in September was a real
+problem, and it was OBSERVED (results changed). What does not hold is the motive given for the start-up diagnostic
+patch planned for 3.1.8: "so that a bot cannot play without a book unnoticed" has no case behind it. The patch is
+still worth making, for its own reasons: the engine prints the same message for a book file that is absent and one
+that is present but unreadable, and it does not say which network or which hash it loaded. The paragraph "Dopo il
+blocco SPRT" of `piano-ricerca.md` uses the false alarm as its example and should be corrected there.
