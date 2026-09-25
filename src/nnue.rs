@@ -443,11 +443,13 @@ impl LunaNNUE {
         let raw = out * SCALE / QAB;
 
         // Material scale, ported from akimbo's own `Position::scale` (src/position.rs, verified
-        // against its source, not assumed -- see BENCHMARKS.md, Block D). The network is TRAINED
-        // inside akimbo with this factor applied after it; used raw, its output is half of a
-        // formula, not a different design choice. Both colours' knights/bishops/rooks/queens
-        // count (pawns and kings do not, matching akimbo exactly); at 0 non-pawn/king material
-        // the factor is 700/1024 =~ 0.684, growing toward 1024/1024 as material returns -- it
+        // against its source, not assumed -- see BENCHMARKS.md, Block D and the erratum of
+        // 2026-09-25). It is a SEARCH-TIME adjustment applied on top of the network's output; it is
+        // NOT part of the network's training (akimbo's data-generation build skipped it, and since
+        // akimbo #208 the training data is Leela's). A network trained here can be trained on raw
+        // labels, and this factor is then a separate setting to re-measure. Both colours'
+        // knights/bishops/rooks/queens count (pawns and kings do not, matching akimbo exactly);
+        // at 0 non-pawn/king material the factor is 700/1024 =~ 0.684, growing toward 1024/1024 as material returns -- it
         // shrinks evaluations more in endgames than in middlegames, the standard "the same
         // advantage counts for less with little material left" technique. NOT applied to mate
         // scores: this function is never called to produce one (see search.rs's is_mate_score /
