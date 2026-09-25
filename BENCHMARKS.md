@@ -761,3 +761,61 @@ different mechanism for persisting or seeding continuation-history state is prop
 **Chain continuing on its own**: D4 (margin retune) is now running against `base_d3` (unaffected by G5's rejection,
 since `head` did not move) -- 1,134 games so far, Elo +4.0 +/- 13.7, LOS 69.0%, LLR -0.31, 0 time losses, no verdict
 yet. G2's re-measurement is queued behind it, unstarted.
+
+
+## D4 and G2b: both stopped by the stop-rule, both revoked and closed (2026-09-25)
+
+Both ran under the 2026-09-23 stop-rule and the 2026-09-24 cap of 8,000 games (`elo0 = 0`, `elo1 = 10`,
+`alpha = beta = 0.05`, 10+0.1, no book, concurrency 2, the Block 0 adjudication). Both matches are valid: 0 games lost
+on time, 0 abnormal terminations. `head` did not move: it is still `base_d3`.
+
+### D4 -- margin retuning (`d4-margin-retune`, `bd484b2`)
+
+| | |
+|---|---|
+| base | `base_d3` = `d3-material-scale` `d12d089` on `a907c7a`, sha256 `10458f5f...a192f3` |
+| patched | `base_d3_d4` = base + D4, sha256 `ab64cacd...b04f87` |
+| games | 2,202 (+487 =1232 -483), score 0.5009, draw rate 55.95% |
+| Elo | +0.3 +/- 9.6 (cutechess-cli), LOS 52.6%, LLR -1.94 |
+| stopped | 2026-09-24T15:35:40Z by the stop-rule: 0.3 + 9.6 = 9.9 < `elo1` = 10 |
+| verdict | acceptance unreachable, LOS < 95%: **revoked and closed** |
+
+The four constants (`RFP_MARGIN_PER_PLY` 110 -> 131, `FUTILITY_MARGIN_PER_PLY` 130 -> 155,
+`ASPIRATION_INITIAL_DELTA` 25 -> 30, `DELTA_MARGIN` 200 -> 238) made no measurable difference on top of D3: undoing
+the extra pruning that D3 brought with it neither helped nor hurt. The pre-registered reading holds: a rejection is a
+clean result that says the margins were already good enough, not a failed experiment. Note the margin by which the
+rule fired: 9.9 against a threshold of 10. It is the stop-rule doing what it was written to do, not a sign that the
+interval is comfortably away from `elo1`.
+
+### G2b -- G2 re-measured on `base_d3` (`g2-king-capture-order`, isolated `movegen.rs` diff)
+
+| | |
+|---|---|
+| base | `base_d3`, same binary as above |
+| patched | `base_d3_g2b` = base + G2, sha256 `4294cc74...e7b094` |
+| games | 2,405 (+538 =1333 -534), score 0.5008, draw rate 55.43% |
+| Elo | +0.4 +/- 9.3 (cutechess-cli), LOS 53.7%, LLR -2.04 |
+| stopped | 2026-09-25T01:12:47Z by the stop-rule: 0.4 + 9.3 = 9.7 < `elo1` = 10 |
+| verdict | acceptance unreachable, LOS < 95%: **revoked and closed** |
+
+G2's first run (on `base`, without D3) ended at the 12,000-game cap with +6.2 +/- 4.1 Elo, LOS 99.8%, and entered the
+suspended candidates. This second measurement does not reproduce it: point estimate +0.4. **What that does and does
+not show.** It does not show that D3 "absorbed" G2's effect: that is an explanation, not a measurement. The interval
+here is +/- 9.3, so it contains both 0 and the +5 Elo the first run pointed at; the stop-rule only says that
+reaching `elo1 = 10` is out of reach, not that the effect is zero. Two readings remain open and this data does not
+separate them: (a) G2's effect is real and D3 made it smaller or redundant (both act on endgames, where the
+multiplier is lowest), (b) G2's first result was a chance excursion, a 99.8% LOS from a single test being still a
+result of one test. The correct use of the number is the one the plan asked for: a new measurement in a new world, not
+a confirmation and not a refutation of the old one. Under the suspended-candidates clause (LOS < 95% -> closed) G2 is
+closed; there is no suspended candidate left.
+
+### G4
+
+Recorded on 2026-09-24, above (section "G5: REJECTED, and Clause 3 closes G4"): closed by Clause 3 after G5's
+rejection, branch `g4-continuation-history` kept, not re-measured. Nothing new to add.
+
+### State after the automatic chain
+
+`queue_d4_done` and `queue_g2b_done` exist, no `_stopped` marker, nothing running on Oracle. The chain ended where it
+was designed to end. Open: Block C (`c-improving-and-nmp-bonus`, written, not queued) and Block 6 (staged, not
+launched); the choice between them is not automated.
