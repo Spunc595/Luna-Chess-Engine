@@ -918,3 +918,53 @@ patch planned for 3.1.8: "so that a bot cannot play without a book unnoticed" ha
 still worth making, for its own reasons: the engine prints the same message for a book file that is absent and one
 that is present but unreadable, and it does not say which network or which hash it loaded. The paragraph "Dopo il
 blocco SPRT" of `piano-ricerca.md` uses the false alarm as its example and should be corrected there.
+
+
+## Erratum: the material scale is a search-time adjustment, not part of the network's training (2026-09-25)
+
+**What was wrong.** From Block D on, this project (in `BENCHMARKS.md`, in the comment above the scale in
+`src/nnue.rs` since `d3-material-scale`, and in the first draft of the `v3.1.7` release notes) said that the embedded
+network "was trained inside akimbo with this factor active", that its raw output "is calibrated to be scaled
+afterwards" and that Luna "was using half of a formula". **That is not what akimbo's sources say.** The statement came
+from an assumption written into the plan and repeated without opening the trainer or the data generator. It is the
+same kind of error as the false alarm about the bot's book (`PROTOCOLLO.md`, "a deduction is not an observation"):
+a plausible story about how a system works, taken as a fact about it.
+
+**What akimbo's sources say** (`jw1912/akimbo`, read on 2026-09-25):
+
+- The scale was introduced by `98ccad42f3` ("Replace Output Buckets with Material Scaling (#185)", 2024-01-02,
+  SPRT +4.34 +/- 3.12 Elo at 8.0+0.08s, against the previous design of 8 output buckets chosen by piece count). In that
+  commit `Position::scale()` is wrapped in `#[cfg(not(feature = "datagen"))]`: **the data-generation build returns the
+  raw evaluation, without the factor.** The labels the network was trained on were therefore never scaled. The same
+  guard is still there at `v1.0.0` (`6f1059cc14`).
+- The commit that introduced the network Luna embeds, `f65305c843` ("Joined the Dark Side (#208)", 2024-03-27),
+  **deletes the datagen code altogether** (`src/datagen.rs` removed, the `datagen` feature and the `bulletformat`
+  dependency removed) and its README states that akimbo "now uses data produced by Leela Chess Zero". From that commit
+  on `scale()` is unconditional, and there is no engine-side data generation left for it to touch.
+- The trainer, `bullet`, has no material-dependent output scaling in its training loop. Material appears in it only
+  as an **output-bucket selector** (`MaterialCount<N>`, learned per-bucket output weights: the design akimbo dropped
+  in #185); `eval_scale` is one constant that maps centipawns to the sigmoid space of the loss.
+
+**So:** the factor is a heuristic applied to the network's output at play time. The network was trained to predict its
+labels raw, and the labels come from Leela data, not from akimbo's search. Luna not having it was a missing search-time
+adjustment, not half of a training formula.
+
+**What this does and does not change.**
+
+- **The measurement stands.** D3 was accepted by SPRT (390 games, LLR 2.95, 0 games lost on time), and the engine
+  reproduces akimbo's evaluation exactly. Nothing in that depended on the wrong explanation.
+- **The explanation of *why* it helps is open.** The structural argument used to justify sending D3 to the SPRT after D1
+  (a null Spearman) was wrong; the SPRT is what justifies it. A plausible mechanism, not tested here: evaluations
+  in low-material positions are over-optimistic about winning, and the factor damps them. (akimbo's own gain from the
+  same idea was +4.3 Elo against output buckets, a different baseline from Luna's, which had nothing.)
+- **For a network Luna trains itself,** the factor is independent of training: the network can be trained normally on raw
+  labels, and the factor is then a separate search-time setting that must be re-measured (its floor of 700/1024 and
+  its divisor 32 belong to akimbo's network and search, not to chess). The learned alternative, output buckets by
+  material count, is available in `bullet` as `MaterialCount<N>`.
+
+**Where the wrong statement still is, and what was done.** Release notes: rewritten before publication (the section
+now says the term is applied in akimbo's evaluation function on top of the network's output). `BENCHMARKS.md`, Block
+D1 (the paragraph beginning "Correction to how this was first read"): its second half is superseded by this erratum.
+**`src/nnue.rs` lines 446-448 (comment above the scale), which is inside the `v3.1.7` tag, still carries the wrong
+sentence.** It is a comment: no behaviour depends on it, and the tag is not moved; it is to be corrected in the next
+commit that touches the engine source.
