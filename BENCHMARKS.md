@@ -900,6 +900,10 @@ found" is correct and irrelevant to the bot.
 moves. The behaviour was visible from the outside the whole time; the wrong conclusion came from reading the
 folders instead of reading the games.
 
+**The bot's own log says the same, and always did.** In `lichess_bot_auto_logs/lichess-bot.log.2026-09-20`, from the
+`v3.1.6` bot: `Got move d1d8 from book engines/book.bin for game KMNPWV87` followed by `Source: Opening Book`, and the
+same for `h2h3` in that game. Nobody had looked in the log either.
+
 **The lesson, which is worth more than the correction.** A deduction about file locations is not an observation of
 behaviour. "The book is in the wrong place" was a statement about paths; "the bot plays without a book" is a
 statement about moves, and only the moves could confirm it. It is the same class of error as *a count is not a cost*
