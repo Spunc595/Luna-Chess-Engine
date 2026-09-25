@@ -131,7 +131,7 @@ fn main() {
     // the engine is idle. See `join_pending` above.
     let mut search_state: Option<(JoinHandle<()>, Arc<AtomicBool>)> = None;
 
-    println!("Luna CE v3.1.6");
+    println!("Luna CE v3.1.7");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();
@@ -149,7 +149,7 @@ fn main() {
 
         match parts[0] {
             "uci" => {
-                println!("id name Luna CE v3.1.6");
+                println!("id name Luna CE v3.1.7");
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 512");
                 println!("option name Threads type spin default 1 min 1 max 64");
