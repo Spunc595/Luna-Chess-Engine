@@ -301,7 +301,7 @@ pub fn eval(board: &Scacchiera, nnue: Option<&LunaNNUE>, params: &EvalParams) ->
         // (esegui_mossa/annulla_mossa) instead of recomputing layer 1 from
         // scratch: only layers 2/3 remain here, at a fixed cost
         // independent of the number of pieces on the board.
-        Some(net) => net.evaluate_from_accumulator(&board.nnue_acc, board.turno == Colore::Bianco),
+        Some(net) => net.evaluate_from_accumulator(&board.nnue_acc, board.turno == Colore::Bianco, board),
         None => evaluate(board, params),
     }
 }

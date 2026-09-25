@@ -46,7 +46,7 @@ fn main() {
         board.esegui_mossa(&m, &z, Some(&net));
         assert_consistent(&net, &board, &format!("dopo {} (score {} cp)", mv, {
             let white_to_move = board.turno == luna::board::Colore::Bianco;
-            net.evaluate_from_accumulator(&board.nnue_acc, white_to_move)
+            net.evaluate_from_accumulator(&board.nnue_acc, white_to_move, &board)
         }));
     }
 }

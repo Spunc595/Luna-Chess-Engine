@@ -435,13 +435,30 @@ impl LunaNNUE {
     /// which is "them" (`output_weights[1]`) — exactly how the network was
     /// trained, and what makes the result already correctly signed for
     /// search.rs's negamax convention.
-    pub fn evaluate_from_accumulator(&self, acc: &Accumulator, side_to_move_white: bool) -> i32 {
+    pub fn evaluate_from_accumulator(&self, acc: &Accumulator, side_to_move_white: bool, board: &Scacchiera) -> i32 {
         let (us, them) = if side_to_move_white { (&acc.white, &acc.black) } else { (&acc.black, &acc.white) };
 
         let sum = flatten(us, &self.output_weights[0]) + flatten(them, &self.output_weights[1]);
         let out = sum / QA + self.output_bias as i32;
+        let raw = out * SCALE / QAB;
 
-        (out * SCALE / QAB).clamp(-NNUE_EVAL_CLAMP, NNUE_EVAL_CLAMP)
+        // Material scale, ported from akimbo's own `Position::scale` (src/position.rs, verified
+        // against its source, not assumed -- see BENCHMARKS.md, Block D). The network is TRAINED
+        // inside akimbo with this factor applied after it; used raw, its output is half of a
+        // formula, not a different design choice. Both colours' knights/bishops/rooks/queens
+        // count (pawns and kings do not, matching akimbo exactly); at 0 non-pawn/king material
+        // the factor is 700/1024 =~ 0.684, growing toward 1024/1024 as material returns -- it
+        // shrinks evaluations more in endgames than in middlegames, the standard "the same
+        // advantage counts for less with little material left" technique. NOT applied to mate
+        // scores: this function is never called to produce one (see search.rs's is_mate_score /
+        // MATE_SCORE, computed independently of NNUE output).
+        let material = (board.pezzi[1] | board.pezzi[2]).count_ones() as i32 * 450
+            + board.pezzi[3].count_ones() as i32 * 650
+            + board.pezzi[4].count_ones() as i32 * 1250;
+        let mat_factor = 700 + material / 32;
+        let scaled = raw * mat_factor / 1024;
+
+        scaled.clamp(-NNUE_EVAL_CLAMP, NNUE_EVAL_CLAMP)
     }
 }
 
