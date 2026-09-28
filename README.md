@@ -84,7 +84,7 @@ Luna's default NNUE architecture and network (`resources/net.bin`) are ported fr
 
 ## License
 
-Luna is licensed under the GPLv3. While contributions and improvements are welcome, the author retains copyright and the right to define the project's direction. See the [LICENSE](LICENSE) file for full details.
+Luna is licensed under the MIT License (see the [LICENSE](LICENSE) file for full details). Previously licensed under the GPLv3; since the author is its sole copyright holder (see the SIMD acknowledgment above for the one third-party exception), it has been relicensed to MIT to allow use in closed-source and commercial projects, such as the LunaRAS app this engine now powers.
 
 The embedded NNUE network (`resources/net.bin`) retains its own separate MIT license from [akimbo](https://github.com/jw1912/akimbo) — see the Acknowledgments section above.
 
