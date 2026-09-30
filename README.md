@@ -47,7 +47,7 @@ The optimized binary is produced at `target/release/luna` (`luna.exe` on Windows
 
 **About the releases**: each release contains the source code and an Android ARM64 build. For every other platform, compile it yourself with `cargo build --release` as above; a Linux build will be added to the releases starting with 4.0.0.
 
-Release files are named `luna-v<version>-<platform>-<arch>`, e.g. `luna-v3.1.5-android-arm64` (and, from 4.0.0, `luna-v4.0.0-linux-x86_64`).
+Release files are named `luna-v<version>-<platform>-<arch>`, e.g. `luna-v3.1.5-android-arm64` (and, from 4.0.0, `luna-v4.0.0-linux-aarch64`; a Linux x86_64 build is not yet part of the release — no verified build environment for it was available, see BENCHMARKS.md).
 
 ### NNUE network
 
@@ -86,7 +86,7 @@ Luna's default NNUE architecture (the king-bucketed, horizontally-mirrored HalfK
 
 ## License
 
-Luna is licensed under the MIT License (see the [LICENSE](LICENSE) file for full details). Previously licensed under the GPLv3; since the author is its sole copyright holder (see the SIMD acknowledgment above for the one third-party exception), it has been relicensed to MIT to allow use in closed-source and commercial projects, such as the LunaRAS app this engine now powers.
+Luna is licensed under the MIT License (see the [LICENSE](LICENSE) file for full details). Previously licensed under the GPLv3; since the author is the sole copyright holder of Luna's own code, it has been relicensed to MIT to allow use in closed-source and commercial projects, such as the LunaRAS app this engine now powers. The NNUE architecture and AVX2 kernel ported from akimbo (see Acknowledgments above) are themselves MIT-licensed, which permits this relicensing; no other third-party code is currently part of the engine.
 
 Through v3.1.7, the embedded NNUE network (`resources/net.bin`) was akimbo's own, MIT-licensed. As of v4.0.0 the network's trained weights are Luna's own (the architecture and inference code ported from [akimbo](https://github.com/jw1912/akimbo) remain MIT-licensed) — see the Acknowledgments section above and the [`luna-nnue`](https://github.com/Spunc595/Luna-CE-NNUE) repository for the training data's provenance and licensing.
 
