@@ -74,7 +74,7 @@ Luna speaks the UCI protocol and works with any compliant GUI or wrapper (Arena,
 
 Luna's search and move-ordering heuristics draw on techniques and ideas documented across the open-source computer chess community, including [Stockfish](https://github.com/official-stockfish/Stockfish), [Reckless](https://github.com/codedeliveryservice/Reckless), and [Viridithas](https://github.com/cosmobobak/viridithas).
 
-Luna's AVX2 (x86_64) and NEON (AArch64) SIMD kernels for NNUE inference were contributed by **Jim Ablett** on the TalkChess forum, who also built and shared cross-platform release binaries for the engine.
+Luna's AVX2 NNUE kernel is ported from akimbo by Jamie Whiting (MIT; the notice below applies). The NEON kernel for AArch64 is a port of the same scheme, written by the author with AI assistance. Earlier versions of Luna, before the akimbo network, used SIMD inference kernels contributed by Jim Ablett on the TalkChess forum, who also built and shared cross-platform release binaries for the engine.
 
 Luna's default NNUE architecture and network (`resources/net.bin`) are ported from and use, respectively, [akimbo](https://github.com/jw1912/akimbo) by Jamie Whiting, used under the MIT License:
 
