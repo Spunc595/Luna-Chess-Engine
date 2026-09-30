@@ -55,7 +55,7 @@ Luna's default network (`resources/net.bin`) is committed to this repository and
 
 An external `luna.nnue` file placed **next to the executable**, if present and valid, still takes priority over the embedded network — useful for trying a different/updated net without recompiling. Without it, or if a real NNUE ends up unusable for any reason, Luna automatically falls back to its classical evaluation — it never fails to start.
 
-**Which network is actually inside this binary**: as of this release, `resources/net.bin` is akimbo's network (MIT-licensed, see Acknowledgments below), not a self-trained one. Luna also has its own from-scratch, self-trained network lineage (gen1, gen2, ...), bootstrapped entirely from the engine's own search/evaluation with no external label source — see the [`luna-nnue`](https://github.com/Spunc595/Luna-CE-NNUE) repository for the full provenance, compliance declaration, and measurements. That self-trained line isn't yet the one embedded by default: its measured playing strength hasn't been compared against akimbo's yet (that measurement is planned, not done), and switching the shipped default ahead of having that number would mean picking a network's real-world strength by assumption rather than by measurement. This section will be updated if and when that changes.
+**Which network is actually inside this binary**: as of v4.0.0, `resources/net.bin` is trained on Luna's own data (1 billion distinct positions, 8 epochs, king-bucketed 768x4 HalfKA architecture, trained with [bullet](https://github.com/jw1912/bullet)) — see the [`luna-nnue`](https://github.com/Spunc595/Luna-CE-NNUE) repository for the full provenance, compliance declaration, and measurements. Through v3.1.7, the embedded network was akimbo's own (MIT-licensed); it was replaced once the self-trained network was measured, in the engine's own search, to be statistically indistinguishable from akimbo's (+0.3 +/- 10.7 Elo, 2,000 games, 95% CI) — the architecture and the AVX2/NEON inference code are still akimbo's (see Acknowledgments below), only the trained weights changed.
 
 ## Running
 
@@ -76,7 +76,9 @@ Luna's search and move-ordering heuristics draw on techniques and ideas document
 
 Luna's AVX2 NNUE kernel is ported from akimbo by Jamie Whiting (MIT; the notice below applies). The NEON kernel for AArch64 is a port of the same scheme, written by the author with AI assistance. Earlier versions of Luna, before the akimbo network, used SIMD inference kernels contributed by Jim Ablett on the TalkChess forum, who also built and shared cross-platform release binaries for the engine.
 
-Luna's default NNUE architecture and network (`resources/net.bin`) are ported from and use, respectively, [akimbo](https://github.com/jw1912/akimbo) by Jamie Whiting, used under the MIT License:
+As of v4.0.0, the embedded network is trained with [bullet](https://github.com/jw1912/bullet) by Jamie Whiting. See the [`luna-nnue`](https://github.com/Spunc595/Luna-CE-NNUE) repository for the training data's own provenance and licensing.
+
+Luna's default NNUE architecture (the king-bucketed, horizontally-mirrored HalfKA scheme, and the AVX2/NEON inference kernels) is ported from [akimbo](https://github.com/jw1912/akimbo) by Jamie Whiting, used under the MIT License. As of v4.0.0, `resources/net.bin` is trained on Luna's own data with this architecture (see above), not akimbo's own network file; the MIT license below covers the architecture and code ported from akimbo, not the trained weights:
 
 > Copyright (c) 2023 Jamie Whiting
 >
@@ -86,6 +88,6 @@ Luna's default NNUE architecture and network (`resources/net.bin`) are ported fr
 
 Luna is licensed under the MIT License (see the [LICENSE](LICENSE) file for full details). Previously licensed under the GPLv3; since the author is its sole copyright holder (see the SIMD acknowledgment above for the one third-party exception), it has been relicensed to MIT to allow use in closed-source and commercial projects, such as the LunaRAS app this engine now powers.
 
-The embedded NNUE network (`resources/net.bin`) retains its own separate MIT license from [akimbo](https://github.com/jw1912/akimbo) — see the Acknowledgments section above.
+Through v3.1.7, the embedded NNUE network (`resources/net.bin`) was akimbo's own, MIT-licensed. As of v4.0.0 the network's trained weights are Luna's own (the architecture and inference code ported from [akimbo](https://github.com/jw1912/akimbo) remain MIT-licensed) — see the Acknowledgments section above and the [`luna-nnue`](https://github.com/Spunc595/Luna-CE-NNUE) repository for the training data's provenance and licensing.
 
 Luna is developed by Daniele Marpino, with special thanks to my son Alessandro Marpino for his invaluable help in stress-testing and refining the engine.

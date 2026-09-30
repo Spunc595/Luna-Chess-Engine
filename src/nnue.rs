@@ -20,9 +20,15 @@ use crate::board::Scacchiera;
 // and rejected for this reason, on top of Reckless's own network having no
 // stated license). Architecture, constants and feature-indexing formulas
 // below are read directly from akimbo's `src/network.rs`/`src/position.rs`
-// (not reconstructed from memory), and `resources/net.bin` in this repo is
+// (not reconstructed from memory). Through v3.1.7, `resources/net.bin` was
 // akimbo's own actual trained network file, used as-is under its MIT
-// license (see the copyright notice this project's README carries for it).
+// license. From v4.0.0, it is a network trained on Luna's own data with
+// this same architecture (bullet, king-bucketed 768x4 HalfKA, from
+// scratch) -- the code in this file, the quantisation constants and the
+// feature-indexing formulas are unchanged; only the trained weights are
+// ours. See `results/` in the luna-nnue repository for the training and
+// measurement record, and the copyright notice this project's README
+// carries for akimbo's architecture.
 //
 // Architecture: (768 inputs x 4 king buckets, horizontally mirrored) x 2
 // perspectives -> 1024 hidden (SCReLU) -> 1 output. 768 = 6 piece types x
@@ -50,7 +56,19 @@ const NUM_BUCKETS: usize = 4;
 /// akimbo's own `consts`, since they're baked into how `resources/net.bin`
 /// was trained/quantized and must match exactly, not independently
 /// tunable constants of this codebase.
-const SCALE: i32 = 400;
+///
+/// SCALE = 358, not 400: the v4.0.0 network's training recipe (bullet, WDL
+/// fraction ramp 0.0 -> 0.1) inflates its raw output relative to akimbo's
+/// network by a factor measured at ~1.116 on two different architectures
+/// trained with the same recipe (1.1156 and 1.1164, against the same
+/// akimbo reference, both eval-set.epd seed 7) -- not a property of either
+/// architecture. 400 / 1.1156 = 358. Applied downstream here rather than
+/// fixed at the source (the WDL ramp itself) because retraining was out of
+/// scope for this release; measured in SPRT to be worth +15.9 +/- 11.9 Elo
+/// over the uncorrected 400 (1,443 games, LOS 99.5%). This constant should
+/// disappear, not just change, once a future network is trained with a
+/// ramp that does not need it.
+const SCALE: i32 = 358;
 const QA: i32 = 255;
 const QB: i32 = 64;
 const QAB: i32 = QA * QB;

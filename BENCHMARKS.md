@@ -968,3 +968,39 @@ D1 (the paragraph beginning "Correction to how this was first read"): its second
 **`src/nnue.rs` lines 446-448 (comment above the scale), which is inside the `v3.1.7` tag, still carries the wrong
 sentence.** It is a comment: no behaviour depends on it, and the tag is not moved; it is to be corrected in the next
 commit that touches the engine source.
+
+
+## v4.0.0: the embedded network is now trained on Luna's own data (2026-09-30)
+
+Closes the NNUE-retraining cycle opened after v3.1.7 (see `luna-nnue`'s `results/` for the full record: phase 1-4
+reports, the bucket experiment report, this section only copies the four match outcomes).
+
+**No-bucket network, measured against akimbo without D3** (isolating the network from D3's own tuning, which was
+tuned for akimbo's network specifically): 338 games, 10+0.1, **-53.9 +/- 26.6 Elo**, LOS 0.0%, SPRT H0 accepted, zero
+games lost on time. Rejected for shipping on this reading alone.
+
+**Scale correction, `SCALE` 400 -> 358, same no-bucket network, D3 active**: the training recipe's WDL ramp inflates
+raw network output relative to akimbo's own network by a measured factor (~1.116); correcting for it recovered real
+Elo. 1,443 games, 10+0.1, **+15.9 +/- 11.9 Elo**, LOS 99.5%, SPRT H1 accepted, zero games lost on time.
+
+**4-king-bucket architecture vs the no-bucket network**, both at `SCALE=358`, D3 active, trees differing only in
+`resources/net.bin`: 529 games, 10+0.1, **+36.9 +/- 20.5 Elo**, LOS 100.0%, SPRT H1 accepted, zero games lost on time.
+Capacity was a real limitation already at 1 billion distinct training positions.
+
+**The shipped result — 4-king-bucket network (`SCALE=358`) directly against akimbo (`SCALE=400`), both D3 active**,
+fixed length, no early stop: 2,000 games, 10+0.1, **+0.3 +/- 10.7 Elo**, draw ratio 0.509, zero games lost on time.
+Statistically indistinguishable from akimbo. Per the shipping rule fixed before this match (Elo >= 0: ship; parity is
+worth shipping on its own, since every future network is then measured against Luna's own, not a frozen external
+artifact), **this network and `SCALE=358` are what v4.0.0 embeds.**
+
+Training: 1 billion distinct S2 positions (Leela-derived, via `linrock/bullet-training-data`), 8 epochs (8 billion
+samples seen), `(768x4 -> 1024)x2 -> 1` SCReLU, from scratch, AdamW, cosine lr 4e-4 -> peak/40, WDL fraction ramp
+0.0 -> 0.1, on Oracle (aarch64, CPU), ~30.5 hours. Full recipe and gates (round-trip against an independent reference,
+0 differences; quantisation gates; the row-index layout verified against bullet's own Rust code before training) in
+`luna-nnue`'s `pipeline/bullet_pilot/` and `results/bucket_experiment_report.md`.
+
+**Not done in this cycle, left for later, separate work:** D3 has not been re-measured for this network directly
+(only a derived estimate exists, ~+40.7 Elo, wide uncertainty); the four search-time margins (RFP, futility,
+aspiration, delta) tuned for akimbo's network have not been retuned; the WDL ramp that causes the SCALE=358
+correction has not been fixed at the training source, so the next network trained with the same recipe will need the
+same kind of downstream correction until it is.
