@@ -22,8 +22,9 @@ use crate::board::Scacchiera;
 // below are read directly from akimbo's `src/network.rs`/`src/position.rs`
 // (not reconstructed from memory). Through v3.1.7, `resources/net.bin` was
 // akimbo's own actual trained network file, used as-is under its MIT
-// license. From v4.0.0, it is a network trained on Luna's own data with
-// this same architecture (bullet, king-bucketed 768x4 HalfKA, from
+// license. From v4.0.0, it is a network trained by the author, with his
+// own training pipeline, on public Leela Chess Zero data, with this same
+// architecture (bullet, king-bucketed 768x4 HalfKA, from
 // scratch) -- the code in this file, the quantisation constants and the
 // feature-indexing formulas are unchanged; only the trained weights are
 // ours. See `results/` in the luna-nnue repository for the training and

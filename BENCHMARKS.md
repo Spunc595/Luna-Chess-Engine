@@ -970,7 +970,7 @@ sentence.** It is a comment: no behaviour depends on it, and the tag is not move
 commit that touches the engine source.
 
 
-## v4.0.0: the embedded network is now trained on Luna's own data (2026-09-30)
+## v4.0.0: the embedded network is now trained by the author, with his own training pipeline, on public Leela Chess Zero data (2026-09-30)
 
 Closes the NNUE-retraining cycle opened after v3.1.7 (see `luna-nnue`'s `results/` for the full record: phase 1-4
 reports, the bucket experiment report, this section only copies the four match outcomes).
