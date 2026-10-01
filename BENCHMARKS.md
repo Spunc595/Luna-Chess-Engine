@@ -985,7 +985,7 @@ Elo. 1,443 games, 10+0.1, **+15.9 +/- 11.9 Elo**, LOS 99.5%, SPRT H1 accepted, z
 
 **4-king-bucket architecture vs the no-bucket network**, both at `SCALE=358`, D3 active, trees differing only in
 `resources/net.bin`: 529 games, 10+0.1, **+36.9 +/- 20.5 Elo**, LOS 100.0%, SPRT H1 accepted, zero games lost on time.
-Capacity was a real limitation already at 1 billion distinct training positions.
+Capacity was a real limitation already at 1 billion training positions (about 914 million unique by exact board and side-to-move match).
 
 **The shipped result — 4-king-bucket network (`SCALE=358`) directly against akimbo (`SCALE=400`), both D3 active**,
 fixed length, no early stop: 2,000 games, 10+0.1, **+0.3 +/- 10.7 Elo**, draw ratio 0.509, zero games lost on time.
@@ -993,7 +993,7 @@ Statistically indistinguishable from akimbo. Per the shipping rule fixed before 
 worth shipping on its own, since every future network is then measured against Luna's own, not a frozen external
 artifact), **this network and `SCALE=358` are what v4.0.0 embeds.**
 
-Training: 1 billion distinct S2 positions (Leela-derived, via `linrock/bullet-training-data`), 8 epochs (8 billion
+Training: 1 billion positions (about 914 million unique by exact board and side-to-move match), S2 subset (Leela-derived, via `linrock/bullet-training-data`), 8 epochs (8 billion
 samples seen), `(768x4 -> 1024)x2 -> 1` SCReLU, from scratch, AdamW, cosine lr 4e-4 -> peak/40, WDL fraction ramp
 0.0 -> 0.1, on Oracle (aarch64, CPU), ~30.5 hours. Full recipe and gates (round-trip against an independent reference,
 0 differences; quantisation gates; the row-index layout verified against bullet's own Rust code before training) in
