@@ -45,9 +45,9 @@ cargo build --release
 
 The optimized binary is produced at `target/release/luna` (`luna.exe` on Windows).
 
-**About the releases**: each release contains the source code and an Android ARM64 build. For every other platform, compile it yourself with `cargo build --release` as above; a Linux build will be added to the releases starting with 4.0.0.
+**About the releases**: each release contains the source code and an Android ARM64 build. From 4.0.0, it also contains a Linux ARM64 build and a Windows x86_64 build. For every other platform, compile it yourself with `cargo build --release` as above.
 
-Release files are named `luna-v<version>-<platform>-<arch>`, e.g. `luna-v3.1.5-android-arm64` (and, from 4.0.0, `luna-v4.0.0-linux-arm64`, same `arm64` naming as the Android build since both target the same AArch64 instruction set; a Linux x86_64 build is not yet part of the release — no verified build environment for it was available, see BENCHMARKS.md).
+Release files are named `luna-v<version>-<platform>-<arch>`, e.g. `luna-v3.1.5-android-arm64` (and, from 4.0.0, `luna-v4.0.0-linux-arm64` and `luna-v4.0.0-windows-x86_64`). The Windows build targets the `x86-64-v2` microarchitecture level (SSE4.2, POPCNT — any x86_64 CPU from 2009 on), not the AVX2-capable `x86-64-v3`: on this project's own hardware, a `v3` build measured slower than `v2` at the same depth and node count (not faster, outside this benchmark's own noise floor), so only one Windows build is shipped. The AVX2 NNUE kernel still activates at runtime on CPUs that support it, in either build — see the NNUE network section below.
 
 ### NNUE network
 
