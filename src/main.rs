@@ -16,7 +16,7 @@ use crate::board::{Scacchiera, Colore, Mossa};
 use crate::zobrist::get_zobrist_keys;
 use crate::nnue::LunaNNUE;
 use crate::evaluation::EvalParams;
-use crate::search::{iterative_deepening, SearchInfo, SharedHistory, MAX_PLY};
+use crate::search::{iterative_deepening, NodeCounters, SearchInfo, SharedHistory, MAX_PLY};
 use crate::tt::TranspositionTable;
 use crate::book::OpeningBook;
 
@@ -537,6 +537,8 @@ fn main() {
                             // SMP fan-out still counts as a single unit the
                             // UCI loop can "stop" and join.
                             let nnue_ref = (*nnue_arc).as_ref();
+                            let counters = Arc::new(NodeCounters::new(threads));
+                            let counters_ref = &counters;
                             thread::scope(|scope| {
                                 let handles: Vec<_> = (0..threads)
                                     .map(|thread_id| {
@@ -549,6 +551,8 @@ fn main() {
                                             let mut info = SearchInfo::new(movetime, depth as i32);
                                             info.max_nodes = nodes_token;
                                             info.stop_signal = stop_ref;
+                                            info.counters = Some(Arc::clone(counters_ref));
+                                            info.thread_id = thread_id;
                                             // Diversity (round 1, kept simple):
                                             // secondary threads skip the depth-1
                                             // iteration, cheap and largely

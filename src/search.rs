@@ -5,7 +5,7 @@ use crate::nnue::LunaNNUE;
 use crate::evaluation::{evaluate, EvalParams}; // Imported EvalParams
 use crate::movegen::see;
 use std::time::Instant;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 pub const MAX_PLY: usize = 64;
@@ -201,12 +201,41 @@ impl SharedHistory {
     }
 }
 
+/// Node count published by each search thread, read only to print `info nodes`. A thread
+/// stores its count every `NODE_FLUSH` nodes (a plain store into its own cache line, not a
+/// shared read-modify-write) and exactly once when its search ends, so a report can lag a
+/// thread by fewer than `NODE_FLUSH` nodes while the final count is exact.
+pub const NODE_FLUSH: u64 = 1024;
+
+#[repr(align(64))]
+pub struct NodeSlot(AtomicU64);
+
+pub struct NodeCounters {
+    slots: Vec<NodeSlot>,
+}
+
+impl NodeCounters {
+    pub fn new(threads: usize) -> Self {
+        NodeCounters { slots: (0..threads).map(|_| NodeSlot(AtomicU64::new(0))).collect() }
+    }
+
+    pub fn publish(&self, thread_id: usize, nodes: u64) {
+        self.slots[thread_id].0.store(nodes, Ordering::Relaxed);
+    }
+
+    pub fn total(&self) -> u64 {
+        self.slots.iter().map(|s| s.0.load(Ordering::Relaxed)).sum()
+    }
+}
+
 pub struct SearchInfo {
     pub start_time: Instant,
     pub hard_limit: u128,
     pub soft_limit: u128,
     pub depth_limit: i32,
     pub nodes: u64,
+    pub counters: Option<Arc<NodeCounters>>,
+    pub thread_id: usize,
     pub stopped: bool,
     pub killer_moves: [[Mossa; 2]; MAX_PLY],
     /// Counter-move heuristic: `counter_moves[pezzo][a]`, indexed by the
@@ -237,6 +266,26 @@ pub struct SearchInfo {
 }
 
 impl SearchInfo {
+    #[inline(always)]
+    fn publish_nodes(&self) {
+        if let Some(c) = &self.counters {
+            if self.nodes % NODE_FLUSH == 0 { c.publish(self.thread_id, self.nodes); }
+        }
+    }
+
+    /// Total nodes of all threads for an `info` report. The calling thread is stored exactly
+    /// first; the others lag by less than `NODE_FLUSH` nodes each. Without counters (single-thread
+    /// search) it is this thread's own count, unchanged.
+    fn reported_nodes(&self) -> u64 {
+        match &self.counters {
+            None => self.nodes,
+            Some(c) => {
+                c.publish(self.thread_id, self.nodes);
+                c.total()
+            }
+        }
+    }
+
     pub fn new(time_limit: u128, depth_limit: i32) -> Self {
         let soft = if time_limit > 500 { time_limit * 60 / 100 } else { time_limit };
         SearchInfo {
@@ -245,6 +294,8 @@ impl SearchInfo {
             soft_limit: soft,
             depth_limit,
             nodes: 0,
+            counters: None,
+            thread_id: 0,
             stopped: false,
             killer_moves: [[Mossa::null(); 2]; MAX_PLY],
             counter_moves: [[Mossa::null(); 64]; 6],
@@ -462,17 +513,18 @@ pub fn iterative_deepening(
             }
 
             if report_info {
-                let nps = if elapsed > 0 { info.nodes as u128 * 1000 / elapsed } else { 0 };
+                let nodes = info.reported_nodes();
+                let nps = if elapsed > 0 { nodes as u128 * 1000 / elapsed } else { 0 };
 
                 if is_mate_score(score) {
                     let plies_to_mate = MATE_SCORE - score.abs();
                     let moves_to_mate = (plies_to_mate + 1) / 2;
                     let signed_moves = if score > 0 { moves_to_mate } else { -moves_to_mate };
                     print!("info depth {} score mate {} nodes {} nps {} time {} pv",
-                        depth, signed_moves, info.nodes, nps, elapsed);
+                        depth, signed_moves, nodes, nps, elapsed);
                 } else {
                     print!("info depth {} score cp {} nodes {} nps {} time {} pv",
-                        depth, score, info.nodes, nps, elapsed);
+                        depth, score, nodes, nps, elapsed);
                 }
                 for i in 0..pv_line.len {
                     print!(" {}", pv_line.moves[i].to_uci());
@@ -489,6 +541,7 @@ pub fn iterative_deepening(
         if !legali.is_empty() { best_move = legali[0]; }
     }
 
+    if let Some(c) = &info.counters { c.publish(info.thread_id, info.nodes); }
     (best_move, score, last_completed_depth)
 }
 
@@ -512,6 +565,7 @@ fn negamax(
 
     if info.check_time() { return 0; }
     info.nodes += 1;
+    info.publish_nodes();
 
     // Safety guard independent of the nominal requested depth: check
     // extensions (`new_depth = depth + 1` just below) can, along chains of
@@ -875,6 +929,7 @@ fn quiescence(
     // time info) or effectively hang. Same bail-out convention as negamax.
     if info.check_time() { return 0; }
     info.nodes += 1;
+    info.publish_nodes();
     // NNUE if available, otherwise PST (see eval() above)
     let stand_pat = eval(board, nnue, params);
     if stand_pat >= beta { return beta; }
@@ -993,6 +1048,47 @@ mod mate_tests {
                 "punteggio {} non riconosciuto come matto con ply simulato = {}",
                 score, simulated_ply
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod node_count_tests {
+    use super::*;
+
+    fn search_threads(threads: usize, depth: i32) -> (u64, u64, Vec<u64>) {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let tt = TranspositionTable::new(16);
+        let sh = SharedHistory::new();
+        let counters = Arc::new(NodeCounters::new(threads));
+        let fen = "8/5pk1/6p1/8/1P6/P4PKP/8/8 w - - 0 40";
+        let per_thread: Vec<u64> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..threads).map(|t| {
+                let (tt, sh, z, params) = (&tt, &sh, &z, &params);
+                let counters = Arc::clone(&counters);
+                scope.spawn(move || {
+                    let mut board = Scacchiera::from_fen(fen, z);
+                    let mut info = SearchInfo::new(600_000, depth);
+                    info.counters = Some(counters);
+                    info.thread_id = t;
+                    let start_depth = if t == 0 { 1 } else { 2 };
+                    iterative_deepening(&mut board, &mut info, tt, sh, z, None, params, start_depth, false);
+                    info.nodes
+                })
+            }).collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let exact_sum: u64 = per_thread.iter().sum();
+        (exact_sum, counters.total(), per_thread)
+    }
+
+    #[test]
+    fn reported_total_equals_sum_of_threads_after_search() {
+        for threads in [1usize, 2, 4] {
+            let (exact_sum, published, per_thread) = search_threads(threads, 8);
+            assert!(exact_sum > 0);
+            assert_eq!(published, exact_sum, "threads={threads} per-thread={per_thread:?}");
         }
     }
 }
