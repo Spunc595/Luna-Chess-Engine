@@ -526,20 +526,17 @@ impl Scacchiera {
         self.pezzi[moved_p] &= !(1 << from);
         self.colori[us] &= !(1 << from);
         self.hash ^= z.pezzi[us][moved_p][from];
-        if let Some(net) = nnue { net.remove_piece(&mut self.nnue_acc, us_white, moved_p, from, white_ksq, black_ksq); }
 
         if flag == MoveFlag::EnPassant {
             let cap_sq = if us == 0 { to - 8 } else { to + 8 };
             self.pezzi[0] &= !(1 << cap_sq);
             self.colori[them] &= !(1 << cap_sq);
             self.hash ^= z.pezzi[them][0][cap_sq];
-            if let Some(net) = nnue { net.remove_piece(&mut self.nnue_acc, !us_white, 0, cap_sq, white_ksq, black_ksq); }
         } else if let Some(cap_p) = undo.cattura_p {
             self.pezzi[cap_p] &= !(1 << to);
             self.colori[them] &= !(1 << to);
             self.hash ^= z.pezzi[them][cap_p][to];
             self.mezze_mosse = 0;
-            if let Some(net) = nnue { net.remove_piece(&mut self.nnue_acc, !us_white, cap_p, to, white_ksq, black_ksq); }
         }
 
         let mut final_p = moved_p;
@@ -547,17 +544,25 @@ impl Scacchiera {
         self.pezzi[final_p] |= 1 << to;
         self.colori[us] |= 1 << to;
         self.hash ^= z.pezzi[us][final_p][to];
-        if let Some(net) = nnue { net.add_piece(&mut self.nnue_acc, us_white, final_p, to, white_ksq, black_ksq); }
 
         if flag == MoveFlag::Castle {
             let (rf, rt) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0,0) };
             self.pezzi[3] ^= (1 << rf) | (1 << rt);
             self.colori[us] ^= (1 << rf) | (1 << rt);
             self.hash ^= z.pezzi[us][3][rf] ^ z.pezzi[us][3][rt];
-            if let Some(net) = nnue {
-                net.remove_piece(&mut self.nnue_acc, us_white, 3, rf, white_ksq, black_ksq);
-                net.add_piece(&mut self.nnue_acc, us_white, 3, rt, white_ksq, black_ksq);
-            }
+        }
+
+        if let Some(net) = nnue {
+            let (rook_from, rook_to) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0, 0) };
+            let (sub2, add2) = if flag == MoveFlag::Castle {
+                (Some((us_white, 3, rook_from)), Some((us_white, 3, rook_to)))
+            } else if flag == MoveFlag::EnPassant {
+                let cap_sq = if us == 0 { to - 8 } else { to + 8 };
+                (Some((!us_white, 0, cap_sq)), None)
+            } else {
+                (undo.cattura_p.map(|cp| (!us_white, cp, to)), None)
+            };
+            nnue_move(net, &mut self.nnue_acc, (us_white, moved_p, from), sub2, (us_white, final_p, to), add2, white_ksq, black_ksq);
         }
 
         // The King has moved: its own perspective's entire king-bucket
@@ -612,30 +617,31 @@ impl Scacchiera {
         self.colori[us] &= !(1 << to);
         self.pezzi[moved_p] |= 1 << from;
         self.colori[us] |= 1 << from;
+        let (rook_from, rook_to) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0, 0) };
+        let (sub2, add2) = if flag == MoveFlag::Castle {
+            (Some((us_white, 3, rook_to)), Some((us_white, 3, rook_from)))
+        } else if flag == MoveFlag::EnPassant {
+            let cap_sq = if us == 0 { to - 8 } else { to + 8 };
+            (None, Some((!us_white, 0, cap_sq)))
+        } else {
+            (None, u.cattura_p.map(|cp| (!us_white, cp, to)))
+        };
         if let Some(net) = nnue {
-            net.remove_piece(&mut self.nnue_acc, us_white, final_p, to, white_ksq, black_ksq);
-            net.add_piece(&mut self.nnue_acc, us_white, moved_p, from, white_ksq, black_ksq);
+            nnue_move(net, &mut self.nnue_acc, (us_white, final_p, to), sub2, (us_white, moved_p, from), add2, white_ksq, black_ksq);
         }
 
         if flag == MoveFlag::EnPassant {
             let cap_sq = if us == 0 { to - 8 } else { to + 8 };
             self.pezzi[0] |= 1 << cap_sq;
             self.colori[them] |= 1 << cap_sq;
-            if let Some(net) = nnue { net.add_piece(&mut self.nnue_acc, !us_white, 0, cap_sq, white_ksq, black_ksq); }
         } else if let Some(cp) = u.cattura_p {
             self.pezzi[cp] |= 1 << to;
             self.colori[them] |= 1 << to;
-            if let Some(net) = nnue { net.add_piece(&mut self.nnue_acc, !us_white, cp, to, white_ksq, black_ksq); }
         }
 
         if flag == MoveFlag::Castle {
-            let (rf, rt) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0,0) };
-            self.pezzi[3] ^= (1 << rf) | (1 << rt);
-            self.colori[us] ^= (1 << rf) | (1 << rt);
-            if let Some(net) = nnue {
-                net.remove_piece(&mut self.nnue_acc, us_white, 3, rt, white_ksq, black_ksq);
-                net.add_piece(&mut self.nnue_acc, us_white, 3, rf, white_ksq, black_ksq);
-            }
+            self.pezzi[3] ^= (1 << rook_from) | (1 << rook_to);
+            self.colori[us] ^= (1 << rook_from) | (1 << rook_to);
         }
 
         // Symmetric to the save in esegui_mossa: if the piece that moved was the
@@ -723,9 +729,17 @@ impl Scacchiera {
         // Exact inverse of the add_piece/remove_piece calls made in esegui_mossa:
         // the "final" piece (promoted or not) disappears from `to`, the
         // original piece (pawn, if promotion) reappears on `from`.
+        let (rook_from, rook_to) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0, 0) };
+        let (sub2, add2) = if flag == MoveFlag::Castle {
+            (Some((us_white, 3, rook_to)), Some((us_white, 3, rook_from)))
+        } else if flag == MoveFlag::EnPassant {
+            let cap_sq = if us == 0 { to - 8 } else { to + 8 };
+            (None, Some((!us_white, 0, cap_sq)))
+        } else {
+            (None, u.cattura_p.map(|cp| (!us_white, cp, to)))
+        };
         if let Some(net) = nnue {
-            net.remove_piece(&mut self.nnue_acc, us_white, final_p, to, white_ksq, black_ksq);
-            net.add_piece(&mut self.nnue_acc, us_white, moved_p, from, white_ksq, black_ksq);
+            nnue_move(net, &mut self.nnue_acc, (us_white, final_p, to), sub2, (us_white, moved_p, from), add2, white_ksq, black_ksq);
         }
 
         // 2. Restore captures or special moves
@@ -733,21 +747,14 @@ impl Scacchiera {
             let cap_sq = if us == 0 { to - 8 } else { to + 8 };
             self.pezzi[0] |= 1 << cap_sq;
             self.colori[them] |= 1 << cap_sq;
-            if let Some(net) = nnue { net.add_piece(&mut self.nnue_acc, !us_white, 0, cap_sq, white_ksq, black_ksq); }
         } else if let Some(cp) = u.cattura_p {
             self.pezzi[cp] |= 1 << to;
             self.colori[them] |= 1 << to;
-            if let Some(net) = nnue { net.add_piece(&mut self.nnue_acc, !us_white, cp, to, white_ksq, black_ksq); }
         }
 
         if flag == MoveFlag::Castle {
-            let (rf, rt) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0,0) };
-            self.pezzi[3] ^= (1 << rf) | (1 << rt);
-            self.colori[us] ^= (1 << rf) | (1 << rt);
-            if let Some(net) = nnue {
-                net.remove_piece(&mut self.nnue_acc, us_white, 3, rt, white_ksq, black_ksq);
-                net.add_piece(&mut self.nnue_acc, us_white, 3, rf, white_ksq, black_ksq);
-            }
+            self.pezzi[3] ^= (1 << rook_from) | (1 << rook_to);
+            self.colori[us] ^= (1 << rook_from) | (1 << rook_to);
         }
 
         // Symmetric to esegui_mossa: the King having returned to `from` above; if
@@ -872,5 +879,18 @@ impl Scacchiera {
 impl fmt::Display for Scacchiera {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.to_fen())
+    }
+}
+
+/// Applies one move's accumulator changes in a single pass per half. The first entries are always
+/// present; the optional second entries cover the captured piece, the en-passant pawn or the castling rook.
+#[inline(always)]
+fn nnue_move(net: &LunaNNUE, acc: &mut Accumulator, sub1: (bool, usize, usize), sub2: Option<(bool, usize, usize)>,
+             add1: (bool, usize, usize), add2: Option<(bool, usize, usize)>, white_ksq: usize, black_ksq: usize) {
+    match (sub2, add2) {
+        (None, None) => net.update_move(acc, [sub1], [add1], white_ksq, black_ksq),
+        (Some(s2), None) => net.update_move(acc, [sub1, s2], [add1], white_ksq, black_ksq),
+        (None, Some(a2)) => net.update_move(acc, [sub1], [add1, a2], white_ksq, black_ksq),
+        (Some(s2), Some(a2)) => net.update_move(acc, [sub1, s2], [add1, a2], white_ksq, black_ksq),
     }
 }
