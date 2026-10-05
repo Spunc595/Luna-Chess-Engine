@@ -1038,3 +1038,5 @@ Not measured in this round: the share of search time spent in the accumulator af
 measurement of the Blocco D method was not repeated). The gain above is the whole-search NPS, not that share.
 
 Not done: AVX2 with runtime detection (the x86-64-v2 build keeps SSE2 only); the x86 gain is therefore the SSE2 one.
+AVX2: non misurabile su Zen+ (PC, Ryzen 3 3200U) e su Neoverse N1 (Oracle, Ampere Altra); da rifare su Zen 4/5.
+Frazione accumulatore: non misurata.
