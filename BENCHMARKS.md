@@ -1004,3 +1004,37 @@ samples seen), `(768x4 -> 1024)x2 -> 1` SCReLU, from scratch, AdamW, cosine lr 4
 aspiration, delta) tuned for akimbo's network have not been retuned; the WDL ramp that causes the SCALE=358
 correction has not been fixed at the training source, so the next network trained with the same recipe will need the
 same kind of downstream correction until it is.
+
+## Accumulator row update with explicit 128-bit intrinsics (accepted, 2026-10-05)
+
+`add_row`/`sub_row` (the feature-row update in `LunaNNUE`) were compiled as scalar code on both
+targets: one `subw`/`ldrh`-`sub`-`strh` per element and a bounds check inside the loop, so LLVM did not vectorise
+them. The row update is now a single 128-bit pass: SSE2 (`_mm_add_epi16`/`_mm_sub_epi16`) on x86_64, NEON
+(`vaddq_s16`/`vsubq_s16`) on AArch64, scalar elsewhere. One length check per row, outside the loop. The scalar
+version stays as the reference oracle (`row_update_scalar`, used by the unit tests).
+
+Gates, all deterministic: bit-identical to the scalar reference on 4,000 random row pairs at full `i16` range and on
+the real `LunaNNUE::add_row`/`sub_row` layout (both targets); static evals identical on the 2,000 `eval_set.epd`
+positions; node counts identical on the 2,002 bench/eval positions on x86-64 and AArch64; test suite green with zero
+build warnings (58 tests on AArch64, all tests on x86-64); mutation check (sub replaced by add, and an off-by-one
+store lane) makes the unit tests fail on both targets.
+
+Disassembly after the change, the loop only (x86-64-v2): `movdqu` / `psubw %xmm1,%xmm0` / `movdqu` store, 128 iterations
+over 2 KB, no panic path inside the loop. AArch64: `ldr q0` / `sub v0.8h` / `str q0`, 128 iterations, no panic path.
+
+Speed (1 thread, depth 18, interleaved 5x1, floor measured in the same run as a byte-identical copy of the reference):
+
+| machine | position | reference NPS | new NPS | gain | floor |
+|---|---|---|---|---|---|
+| PC, x86-64-v2 | mediogioco | 516,377 | 571,270 | +9.6% | 3.4% |
+| PC, x86-64-v2 | finale_pedoni | 495,149 | 534,517 | +7.4% | 2.0% |
+| Oracle, AArch64 | mediogioco | 549,829 | 557,278 | +1.3% | 0.2% |
+| Oracle, AArch64 | finale_pedoni | 516,770 | 521,096 | +0.8% | 0.1% |
+
+Pre-registered rule: merge if the gain is at least 3% and at least twice the floor on one machine, with no loss beyond
+the floor on the other. The PC meets it on both positions; Oracle shows a small gain, no loss. Verdict: merge.
+
+Not measured in this round: the share of search time spent in the accumulator after the change (the instrumented
+measurement of the Blocco D method was not repeated). The gain above is the whole-search NPS, not that share.
+
+Not done: AVX2 with runtime detection (the x86-64-v2 build keeps SSE2 only); the x86 gain is therefore the SSE2 one.

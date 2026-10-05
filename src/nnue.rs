@@ -272,6 +272,56 @@ fn max_abs_output_weight_over_limit(output_weights: &[[i16; HIDDEN]; 2]) -> Opti
     (max_w > MAX_SAFE_OUTPUT_WEIGHT as u16).then_some(max_w)
 }
 
+/// `half += w` (or `half -= w` when `SUB`), wrapping. `w` is exactly one
+/// feature row, so the single length check here replaces a per-element one.
+#[inline(always)]
+fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
+    let w: &[i16; HIDDEN] = w.try_into().unwrap();
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::x86_64::*;
+        // SAFETY: SSE2 is part of the x86_64 baseline; both arrays hold HIDDEN
+        // i16 (HIDDEN % 8 == 0), so every 8-lane access below is in bounds.
+        unsafe {
+            let hp = half.as_mut_ptr();
+            let wp = w.as_ptr();
+            for k in 0..HIDDEN / 8 {
+                let a = _mm_loadu_si128(hp.add(k * 8) as *const __m128i);
+                let b = _mm_loadu_si128(wp.add(k * 8) as *const __m128i);
+                let r = if SUB { _mm_sub_epi16(a, b) } else { _mm_add_epi16(a, b) };
+                _mm_storeu_si128(hp.add(k * 8) as *mut __m128i, r);
+            }
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        use std::arch::aarch64::*;
+        // SAFETY: NEON is part of the AArch64 baseline; same bounds as above.
+        unsafe {
+            let hp = half.as_mut_ptr();
+            let wp = w.as_ptr();
+            for k in 0..HIDDEN / 8 {
+                let a = vld1q_s16(hp.add(k * 8));
+                let b = vld1q_s16(wp.add(k * 8));
+                let r = if SUB { vsubq_s16(a, b) } else { vaddq_s16(a, b) };
+                vst1q_s16(hp.add(k * 8), r);
+            }
+        }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    row_update_scalar::<SUB>(half, w);
+}
+
+/// Scalar reference for `row_update`: the bit-exact oracle for the G1 test,
+/// and the fallback on targets without an intrinsic path above.
+#[inline(always)]
+#[cfg_attr(all(not(test), any(target_arch = "x86_64", target_arch = "aarch64")), allow(dead_code))]
+fn row_update_scalar<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16; HIDDEN]) {
+    for i in 0..HIDDEN {
+        half[i] = if SUB { half[i].wrapping_sub(w[i]) } else { half[i].wrapping_add(w[i]) };
+    }
+}
+
 impl LunaNNUE {
     pub fn load(path: &str) -> Option<Self> {
         let mut file = File::open(path).ok()?;
@@ -363,16 +413,12 @@ impl LunaNNUE {
     #[inline(always)]
     fn add_row(&self, half: &mut [i16; HIDDEN], row: usize) {
         let off = row * HIDDEN;
-        for i in 0..HIDDEN {
-            half[i] = half[i].wrapping_add(self.feature_weights[off + i]);
-        }
+        row_update::<false>(half, &self.feature_weights[off..off + HIDDEN]);
     }
     #[inline(always)]
     fn sub_row(&self, half: &mut [i16; HIDDEN], row: usize) {
         let off = row * HIDDEN;
-        for i in 0..HIDDEN {
-            half[i] = half[i].wrapping_sub(self.feature_weights[off + i]);
-        }
+        row_update::<true>(half, &self.feature_weights[off..off + HIDDEN]);
     }
 
     /// Recomputes from scratch the accumulator half relative to ONE single
@@ -728,5 +774,69 @@ mod safety_gate_tests {
         let mut weights = [[0i16; HIDDEN]; 2];
         weights[0][0] = i16::MIN;
         assert_eq!(max_abs_output_weight_over_limit(&weights), Some(32768));
+    }
+}
+
+#[cfg(test)]
+mod row_update_tests {
+    use super::*;
+
+    fn xorshift_full_range(seed: &mut u64) -> i16 {
+        *seed ^= *seed << 13; *seed ^= *seed >> 7; *seed ^= *seed << 17;
+        *seed as i16
+    }
+
+    fn random_row(seed: &mut u64) -> [i16; HIDDEN] {
+        let mut out = [0i16; HIDDEN];
+        for o in out.iter_mut() { *o = xorshift_full_range(seed); }
+        // Force the wrapping extremes into a few lanes every time.
+        out[0] = i16::MAX; out[1] = i16::MIN; out[HIDDEN - 1] = i16::MIN; out[HIDDEN / 2] = i16::MAX;
+        out
+    }
+
+    #[test]
+    fn kernel_matches_scalar_bit_for_bit() {
+        let mut seed = 0x9E3779B97F4A7C15u64;
+        for _ in 0..4000 {
+            let w = random_row(&mut seed);
+            let base = random_row(&mut seed);
+
+            let mut simd = base; let mut scalar = base;
+            row_update::<false>(&mut simd, &w);
+            row_update_scalar::<false>(&mut scalar, &w);
+            assert_eq!(simd, scalar, "add mismatch");
+
+            let mut simd = base; let mut scalar = base;
+            row_update::<true>(&mut simd, &w);
+            row_update_scalar::<true>(&mut scalar, &w);
+            assert_eq!(simd, scalar, "sub mismatch");
+        }
+    }
+
+    #[test]
+    fn methods_match_scalar_on_real_row_layout() {
+        let mut seed = 0xD1B54A32D192ED03u64;
+        let rows = 64usize;
+        let feature_weights: Vec<i16> = (0..rows * HIDDEN).map(|_| xorshift_full_range(&mut seed)).collect();
+        let net = LunaNNUE {
+            feature_weights: feature_weights.clone(),
+            feature_bias: [0; HIDDEN],
+            output_weights: [[0; HIDDEN]; 2],
+            output_bias: 0,
+        };
+        for row in 0..rows {
+            let base = random_row(&mut seed);
+            let w: &[i16; HIDDEN] = feature_weights[row * HIDDEN..(row + 1) * HIDDEN].try_into().unwrap();
+
+            let mut got = base; let mut want = base;
+            net.add_row(&mut got, row);
+            row_update_scalar::<false>(&mut want, w);
+            assert_eq!(got, want, "add_row method, row {row}");
+
+            let mut got = base; let mut want = base;
+            net.sub_row(&mut got, row);
+            row_update_scalar::<true>(&mut want, w);
+            assert_eq!(got, want, "sub_row method, row {row}");
+        }
     }
 }
