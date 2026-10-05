@@ -11,7 +11,7 @@ version = "4.0.0"
 authors = ["Daniele Marpino"]
 edition = "2021"
 description = "Luna, a UCI chess engine written in Rust with NNUE evaluation"
-license = "MIT"
+license = "GPL-3.0-or-later"
 repository = "https://github.com/Spunc595/Luna-Chess-Engine"
 
 [dependencies]
