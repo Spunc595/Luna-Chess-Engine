@@ -1076,3 +1076,20 @@ Pre-registered rule: merge only if the gain is at least 3% and at least twice th
 beyond the floor on the other. Both machines clear both conditions on both positions (PC: 7.3/7.9% against floors of
 0.8/1.0%; Oracle: 11.8/13.2% against floors of 1.7/1.4%), with no loss anywhere. **Verdict: MERGE.** Not yet merged
 into `main` or pushed; pending confirmation.
+
+## Lazy SMP: the `info nodes` report sums all threads (2026-10-05)
+
+Before: the `info` line reported `nodes` and `nps` of thread 0 only. With 4 threads on the finale position at depth 12,
+the reported count was 97,505 (main) while the threads together searched about four times that. The bot's logged
+"Speed" (Threads 4) was understated for the same reason. Now each thread publishes its count to its own cache-line slot
+every 1,024 nodes and once at the end of its search; the report sums the slots. The search itself is unchanged.
+
+Measured (v2 build, depth 12, finale position): 1 thread 100,656 nodes both before and after; 2 threads 204,678 (was
+108,640); 4 threads 424,612 (was 97,505). The best move is the same in every run (b4b5).
+
+Gates: test suite green, zero warnings; a unit test checks the published counts equal the per-thread counts after
+the search for 1, 2 and 4 threads; mutation (final publish removed) makes that test fail. Single thread: 2,002 node
+counts identical to v4.0.0; static evals identical on 2,000 positions. Speed at 1 thread, depth 18, interleaved 5x1,
+floor in the same run: mediogioco +0.1% (floor 1.0%); finale_pedoni +2.6% (floor 1.2%). The finale result is outside
+the floor in the faster direction, while the control in the same run moved 4.0 points: the gate "within the floor"
+is not met cleanly on that position. Not re-measured.
