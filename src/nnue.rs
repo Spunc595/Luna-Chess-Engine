@@ -315,6 +315,7 @@ fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
 /// `half -= subs[..]` then `half += adds[..]`, wrapping, in ONE pass over the half: each lane
 /// is loaded and stored once, however many rows contribute to it. Modular arithmetic makes
 /// the order of the terms irrelevant, so this equals the sequence of single-row updates.
+const _: () = assert!(HIDDEN % 8 == 0);
 #[inline(always)]
 fn row_fused<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[i16; HIDDEN]; S], adds: [&[i16; HIDDEN]; A]) {
     #[cfg(target_arch = "x86_64")]
