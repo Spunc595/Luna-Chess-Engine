@@ -1100,3 +1100,22 @@ To be addressed in a separate commit, not now:
 - `src/board.rs:888` -- `nnue_move` has 8 arguments (clippy's default threshold is 7).
 - `src/search.rs:272` -- `self.nodes % NODE_FLUSH == 0` could be `self.nodes.is_multiple_of(NODE_FLUSH)`.
 - `src/nnue.rs:318` -- the `const _: () = assert!(HIDDEN % 8 == 0);` line, same `.is_multiple_of()` suggestion.
+
+### IIR SPRT: paired-openings amendment to the preamble, registered before launch (2026-10-10)
+
+The preamble built with `-games 8000` plays each opening once, in random order (same structure as the D3 fixed-length
+match). Changed before launch to paired openings with colour swap: **`-rounds 4000 -games 2 -repeat`** replaces
+`-games 8000` -- same total of 8,000 games, but each opening is played twice in the same round, once per colour,
+instead of once with a random colour. `order=random` is kept (it governs which opening each round draws, not the
+pairing within a round, which `-repeat` provides). Every other preamble parameter is unchanged: `tc=10+0.1`,
+`option.Hash=64`, `option.Threads=1`, `-concurrency 2`, `-srand 1207`, `-sprt elo0=0 elo1=10 alpha=0.05 beta=0.05`,
+openings `8moves_v3.pgn` (sha256 `5835239f88cc2c7511b177c32392a69f3ede21819cf0616f80a7f907cd21d17e`).
+
+Binaries (aarch64, re-verified with `sha256sum` on the machine): `iir` `4a502ceac0176d62528a0776b485934060c399fbbdeb92472f391700cb4c8a4c`,
+`main` `23a4869c24b6ec7be4df563b6e3a1ace6e39b232166ce91807239ab9edb273fe`.
+
+Decision rule, unchanged from the pre-registration: H1 (upper SPRT bound reached) -> candidate for merge, pending
+the full gate suite; H0 (lower bound reached) -> rejected measurement; cap reached with neither bound crossed ->
+"not decided", no merge. Validity clause (amended 2026-10-09): a single time loss does not by itself invalidate the
+run; it invalidates only if attributable to a machine anomaly, or if time losses exceed 0.5% of games (more than
+40 out of 8,000).
