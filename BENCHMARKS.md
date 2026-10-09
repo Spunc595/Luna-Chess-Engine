@@ -1093,3 +1093,10 @@ counts identical to v4.0.0; static evals identical on 2,000 positions. Speed at 
 floor in the same run: mediogioco +0.1% (floor 1.0%); finale_pedoni +2.6% (floor 1.2%). The finale result is outside
 the floor in the faster direction, while the control in the same run moved 4.0 points: the gate "within the floor"
 is not met cleanly on that position. Not re-measured.
+
+### Clippy follow-up: three new warnings from acc-fuse/smp-nodes/the HIDDEN assert (not blocking, not fixed yet)
+
+To be addressed in a separate commit, not now:
+- `src/board.rs:888` -- `nnue_move` has 8 arguments (clippy's default threshold is 7).
+- `src/search.rs:272` -- `self.nodes % NODE_FLUSH == 0` could be `self.nodes.is_multiple_of(NODE_FLUSH)`.
+- `src/nnue.rs:318` -- the `const _: () = assert!(HIDDEN % 8 == 0);` line, same `.is_multiple_of()` suggestion.
