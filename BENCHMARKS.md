@@ -1040,3 +1040,39 @@ measurement of the Blocco D method was not repeated). The gain above is the whol
 Not done: AVX2 with runtime detection (the x86-64-v2 build keeps SSE2 only); the x86 gain is therefore the SSE2 one.
 AVX2: non misurabile su Zen+ (PC, Ryzen 3 3200U) e su Neoverse N1 (Oracle, Ampere Altra); da rifare su Zen 4/5.
 Frazione accumulatore: non misurata.
+
+## Fused accumulator update (move-level row fusion) -- accepted, 2026-10-09
+
+Change: make and unmake apply all row changes of a move to each accumulator half in one load/store per 8 lanes
+(`update_move`, `row_fused`; SSE2 / NEON / scalar). Local commit `5a5e7d2` on branch `acc-fuse`, not yet published
+at the time of this measurement.
+
+Gates (deterministic): bit-identical to the piece sequence on random rows, overflow included (both architectures);
+static evals identical on the 2,000 `eval_set.epd` positions (x86_64 and aarch64); node counts identical on the 2,002
+bench/eval positions (x86_64 and aarch64); full test suite green, zero build warnings (x86_64 and aarch64);
+mutation checks (sub/add swapped in the kernel; sub rows fed as adds) fail the tests on both architectures.
+
+Disassembly, the fused loop (x86-64-v2): `movdqu` loads of the accumulator and the rows, `psubw`/`paddw` on `%xmm`,
+one store, 128 iterations, no bounds-check panic path. AArch64: `ldr q` / `sub v.8h` / `add v.8h` / `str q`, 128
+iterations, no panic path.
+
+PC (x86-64-v2), reference = `main` kernel (`520f5d5`), 1 thread, depth 18, interleaved 5x1, floor in the same run,
+measured 2026-10-05:
+
+| position | reference NPS | fused NPS | gain | floor |
+|---|---|---|---|---|
+| mediogioco | 583,424 | 629,439 | +7.3% | 0.8% |
+| finale_pedoni | 528,403 | 573,936 | +7.9% | 1.0% |
+
+Oracle (aarch64, Ampere Altra / Neoverse N1, the VM recreated as A1.Flex 2 OCPU/12GB after the 2026-10-05 outage),
+reference = `main` (`ce9d4d4`), same protocol, bot stopped for the run, measured 2026-10-09:
+
+| position | reference NPS | fused NPS | gain | floor |
+|---|---|---|---|---|
+| mediogioco | 556,408 | 630,552 | +11.8% | 1.7% |
+| finale_pedoni | 513,251 | 590,991 | +13.2% | 1.4% |
+
+Pre-registered rule: merge only if the gain is at least 3% and at least twice the floor on one machine, AND no loss
+beyond the floor on the other. Both machines clear both conditions on both positions (PC: 7.3/7.9% against floors of
+0.8/1.0%; Oracle: 11.8/13.2% against floors of 1.7/1.4%), with no loss anywhere. **Verdict: MERGE.** Not yet merged
+into `main` or pushed; pending confirmation.

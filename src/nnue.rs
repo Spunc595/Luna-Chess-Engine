@@ -312,6 +312,56 @@ fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
     row_update_scalar::<SUB>(half, w);
 }
 
+/// `half -= subs[..]` then `half += adds[..]`, wrapping, in ONE pass over the half: each lane
+/// is loaded and stored once, however many rows contribute to it. Modular arithmetic makes
+/// the order of the terms irrelevant, so this equals the sequence of single-row updates.
+#[inline(always)]
+fn row_fused<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[i16; HIDDEN]; S], adds: [&[i16; HIDDEN]; A]) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use std::arch::x86_64::*;
+        // SAFETY: SSE2 is part of the x86_64 baseline; every row holds HIDDEN i16 (HIDDEN % 8 == 0).
+        unsafe {
+            let hp = half.as_mut_ptr();
+            for k in 0..HIDDEN / 8 {
+                let mut v = _mm_loadu_si128(hp.add(k * 8) as *const __m128i);
+                for s in subs.iter() {
+                    v = _mm_sub_epi16(v, _mm_loadu_si128(s.as_ptr().add(k * 8) as *const __m128i));
+                }
+                for a in adds.iter() {
+                    v = _mm_add_epi16(v, _mm_loadu_si128(a.as_ptr().add(k * 8) as *const __m128i));
+                }
+                _mm_storeu_si128(hp.add(k * 8) as *mut __m128i, v);
+            }
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        use std::arch::aarch64::*;
+        // SAFETY: NEON is part of the AArch64 baseline; same bounds as above.
+        unsafe {
+            let hp = half.as_mut_ptr();
+            for k in 0..HIDDEN / 8 {
+                let mut v = vld1q_s16(hp.add(k * 8));
+                for s in subs.iter() {
+                    v = vsubq_s16(v, vld1q_s16(s.as_ptr().add(k * 8)));
+                }
+                for a in adds.iter() {
+                    v = vaddq_s16(v, vld1q_s16(a.as_ptr().add(k * 8)));
+                }
+                vst1q_s16(hp.add(k * 8), v);
+            }
+        }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    for i in 0..HIDDEN {
+        let mut v = half[i];
+        for s in subs.iter() { v = v.wrapping_sub(s[i]); }
+        for a in adds.iter() { v = v.wrapping_add(a[i]); }
+        half[i] = v;
+    }
+}
+
 /// Scalar reference for `row_update`: the bit-exact oracle for the G1 test,
 /// and the fallback on targets without an intrinsic path above.
 #[inline(always)]
@@ -416,6 +466,7 @@ impl LunaNNUE {
         row_update::<false>(half, &self.feature_weights[off..off + HIDDEN]);
     }
     #[inline(always)]
+    #[cfg_attr(not(test), allow(dead_code))]
     fn sub_row(&self, half: &mut [i16; HIDDEN], row: usize) {
         let off = row * HIDDEN;
         row_update::<true>(half, &self.feature_weights[off..off + HIDDEN]);
@@ -481,6 +532,7 @@ impl LunaNNUE {
     /// unlike in HalfKP where the King carried no feature information for
     /// either perspective.
     #[inline]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn add_piece(&self, acc: &mut Accumulator, color_white: bool, piece_type_luna: usize, sq: usize, white_ksq: usize, black_ksq: usize) {
         self.add_row(&mut acc.white, feature_index(false, white_ksq, color_white, piece_type_luna, sq));
         self.add_row(&mut acc.black, feature_index(true, black_ksq, color_white, piece_type_luna, sq));
@@ -489,9 +541,24 @@ impl LunaNNUE {
     /// Exact inverse of `add_piece`: to be called when a piece DISAPPEARS
     /// from square `sq`.
     #[inline]
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn remove_piece(&self, acc: &mut Accumulator, color_white: bool, piece_type_luna: usize, sq: usize, white_ksq: usize, black_ksq: usize) {
         self.sub_row(&mut acc.white, feature_index(false, white_ksq, color_white, piece_type_luna, sq));
         self.sub_row(&mut acc.black, feature_index(true, black_ksq, color_white, piece_type_luna, sq));
+    }
+
+    /// Applies a whole move to both halves in one pass per half: `subs` are the pieces leaving
+    /// their squares, `adds` the pieces arriving. Each entry is `(color_white, piece, square)`,
+    /// with the same meaning as the arguments of `add_piece`/`remove_piece`.
+    #[inline]
+    pub fn update_move<const S: usize, const A: usize>(&self, acc: &mut Accumulator, subs: [(bool, usize, usize); S], adds: [(bool, usize, usize); A], white_ksq: usize, black_ksq: usize) {
+        let row = |r: usize| -> &[i16; HIDDEN] { self.feature_weights[r * HIDDEN..(r + 1) * HIDDEN].try_into().unwrap() };
+        let w_subs = subs.map(|(cw, pc, sq)| row(feature_index(false, white_ksq, cw, pc, sq)));
+        let w_adds = adds.map(|(cw, pc, sq)| row(feature_index(false, white_ksq, cw, pc, sq)));
+        let b_subs = subs.map(|(cw, pc, sq)| row(feature_index(true, black_ksq, cw, pc, sq)));
+        let b_adds = adds.map(|(cw, pc, sq)| row(feature_index(true, black_ksq, cw, pc, sq)));
+        row_fused(&mut acc.white, w_subs, w_adds);
+        row_fused(&mut acc.black, b_subs, b_adds);
     }
 
     /// Output layer: SCReLU-activated dot product against each perspective
@@ -810,6 +877,49 @@ mod row_update_tests {
             row_update::<true>(&mut simd, &w);
             row_update_scalar::<true>(&mut scalar, &w);
             assert_eq!(simd, scalar, "sub mismatch");
+        }
+    }
+
+    #[test]
+    fn update_move_matches_piece_sequence() {
+        let mut seed = 0xA0761D6478BD642Fu64;
+        let rows = 768 * NUM_BUCKETS;
+        let feature_weights: Vec<i16> = (0..rows * HIDDEN).map(|_| xorshift_full_range(&mut seed)).collect();
+        let net = LunaNNUE {
+            feature_weights,
+            feature_bias: [0; HIDDEN],
+            output_weights: [[0; HIDDEN]; 2],
+            output_bias: 0,
+        };
+        let mut acc0 = Accumulator { white: random_row(&mut seed), black: random_row(&mut seed) };
+        for step in 0..3000 {
+            let wk = (xorshift_full_range(&mut seed) as u64 % 64) as usize;
+            let bk = (xorshift_full_range(&mut seed) as u64 % 64) as usize;
+            let pick = |seed: &mut u64| -> (bool, usize, usize) {
+                let cw = xorshift_full_range(seed) & 1 == 0;
+                let pc = (xorshift_full_range(seed) as u64 % 6) as usize;
+                let sq = (xorshift_full_range(seed) as u64 % 64) as usize;
+                (cw, pc, sq)
+            };
+            let n_sub = 1 + (step % 2);
+            let n_add = 1 + ((step / 2) % 2);
+            let subs: Vec<(bool, usize, usize)> = (0..n_sub).map(|_| pick(&mut seed)).collect();
+            let adds: Vec<(bool, usize, usize)> = (0..n_add).map(|_| pick(&mut seed)).collect();
+
+            let mut want = acc0.clone();
+            for &(cw, pc, sq) in &subs { net.remove_piece(&mut want, cw, pc, sq, wk, bk); }
+            for &(cw, pc, sq) in &adds { net.add_piece(&mut want, cw, pc, sq, wk, bk); }
+
+            let mut got = acc0.clone();
+            match (n_sub, n_add) {
+                (1, 1) => net.update_move(&mut got, [subs[0]], [adds[0]], wk, bk),
+                (2, 1) => net.update_move(&mut got, [subs[0], subs[1]], [adds[0]], wk, bk),
+                (1, 2) => net.update_move(&mut got, [subs[0]], [adds[0], adds[1]], wk, bk),
+                _ => net.update_move(&mut got, [subs[0], subs[1]], [adds[0], adds[1]], wk, bk),
+            }
+            assert_eq!(got.white, want.white, "white half, step {step}");
+            assert_eq!(got.black, want.black, "black half, step {step}");
+            acc0 = want;
         }
     }
 
