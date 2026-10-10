@@ -45,6 +45,7 @@ pub const MATE_THRESHOLD: i32 = MATE_SCORE - MAX_PLY as i32;
 /// eval is too crude an indicator to justify a cutoff without even
 /// generating moves.
 const RFP_MAX_DEPTH: i32 = 8;
+const IIR_MIN_DEPTH: i32 = 4;
 /// Safety margin per ply of RFP (unit: centipawn-equivalents).
 const RFP_MARGIN_PER_PLY: i32 = 110;
 
@@ -614,6 +615,7 @@ fn negamax(
     let tt_move = tt.get_move(board.hash);
     let in_check = board.in_scacco();
     let new_depth = if in_check { depth + 1 } else { depth };
+    let new_depth = if tt_move.is_null() && !in_check && new_depth >= IIR_MIN_DEPTH { new_depth - 1 } else { new_depth };
 
     if new_depth <= 0 {
         return quiescence(board, alpha, beta, info, sh, z, nnue, params);

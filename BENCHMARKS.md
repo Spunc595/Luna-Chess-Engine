@@ -1100,3 +1100,42 @@ To be addressed in a separate commit, not now:
 - `src/board.rs:888` -- `nnue_move` has 8 arguments (clippy's default threshold is 7).
 - `src/search.rs:272` -- `self.nodes % NODE_FLUSH == 0` could be `self.nodes.is_multiple_of(NODE_FLUSH)`.
 - `src/nnue.rs:318` -- the `const _: () = assert!(HIDDEN % 8 == 0);` line, same `.is_multiple_of()` suggestion.
+
+### IIR SPRT: paired-openings amendment to the preamble, registered before launch (2026-10-10)
+
+The preamble built with `-games 8000` plays each opening once, in random order (same structure as the D3 fixed-length
+match). Changed before launch to paired openings with colour swap: **`-rounds 4000 -games 2 -repeat`** replaces
+`-games 8000` -- same total of 8,000 games, but each opening is played twice in the same round, once per colour,
+instead of once with a random colour. `order=random` is kept (it governs which opening each round draws, not the
+pairing within a round, which `-repeat` provides). Every other preamble parameter is unchanged: `tc=10+0.1`,
+`option.Hash=64`, `option.Threads=1`, `-concurrency 2`, `-srand 1207`, `-sprt elo0=0 elo1=10 alpha=0.05 beta=0.05`,
+openings `8moves_v3.pgn` (sha256 `5835239f88cc2c7511b177c32392a69f3ede21819cf0616f80a7f907cd21d17e`).
+
+Binaries (aarch64, re-verified with `sha256sum` on the machine): `iir` `4a502ceac0176d62528a0776b485934060c399fbbdeb92472f391700cb4c8a4c`,
+`main` `23a4869c24b6ec7be4df563b6e3a1ace6e39b232166ce91807239ab9edb273fe`.
+
+Decision rule, unchanged from the pre-registration: H1 (upper SPRT bound reached) -> candidate for merge, pending
+the full gate suite; H0 (lower bound reached) -> rejected measurement; cap reached with neither bound crossed ->
+"not decided", no merge. Validity clause (amended 2026-10-09): a single time loss does not by itself invalidate the
+run; it invalidates only if attributable to a machine anomaly, or if time losses exceed 0.5% of games (more than
+40 out of 8,000).
+
+### IIR SPRT result: H1 accepted, candidate for merge (2026-10-10)
+
+Run `iir_sprt_20261009_2306` on Oracle (aarch64, A1.Flex 4 OCPU/24GB), started 2026-10-09T23:06:07Z, stopped itself
+before the 8,000-game cap. Preamble matched the pre-registration (paired openings `-rounds 4000 -games 2 -repeat`,
+tc=10+0.1, Hash 64, Threads 1, concurrency 2, srand 1207, sprt elo0=0 elo1=10 alpha=0.05 beta=0.05, both binaries'
+sha256 re-verified on the machine before launch).
+
+- Games: 2,057 completed + 1 cut short by the stop itself (the match stopping mid-game on one of the two concurrent
+  encounters) = 2,058 total, well under the 8,000 cap.
+- W/D/L of IIR vs main: 455-383-1,219.
+- Elo difference: +12.2 +/- 9.6, LOS 99.4%, draw ratio 59.3%. Colour split: IIR White 289-150-590 (0.568), IIR Black
+  166-233-629 (0.467).
+- SPRT: llr 3 (101.9%), lbound -2.94, ubound 2.94 -- **H1 accepted**.
+- Time losses: 0. All anomaly categories (illegal/crash/disconnect/stall/time forfeit/loses on time/lost on time):
+  0, checked with `check_anomalies.sh` against the full log. Validity clause satisfied without needing its 0.5%
+  threshold.
+
+Pre-registered rule: H1 -> candidate for merge, pending the full test suite (not an automatic merge). **Verdict:
+candidate for merge, not yet merged.**
