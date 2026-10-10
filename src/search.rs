@@ -576,7 +576,7 @@ fn negamax(
     // out-of-bounds index. We treat the node as a leaf (quiescence)
     // exactly as for new_depth <= 0.
     if ply >= MAX_PLY - 1 {
-        return quiescence(board, alpha, beta, info, sh, z, nnue, params);
+        return quiescence(board, alpha, beta, ply as i32, info, sh, z, nnue, params);
     }
 
     let pv_node = beta - alpha > 1;
@@ -618,7 +618,7 @@ fn negamax(
     let new_depth = if tt_move.is_null() && !in_check && new_depth >= IIR_MIN_DEPTH { new_depth - 1 } else { new_depth };
 
     if new_depth <= 0 {
-        return quiescence(board, alpha, beta, info, sh, z, nnue, params);
+        return quiescence(board, alpha, beta, ply as i32, info, sh, z, nnue, params);
     }
 
     // --- SHARED STATIC EVAL ---
@@ -913,6 +913,7 @@ fn quiescence(
     board: &mut Scacchiera,
     mut alpha: i32,
     beta: i32,
+    ply: i32,
     info: &mut SearchInfo,
     sh: &SharedHistory,
     z: &ZobristKeys,
@@ -932,6 +933,44 @@ fn quiescence(
     if info.check_time() { return 0; }
     info.nodes += 1;
     info.publish_nodes();
+
+    // --- CHECK EVASIONS ---
+    // A side in check cannot "stand pat": declining to move is not a legal
+    // option, so stand_pat must never be used as a lower bound here. The
+    // only legal replies may be quiet (a king step, a block, an
+    // interposition) rather than a capture, so the usual
+    // captures/promotions-only filter below would silently search zero
+    // moves at a node that actually has legal replies. `genera_mosse_legali`
+    // (full legality, not the pseudo-legal capture filter used in the
+    // non-check path) is the correct generator here; if it returns empty,
+    // this is checkmate, same convention as negamax's own no-legal-move
+    // branch (`-MATE_SCORE + ply`, ply-relative to this search's root, not
+    // to the absolute game ply — see the FIX comment on that branch in
+    // negamax for why the distinction matters).
+    if board.in_scacco() {
+        let legal_moves = board.genera_mosse_legali(z);
+        if legal_moves.is_empty() {
+            return -MATE_SCORE + ply;
+        }
+
+        let mut moves = legal_moves;
+        crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+
+        for m in moves {
+            // Already verified legal by genera_mosse_legali: esegui_mossa
+            // here (this time WITH the real nnue, unlike the throwaway
+            // legality check inside genera_mosse_legali itself) cannot
+            // return false.
+            board.esegui_mossa(&m, z, nnue);
+            let score = -quiescence(board, -beta, -alpha, ply + 1, info, sh, z, nnue, params);
+            board.annulla_mossa(&m, z, nnue);
+
+            if score >= beta { return beta; }
+            if score > alpha { alpha = score; }
+        }
+        return alpha;
+    }
+
     // NNUE if available, otherwise PST (see eval() above)
     let stand_pat = eval(board, nnue, params);
     if stand_pat >= beta { return beta; }
@@ -999,7 +1038,7 @@ fn quiescence(
         // board.rs::annulla_mossa_veloce), so in that branch
         // annulla_mossa must NEVER be called explicitly.
         if board.esegui_mossa(&m, z, nnue) {
-            let score = -quiescence(board, -beta, -alpha, info, sh, z, nnue, params);
+            let score = -quiescence(board, -beta, -alpha, ply + 1, info, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
             if score >= beta { return beta; }
@@ -1051,6 +1090,37 @@ mod mate_tests {
                 score, simulated_ply
             );
         }
+    }
+
+    /// Regression test for the check-evasion patch: a quiescence leaf where
+    /// the side to move is in check, has NO capture available, and has NO
+    /// legal move at all (checkmate) must be recognized as mate. Before
+    /// this patch, `quiescence`'s capture/promotion-only filter would leave
+    /// `moves` empty regardless of whether legal (quiet) replies existed,
+    /// and the function would simply return `stand_pat` — never checking
+    /// `in_scacco()` at all, so a checkmate reached exactly at the
+    /// depth-0/qsearch boundary was invisible to it.
+    #[test]
+    fn quiescence_detects_checkmate_with_no_captures_available() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(
+            "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+            &z,
+        );
+        // Play the mating move (Qd8-h4#) to reach the actual checkmate
+        // position: White to move, in check, no legal reply.
+        let mating_move = board.genera_mosse_legali(&z).into_iter()
+            .find(|m| m.to_uci() == "d8h4")
+            .expect("Qd8-h4 must be a legal move in this position");
+        board.esegui_mossa(&mating_move, &z, None);
+
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let score = quiescence(&mut board, -INFINITY, INFINITY, 0, &mut info, &sh, &z, None, &params);
+
+        assert!(is_mate_score(score), "checkmate at a qsearch leaf not recognized, score={score}");
+        assert_eq!(score, -MATE_SCORE, "expected mate score at ply 0, got {score}");
     }
 }
 
