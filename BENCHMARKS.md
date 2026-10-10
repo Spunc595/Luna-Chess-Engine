@@ -1139,3 +1139,12 @@ sha256 re-verified on the machine before launch).
 
 Pre-registered rule: H1 -> candidate for merge, pending the full test suite (not an automatic merge). **Verdict:
 candidate for merge, not yet merged.**
+
+### IIR follow-up variants, for future separate SPRTs (not measured now)
+
+Three independent changes to try, one SPRT each, not combined:
+- (a) Store the reduced depth in the TT, not the original one: `tt.store` (`search.rs:900,907`) currently stores
+  `depth` (the depth requested before IIR's reduction and the check-extension), not `new_depth` (what was actually
+  searched). Changing it to store `new_depth` would make the TT entry's depth match the work actually done.
+- (b) Restrict IIR to PV and cut nodes only, instead of all non-check nodes without a TT move.
+- (c) Re-tune `IIR_MIN_DEPTH` (currently 4): try 3, 5 and 6, one value per SPRT, not combined.
