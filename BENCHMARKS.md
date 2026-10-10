@@ -1129,9 +1129,12 @@ sha256 re-verified on the machine before launch).
 
 - Games: 2,057 completed + 1 cut short by the stop itself (the match stopping mid-game on one of the two concurrent
   encounters) = 2,058 total, well under the 8,000 cap.
-- W/D/L of IIR vs main: 455-383-1,219.
-- Elo difference: +12.2 +/- 9.6, LOS 99.4%, draw ratio 59.3%. Colour split: IIR White 289-150-590 (0.568), IIR Black
-  166-233-629 (0.467).
+- **Correction (2026-10-10): the label below was "W/D/L", but the three numbers were always ordered
+  win-loss-draw** (the draw ratio and the Elo figure on the next line are the numbers that were actually computed
+  from them; 1,219/2,057 = 59.3%, matching the stated draw ratio only if the third number is the draw count).
+  **W/L/D of IIR vs main: 455-383-1,219** (win 455, loss 383, draw 1,219).
+- Elo difference: +12.2 +/- 9.6, LOS 99.4%, draw ratio 59.3%. Colour split (same W/L/D order): IIR White
+  289-150-590 (0.568), IIR Black 166-233-629 (0.467).
 - SPRT: llr 3 (101.9%), lbound -2.94, ubound 2.94 -- **H1 accepted**.
 - Time losses: 0. All anomaly categories (illegal/crash/disconnect/stall/time forfeit/loses on time/lost on time):
   0, checked with `check_anomalies.sh` against the full log. Validity clause satisfied without needing its 0.5%
