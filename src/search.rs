@@ -54,6 +54,12 @@ const FUTILITY_MAX_DEPTH: i32 = 6;
 /// Safety margin per ply of Futility Pruning.
 const FUTILITY_MARGIN_PER_PLY: i32 = 130;
 
+/// Maximum depth within which Late Move Pruning (move-count-based pruning)
+/// is active. Beyond this depth the move-count threshold (see
+/// `lmp_move_limit` below) would already be larger than most real move
+/// lists, making the heuristic a no-op anyway.
+const LMP_MAX_DEPTH: i32 = 8;
+
 /// Minimum depth and minimum number of moves already searched before LMR
 /// can activate. The first moves (TT-move, good captures: already at the
 /// front thanks to `ordina_mosse`) are never reduced.
@@ -426,6 +432,21 @@ fn lmr_reduction(depth: i32, move_count: i32) -> i32 {
     get_lmr_table()[d][m]
 }
 
+/// Move-count threshold for Late Move Pruning: once this many moves have
+/// already been searched at this node (depth `depth`, which is always
+/// `new_depth`, the one actually being searched at this node — same
+/// convention as every other depth-indexed heuristic above), remaining
+/// quiet moves are skipped outright rather than reduced. `3 + depth^2` is
+/// the plain, untuned form of the formula used by several open-source
+/// engines (no "improving" distinction — deliberately excluded here to
+/// keep this patch to the one variable it is meant to test; RFP's own
+/// "improving" flag was tried separately and found neutral, see the note
+/// next to RFP above).
+#[inline(always)]
+fn lmp_move_limit(depth: i32) -> i32 {
+    3 + depth * depth
+}
+
 pub fn iterative_deepening(
     board: &mut Scacchiera,
     info: &mut SearchInfo,
@@ -761,6 +782,18 @@ fn negamax(
         // discarded move, not just that of the recursive search: it is
         // the cheapest of the three forms of pruning.
         if futility_applicable && is_quiet && !is_passed_push && moves_searched > 0 && futility_margin_value <= alpha {
+            continue;
+        }
+
+        // --- LATE MOVE PRUNING ---
+        // Unlike futility pruning above, this does not look at static_eval
+        // at all: once move ordering has already offered this many quiet
+        // moves without one of them raising alpha, the remaining quiet
+        // moves in the list (the ones ordering itself ranks lowest) are
+        // skipped outright. A separate mechanism from futility/RFP/NMP: it
+        // prunes on move index, not on a margin over the position's
+        // evaluation.
+        if can_prune && !is_passed_push && is_quiet && new_depth <= LMP_MAX_DEPTH && moves_searched >= lmp_move_limit(new_depth) {
             continue;
         }
 
