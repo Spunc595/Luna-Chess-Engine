@@ -576,7 +576,7 @@ fn negamax(
     // out-of-bounds index. We treat the node as a leaf (quiescence)
     // exactly as for new_depth <= 0.
     if ply >= MAX_PLY - 1 {
-        return quiescence(board, alpha, beta, ply as i32, info, sh, z, nnue, params);
+        return quiescence(board, alpha, beta, ply as i32, info, tt, sh, z, nnue, params);
     }
 
     let pv_node = beta - alpha > 1;
@@ -618,7 +618,7 @@ fn negamax(
     let new_depth = if tt_move.is_null() && !in_check && new_depth >= IIR_MIN_DEPTH { new_depth - 1 } else { new_depth };
 
     if new_depth <= 0 {
-        return quiescence(board, alpha, beta, ply as i32, info, sh, z, nnue, params);
+        return quiescence(board, alpha, beta, ply as i32, info, tt, sh, z, nnue, params);
     }
 
     // --- SHARED STATIC EVAL ---
@@ -915,6 +915,7 @@ fn quiescence(
     beta: i32,
     ply: i32,
     info: &mut SearchInfo,
+    tt: &TranspositionTable,
     sh: &SharedHistory,
     z: &ZobristKeys,
     nnue: Option<&LunaNNUE>,
@@ -946,7 +947,12 @@ fn quiescence(
     // this is checkmate, same convention as negamax's own no-legal-move
     // branch (`-MATE_SCORE + ply`, ply-relative to this search's root, not
     // to the absolute game ply — see the FIX comment on that branch in
-    // negamax for why the distinction matters).
+    // negamax for why the distinction matters). No TT probe/store in this
+    // branch: the check-evasion patch never used the TT, and this merge
+    // does not add that on top of it -- `tt` is only threaded through the
+    // recursive call below because the function signature now requires it
+    // (plumbing for the sibling patch merged below, not a behaviour change
+    // here).
     if board.in_scacco() {
         let legal_moves = board.genera_mosse_legali(z);
         if legal_moves.is_empty() {
@@ -962,7 +968,7 @@ fn quiescence(
             // legality check inside genera_mosse_legali itself) cannot
             // return false.
             board.esegui_mossa(&m, z, nnue);
-            let score = -quiescence(board, -beta, -alpha, ply + 1, info, sh, z, nnue, params);
+            let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
             if score >= beta { return beta; }
@@ -971,15 +977,40 @@ fn quiescence(
         return alpha;
     }
 
+    // --- TRANSPOSITION TABLE PROBE ---
+    // Quiescence revisits the same tactical positions through different
+    // capture orders very often (the same square can be the target of
+    // several different attackers, explored in different sequences); a
+    // hit here skips move generation/ordering and the whole exchange
+    // entirely. Depth is always 0 (quiescence has no depth of its own),
+    // so any entry already in the table — whether stored by an earlier
+    // qsearch visit or inherited from a negamax node that transposed into
+    // this same position — is always "deep enough" for another qsearch
+    // probe. `ply` (threaded through from negamax, unlike before) is only
+    // needed for the mate-score ply-rebasing `score_to_tt`/`score_from_tt`
+    // already do for negamax; ordinary quiescence scores are unaffected
+    // by it. Only reached for a side NOT in check: the branch above already
+    // returned for the in-check case.
+    if let Some(entry) = tt.probe(board.hash, 0, ply, alpha, beta) {
+        return entry;
+    }
+    let tt_move = tt.get_move(board.hash);
+
+    let original_alpha = alpha;
+
     // NNUE if available, otherwise PST (see eval() above)
     let stand_pat = eval(board, nnue, params);
-    if stand_pat >= beta { return beta; }
+    if stand_pat >= beta {
+        tt.store(board.hash, 0, ply, beta, Bound::Beta, Mossa::null());
+        return beta;
+    }
 
     // --- DELTA PRUNING (global, over the entire node) ---
     // If even capturing the highest-value piece possible (a Queen) with
     // an additional safety margin cannot get us close to alpha, the
     // whole position is unrecoverable: we avoid generating/ordering moves
-    // and bail out immediately.
+    // and bail out immediately. No TT store here: this is a bound on
+    // stand_pat's own neighbourhood, not a searched result worth caching.
     if stand_pat + Pezzo::Regina.valore() + DELTA_MARGIN < alpha {
         return alpha;
     }
@@ -996,8 +1027,12 @@ fn quiescence(
     // already filtered to captures/promotions, so its contribution in
     // `score_move` will never be reached for these elements. We still
     // pass the real table (instead of a dummy one) so as not to introduce
-    // a second parameter type just for this call site.
-    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+    // a second parameter type just for this call site. `tt_move`, when
+    // present, is now used to try the TT's own best move first, same as
+    // in negamax.
+    crate::movegen::ordina_mosse(&mut moves, board, tt_move, &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+
+    let mut best_move = Mossa::null();
 
     for m in moves {
         // --- SEE PRUNING (objectively losing captures) ---
@@ -1038,13 +1073,22 @@ fn quiescence(
         // board.rs::annulla_mossa_veloce), so in that branch
         // annulla_mossa must NEVER be called explicitly.
         if board.esegui_mossa(&m, z, nnue) {
-            let score = -quiescence(board, -beta, -alpha, ply + 1, info, sh, z, nnue, params);
+            let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
-            if score >= beta { return beta; }
-            if score > alpha { alpha = score; }
+            if score >= beta {
+                tt.store(board.hash, 0, ply, beta, Bound::Beta, m);
+                return beta;
+            }
+            if score > alpha {
+                alpha = score;
+                best_move = m;
+            }
         }
     }
+
+    let flag = if alpha > original_alpha { Bound::Exact } else { Bound::Alpha };
+    tt.store(board.hash, 0, ply, alpha, flag, best_move);
     alpha
 }
 
@@ -1117,7 +1161,8 @@ mod mate_tests {
 
         let sh = SharedHistory::new();
         let mut info = SearchInfo::new(5000, 1);
-        let score = quiescence(&mut board, -INFINITY, INFINITY, 0, &mut info, &sh, &z, None, &params);
+        let tt = TranspositionTable::new(1);
+        let score = quiescence(&mut board, -INFINITY, INFINITY, 0, &mut info, &tt, &sh, &z, None, &params);
 
         assert!(is_mate_score(score), "checkmate at a qsearch leaf not recognized, score={score}");
         assert_eq!(score, -MATE_SCORE, "expected mate score at ply 0, got {score}");
