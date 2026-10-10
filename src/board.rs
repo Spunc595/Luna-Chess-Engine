@@ -562,7 +562,7 @@ impl Scacchiera {
             } else {
                 (undo.cattura_p.map(|cp| (!us_white, cp, to)), None)
             };
-            nnue_move(net, &mut self.nnue_acc, (us_white, moved_p, from), sub2, (us_white, final_p, to), add2, white_ksq, black_ksq);
+            nnue_move(net, &mut self.nnue_acc, (us_white, moved_p, from), sub2, (us_white, final_p, to), add2, (white_ksq, black_ksq));
         }
 
         // The King has moved: its own perspective's entire king-bucket
@@ -627,7 +627,7 @@ impl Scacchiera {
             (None, u.cattura_p.map(|cp| (!us_white, cp, to)))
         };
         if let Some(net) = nnue {
-            nnue_move(net, &mut self.nnue_acc, (us_white, final_p, to), sub2, (us_white, moved_p, from), add2, white_ksq, black_ksq);
+            nnue_move(net, &mut self.nnue_acc, (us_white, final_p, to), sub2, (us_white, moved_p, from), add2, (white_ksq, black_ksq));
         }
 
         if flag == MoveFlag::EnPassant {
@@ -739,7 +739,7 @@ impl Scacchiera {
             (None, u.cattura_p.map(|cp| (!us_white, cp, to)))
         };
         if let Some(net) = nnue {
-            nnue_move(net, &mut self.nnue_acc, (us_white, final_p, to), sub2, (us_white, moved_p, from), add2, white_ksq, black_ksq);
+            nnue_move(net, &mut self.nnue_acc, (us_white, final_p, to), sub2, (us_white, moved_p, from), add2, (white_ksq, black_ksq));
         }
 
         // 2. Restore captures or special moves
@@ -886,7 +886,8 @@ impl fmt::Display for Scacchiera {
 /// present; the optional second entries cover the captured piece, the en-passant pawn or the castling rook.
 #[inline(always)]
 fn nnue_move(net: &LunaNNUE, acc: &mut Accumulator, sub1: (bool, usize, usize), sub2: Option<(bool, usize, usize)>,
-             add1: (bool, usize, usize), add2: Option<(bool, usize, usize)>, white_ksq: usize, black_ksq: usize) {
+             add1: (bool, usize, usize), add2: Option<(bool, usize, usize)>, ksq: (usize, usize)) {
+    let (white_ksq, black_ksq) = ksq;
     match (sub2, add2) {
         (None, None) => net.update_move(acc, [sub1], [add1], white_ksq, black_ksq),
         (Some(s2), None) => net.update_move(acc, [sub1, s2], [add1], white_ksq, black_ksq),

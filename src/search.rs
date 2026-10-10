@@ -270,7 +270,7 @@ impl SearchInfo {
     #[inline(always)]
     fn publish_nodes(&self) {
         if let Some(c) = &self.counters {
-            if self.nodes % NODE_FLUSH == 0 { c.publish(self.thread_id, self.nodes); }
+            if self.nodes.is_multiple_of(NODE_FLUSH) { c.publish(self.thread_id, self.nodes); }
         }
     }
 
