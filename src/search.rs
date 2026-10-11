@@ -968,6 +968,22 @@ fn quiescence(
     info.nodes += 1;
     info.publish_nodes();
 
+    // --- PLY CAP (safety net, not a search change) ---
+    // negamax already refuses to recurse past MAX_PLY (see the `ply >=
+    // MAX_PLY - 1` guard right before it hands off to quiescence), but
+    // quiescence itself had no such limit: a sufficiently long chain of
+    // forced captures (the kind of thing simplified endgames produce) could
+    // in principle recurse past MAX_PLY from inside quiescence alone,
+    // without ever passing back through negamax's own check. In practice
+    // this is not known to happen -- the gate below (bench-suite node
+    // identity) exists specifically to confirm this patch changes NOTHING
+    // observable in ordinary play, not to fix an observed bug. Checked
+    // BEFORE the in-check branch below: this is a universal safety net,
+    // not conditioned on check status.
+    if ply >= MAX_PLY as i32 {
+        return eval(board, nnue, params);
+    }
+
     // --- CHECK EVASIONS ---
     // A side in check cannot "stand pat": declining to move is not a legal
     // option, so stand_pat must never be used as a lower bound here. The
@@ -1123,6 +1139,64 @@ fn quiescence(
     let flag = if alpha > original_alpha { Bound::Exact } else { Bound::Alpha };
     tt.store(board.hash, 0, ply, alpha, flag, best_move);
     alpha
+}
+
+#[cfg(test)]
+mod ply_cap_tests {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+    use crate::evaluation::EvalParams;
+
+    // A position with one clearly profitable, undefended capture available
+    // (White bishop e4 takes the undefended black pawn d5). Chosen
+    // specifically so the two tests below can tell "the cap fired" apart
+    // from "there was nothing to search anyway" by the RETURNED VALUE
+    // alone: if the cap is bypassed, quiescence must find the capture and
+    // return a score visibly better than the raw static eval; if the cap
+    // fires, it returns the raw static eval unconditionally, ignoring the
+    // capture entirely.
+    const CAPTURE_AVAILABLE_FEN: &str = "4k3/8/8/3p4/4B3/8/8/4K3 w - - 0 1";
+
+    /// The cap must fire at ply == MAX_PLY: even with a profitable capture
+    /// sitting right there, quiescence must return the PLAIN static eval,
+    /// not search it.
+    #[test]
+    fn ply_cap_fires_exactly_at_max_ply_and_ignores_the_available_capture() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(CAPTURE_AVAILABLE_FEN, &z);
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let tt = crate::tt::TranspositionTable::new(1);
+
+        let score = quiescence(&mut board, -INFINITY, INFINITY, MAX_PLY as i32, &mut info, &tt, &sh, &z, None, &params);
+        let static_eval = eval(&board, None, &params);
+
+        assert_eq!(score, static_eval, "ply cap did not return the plain static eval (it searched the capture instead)");
+    }
+
+    /// One ply below the cap, the SAME position must be searched normally:
+    /// the available capture must be found, giving a score clearly better
+    /// than the raw static eval (not just "didn't crash"). The exact margin
+    /// isn't asserted -- only that it is a real, pawn-sized improvement,
+    /// which the raw eval cannot produce on its own.
+    #[test]
+    fn ply_cap_does_not_fire_one_ply_below_and_the_capture_is_found() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(CAPTURE_AVAILABLE_FEN, &z);
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let tt = crate::tt::TranspositionTable::new(1);
+
+        let score = quiescence(&mut board, -INFINITY, INFINITY, MAX_PLY as i32 - 1, &mut info, &tt, &sh, &z, None, &params);
+        let static_eval = eval(&board, None, &params);
+
+        assert!(
+            score > static_eval + 50,
+            "ply cap fired one ply too early: expected the capture to be found (score well above static eval {static_eval}), got {score}"
+        );
+    }
 }
 
 #[cfg(test)]
