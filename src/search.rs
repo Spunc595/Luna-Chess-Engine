@@ -1242,3 +1242,46 @@ mod node_count_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod coldstart_gate {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+    use crate::tt::TranspositionTable;
+    use crate::evaluation::EvalParams;
+
+    /// Regression gate for the magic-bitboard cold-start fix (see attacks.rs): the very
+    /// first real search of a process must not take meaningfully longer than its own
+    /// hard_limit. 1.1x, not 1.0x, to leave room for ordinary scheduling noise -- this is
+    /// NOT the same tolerance as a time-loss-safety margin, it exists only to catch a
+    /// regression back to a multi-second one-time setup cost hiding inside the first
+    /// search's reported time, which is exactly what this gate would have caught before the
+    /// fix (measured 3.4x-5x overshoot, see BENCHMARKS.md). Calls `init_attack_tables()`
+    /// explicitly first (same as main.rs does, before the UCI loop starts) rather than
+    /// relying on test execution order to have warmed it already.
+    #[test]
+    fn first_search_of_a_fresh_init_stays_within_1_1x_hard_limit() {
+        crate::attacks::init_attack_tables();
+
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", &z,
+        );
+        let tt = TranspositionTable::new(64);
+        let sh = SharedHistory::new();
+        let hard_limit: u128 = 480; // matches movetime at wtime=10000, winc=100, 10+0.1
+        let mut info = SearchInfo::new(hard_limit, 64);
+
+        let start = std::time::Instant::now();
+        let _ = iterative_deepening(&mut board, &mut info, &tt, &sh, &z, None, &params, 1, false);
+        let used = start.elapsed().as_millis();
+
+        assert!(
+            used <= hard_limit * 11 / 10,
+            "first search took {used}ms, more than 1.1x its own hard_limit ({hard_limit}ms) -- \
+             likely a cold-start regression (see attacks.rs's magic-bitboard fix)"
+        );
+    }
+}
+
