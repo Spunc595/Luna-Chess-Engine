@@ -1151,3 +1151,39 @@ Three independent changes to try, one SPRT each, not combined:
   searched). Changing it to store `new_depth` would make the TT entry's depth match the work actually done.
 - (b) Restrict IIR to PV and cut nodes only, instead of all non-check nodes without a TT move.
 - (c) Re-tune `IIR_MIN_DEPTH` (currently 4): try 3, 5 and 6, one value per SPRT, not combined.
+
+
+## Real-device verification: cold-start fix on Android arm64 (2026-10-13)
+
+**Device**: Lenovo Tab M11 (Termux, Android), CPU to be confirmed, likely MediaTek Helio G88 (2x Cortex-A75 +
+6x Cortex-A55). **Not** the Galaxy A16 5G cited by the MCEC organizer -- this run establishes the mechanism on
+real ARM64/Android hardware, not a measurement on the tournament's actual device, which remains unconfirmed and
+unmeasured.
+
+**Binaries**: `luna-rc1-android-arm64` (`release-4.1-rc1`, sha256 `4325b7eeb05150e0d3100cce7818f0fb2334fbe3bad345ea338ef9001c6acaa5`)
+and `luna-v4.0.0-android-arm64` (tag `v4.0.0`, sha256 `72caa67615d3741be085dc16712f78340618f67c220c9a2e68c06b38d421d9ab`),
+both built on the PC with NDK r27d, API level 21, sha256 verified on-device before every run. Measured externally
+(`phone_timing_probe.py`, a pure black-box UCI-over-pipe timer, no change to either binary) via Termux, 3 repeats
+per binary, per the PC-side instructions in `android_phone_test/ISTRUZIONI.md`.
+
+| build | avvio -> uciok (3 lanci) | isready -> readyok | go movetime 1000 -> bestmove (3 lanci) |
+|---|---|---|---|
+| v4.0.0 | 3219 / 3172 / 3172 ms | 0 ms | 660 / 673 / 690 ms |
+| rc1 | 33 / 27 / 21 ms | 0 ms | 683 / 696 / 703 ms |
+
+**Conclusion.** The magic-bitboard hardcoding (`attacks.rs`, cold-start fix, already verified on the PC in this
+same window) reduces real startup on ARM64 Android hardware from ~3.2s to **under 0.03s** -- consistent with, and
+even cleaner than, the PC-side measurement (there the whole cost was attributed to the same mechanism; here it is
+confirmed on a second, independent architecture). Search response time under "go movetime 1000" is essentially
+unchanged between the two builds (660-703ms both ways, differences within normal noise) -- the fix touches only
+startup, not the search loop, exactly as intended.
+
+**Why ~70% and not closer to 1000ms, by design, not a fixed margin.** `SearchInfo::new` (`search.rs:296-297`) sets
+`soft_limit = hard_limit * 60 / 100` whenever `time_limit > 500` -- for `movetime=1000` that is `soft_limit=600`.
+The stop check (`search.rs:533`, `if elapsed > info.soft_limit && (stability_counter >= 3 || depth > 8)`) only
+runs once per COMPLETED depth iteration, not continuously -- so the search keeps finishing whole iterations until
+one ends past 600ms, then stops before starting the next. The measured 660-703ms is exactly that: the first
+completed iteration whose own end time lands past the 600ms soft limit, on a device/position where each iteration
+takes tens of ms. `hard_limit` (1000ms) is the real ceiling, checked every node via `check_time`, and was never
+approached here -- nothing silently discounted the requested 1000ms, the engine simply decided (correctly, by its
+own soft/hard design) that it didn't need the rest.
