@@ -1189,16 +1189,21 @@ approached here -- nothing silently discounted the requested 1000ms, the engine 
 own soft/hard design) that it didn't need the rest.
 
 
-## Pre-registration: v4.1.0 non-regression verification, `release-4.1-rc1` vs `v4.0.0` (NOT LAUNCHED, 2026-10-14)
+## Pre-registration: v4.1.0 verification, `release-4.1-rc1` vs `v4.0.0` -- Test 0/1/2 (NOT LAUNCHED, 2026-10-14)
 
-This is the gate for whether v4.1.0 ships at all -- not a feature SPRT, a check that the accumulated changes
-since v4.0.0 (see the release notes draft) have not made the engine WORSE. Two fixed-length matches, both
-Threads=2 (the untested thread count every prior SPRT/Elo number in this project's v4.0.0->rc1 history skipped --
-see the release notes' "Not measured" section), both `Hash=64`, both against `v4.0.0` using the EXACT binary
-currently deployed on the lichess bot (`~/luna-bot/bot/engines/luna`, sha256
-`2de537190dfee6c0f7b24ce4c8d4305f1c74ca05b6e9f74e07335c5dd7eacb0d`, copied, original never touched), not a fresh
-build from the `v4.0.0` tag -- this is deliberate: the bot's own binary is what actually plays real games today,
+Test 0 is the release's headline Elo figure (Threads=1, the thread count every other Elo/SPRT number in this
+project's history was measured at). Test 1 and Test 2 are the non-regression gate for whether v4.1.0 ships at
+all under Threads=2 -- not feature SPRTs, a check that the accumulated changes since v4.0.0 (see the release
+notes draft) have not made the engine WORSE at a thread count nothing above has ever been measured at. All three
+against `v4.0.0` using the EXACT binary currently deployed on the lichess bot (`~/luna-bot/bot/engines/luna`,
+sha256 `2de537190dfee6c0f7b24ce4c8d4305f1c74ca05b6e9f74e07335c5dd7eacb0d`, copied, original never touched), not a
+fresh build from the `v4.0.0` tag -- deliberate: the bot's own binary is what actually plays real games today,
 and is the thing v4.1.0 is meant to replace.
+
+**Test 0**: `tc=10+0.1`, `Threads=1`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), openings
+`UHO_4060_v4.epd`. **This is the number that goes into the release notes as v4.1.0's headline Elo estimate, with
+its 95% CI** -- not Test 1 or Test 2, which stay framed as non-regression checks at Threads=2, not as the
+release's strength claim.
 
 **Test 1**: `tc=10+0.1`, `Threads=2`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), openings
 `UHO_4060_v4.epd` (sha256 `3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca`, already used and
@@ -1207,18 +1212,23 @@ re-verified for the `integ-3` independent confirmation).
 **Test 2**: `tc=60+0.6`, `Threads=2`, 1,000 games fixed-length (500 paired rounds, `-repeat`), same binaries, same
 book.
 
-Both: `-games 2 -repeat`, no `-sprt` flag (fixed-length confirmation, per this project's established protocol for
-this kind of match -- an Elo estimate with its 95% CI, not an SPRT verdict). Concurrency: **7** if the Oracle
-instance is at 16 OCPU, **3** if only 8 OCPU is available (core-2, same formula `queue_runner.sh` already uses
-elsewhere, applied by hand here since both tests share one fixed concurrency rather than the per-candidate
-auto-formula). **If only 8 OCPU is available, only Test 1 runs tonight** -- Test 2 waits.
+All three: `-games 2 -repeat`, no `-sprt` flag (fixed-length confirmation, per this project's established
+protocol for this kind of match -- an Elo estimate with its 95% CI, not an SPRT verdict). Queue order: **Test 0,
+then Test 1, then Test 2** (one candidate at a time, `queue_runner.sh`'s normal sequential behavior).
+Concurrency: Test 0 at **14** (16 OCPU) or **6** (8 OCPU), Tests 1/2 at **7** (16 OCPU) or **3** (8 OCPU) -- Test
+0 is Threads=1 so it uses the plain core-count/core-minus-2 formula, Tests 1/2 are Threads=2 so concurrency is
+halved to keep total engine threads within the core count. **If only 8 OCPU is available, only Test 0 and Test 1
+run tonight** (`--deadline-hours 12`) -- Test 2 waits. At 16 OCPU, all three run (`--deadline-hours 20`).
 
-**Decision rule, agreed before launch**: if the 95% CI's UPPER bound is below zero for EITHER test (i.e. rc1 is
-significantly worse, not just "not significantly better"), v4.1.0 does NOT ship until the cause is understood --
-no exceptions, no averaging the two tests together to paper over one bad result. Otherwise, v4.1.0 ships with
-both tests reported as the non-regression verification, with their intervals stated plainly (not reduced to a
-single pass/fail line) -- including if one or both intervals straddle zero inconclusively, which is still a valid
-basis to ship (this is a non-regression check, not a strength claim: "not proven worse" is what it needs to
-show, not "proven better").
+**Decision rule, agreed before launch**: if the 95% CI's UPPER bound is below zero for Test 1 OR Test 2 (i.e. rc1
+is significantly worse at Threads=2, not just "not significantly better"), v4.1.0 does NOT ship until the cause
+is understood -- no exceptions, no averaging the tests together to paper over one bad result. Test 0's own CI is
+reported as the headline figure regardless of its own sign/width (it is the measurement, not a gate) -- but if
+Test 0 itself showed a clearly negative CI, that would obviously also stop the release; the explicit gate
+language above is about Tests 1/2 specifically because those are the ones measuring a previously untested
+condition (Threads=2), not because Test 0 is exempt from common sense. Otherwise, v4.1.0 ships with all three
+tests reported, with their intervals stated plainly (not reduced to a single pass/fail line) -- including if one
+or both of Tests 1/2 straddle zero inconclusively, which is still a valid basis to ship (those two are a
+non-regression check, not a strength claim: "not proven worse" is what they need to show).
 
 Not launched. No `.approved`. Awaiting Daniele's go-ahead and the Oracle resize.
