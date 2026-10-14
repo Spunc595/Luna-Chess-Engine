@@ -1187,3 +1187,38 @@ completed iteration whose own end time lands past the 600ms soft limit, on a dev
 takes tens of ms. `hard_limit` (1000ms) is the real ceiling, checked every node via `check_time`, and was never
 approached here -- nothing silently discounted the requested 1000ms, the engine simply decided (correctly, by its
 own soft/hard design) that it didn't need the rest.
+
+
+## Pre-registration: v4.1.0 non-regression verification, `release-4.1-rc1` vs `v4.0.0` (NOT LAUNCHED, 2026-10-14)
+
+This is the gate for whether v4.1.0 ships at all -- not a feature SPRT, a check that the accumulated changes
+since v4.0.0 (see the release notes draft) have not made the engine WORSE. Two fixed-length matches, both
+Threads=2 (the untested thread count every prior SPRT/Elo number in this project's v4.0.0->rc1 history skipped --
+see the release notes' "Not measured" section), both `Hash=64`, both against `v4.0.0` using the EXACT binary
+currently deployed on the lichess bot (`~/luna-bot/bot/engines/luna`, sha256
+`2de537190dfee6c0f7b24ce4c8d4305f1c74ca05b6e9f74e07335c5dd7eacb0d`, copied, original never touched), not a fresh
+build from the `v4.0.0` tag -- this is deliberate: the bot's own binary is what actually plays real games today,
+and is the thing v4.1.0 is meant to replace.
+
+**Test 1**: `tc=10+0.1`, `Threads=2`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), openings
+`UHO_4060_v4.epd` (sha256 `3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca`, already used and
+re-verified for the `integ-3` independent confirmation).
+
+**Test 2**: `tc=60+0.6`, `Threads=2`, 1,000 games fixed-length (500 paired rounds, `-repeat`), same binaries, same
+book.
+
+Both: `-games 2 -repeat`, no `-sprt` flag (fixed-length confirmation, per this project's established protocol for
+this kind of match -- an Elo estimate with its 95% CI, not an SPRT verdict). Concurrency: **7** if the Oracle
+instance is at 16 OCPU, **3** if only 8 OCPU is available (core-2, same formula `queue_runner.sh` already uses
+elsewhere, applied by hand here since both tests share one fixed concurrency rather than the per-candidate
+auto-formula). **If only 8 OCPU is available, only Test 1 runs tonight** -- Test 2 waits.
+
+**Decision rule, agreed before launch**: if the 95% CI's UPPER bound is below zero for EITHER test (i.e. rc1 is
+significantly worse, not just "not significantly better"), v4.1.0 does NOT ship until the cause is understood --
+no exceptions, no averaging the two tests together to paper over one bad result. Otherwise, v4.1.0 ships with
+both tests reported as the non-regression verification, with their intervals stated plainly (not reduced to a
+single pass/fail line) -- including if one or both intervals straddle zero inconclusively, which is still a valid
+basis to ship (this is a non-regression check, not a strength claim: "not proven worse" is what it needs to
+show, not "proven better").
+
+Not launched. No `.approved`. Awaiting Daniele's go-ahead and the Oracle resize.
