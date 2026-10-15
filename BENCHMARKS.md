@@ -1288,3 +1288,17 @@ cleanly), not a balanced book. Elo measured on an imbalanced book is not directl
 balanced one, or to ratings from other projects/rating lists that use different books -- the number is internally
 valid (same book, same conditions, for comparing `rc1` to `v4.0.0`) but should not be read as "rc1 is +48.6 Elo
 stronger in general."
+
+
+## Test 1 result: `release-4.1-rc1` vs `v4.0.0`, Threads=2 non-regression, +49.1 Elo (2026-10-15)
+
+`tc=10+0.1`, `Threads=2`, `Hash=64`, openings `UHO_4060_v4.epd`, 3,000 games fixed-length (1,500 paired rounds,
+`-repeat`), same binaries as Test 0. Launched 2026-10-14T23:51:48Z, finished 2026-10-15T08:54:28Z (**9h02m40s**).
+
+- **W-L-D of rc1-test1 vs v4.0.0: 1,051 - 630 - 1,319** (3,000 games).
+- **Elo difference: +49.1 +/- 9.3**, LOS 100.0%, draw ratio 44.0%.
+- **Time losses: 0.**
+
+Consistent with Test 0 (+48.6 +/- 9.2 at Threads=1) -- the gain holds at Threads=2, inside the margin of the two
+CIs. Per the pre-registered decision rule, the non-regression gate is clearly passed (nowhere near a negative
+upper CI bound). Test 2 (60+0.6, Threads=2) still running at the time of this entry.
