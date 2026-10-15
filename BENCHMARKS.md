@@ -1232,3 +1232,59 @@ or both of Tests 1/2 straddle zero inconclusively, which is still a valid basis 
 non-regression check, not a strength claim: "not proven worse" is what they need to show).
 
 Not launched. No `.approved`. Awaiting Daniele's go-ahead and the Oracle resize.
+
+
+## Test 0 result: `release-4.1-rc1` vs `v4.0.0`, +48.6 Elo (2026-10-14/15)
+
+**This is the headline Elo figure for the v4.1.0 release.** `tc=10+0.1`, `Threads=1`, `Hash=64`, openings
+`UHO_4060_v4.epd`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), against the exact binary deployed
+on the lichess bot (sha256 `2de537190dfee6c0f7b24ce4c8d4305f1c74ca05b6e9f74e07335c5dd7eacb0d`). Launched
+2026-10-14T19:18:17Z, finished 2026-10-14T23:51:48Z (**4h33m31s**).
+
+- **W-L-D of rc1-test0 vs v4.0.0: 1,029 - 612 - 1,359** (3,000 games).
+- **Elo difference: +48.6 +/- 9.2**, LOS 100.0%, draw ratio 45.3%.
+- **Time losses: 0.** No adjudicated games (0%) -- all 1,641 decisive results ended by checkmate, all 1,359 draws
+  by the normal chess rules (904 threefold repetition, 195 fifty-move rule, 254 insufficient material, 6
+  stalemate).
+
+**+48.6 is a large number -- larger than any single change previously measured in this project -- so before
+trusting it, four possible artifacts were checked and ruled out, all read-only, without disturbing the live
+queue:**
+
+1. **Base-binary identity.** Node counts at depth 18, Threads=1, on the two standard bench positions, single
+   `nice -n 19` UCI session: the bot's binary (mediogioco 1,069,417 / finale_pedoni 1,431,971) matches EXACTLY a
+   fresh local PC build of the `v4.0.0` tag (commit `d293839`, peeled from annotated tag `650ebe6`) -- same two
+   numbers. The bot is genuinely running `v4.0.0`, not some other build.
+2. **No per-game engine restart.** `ps` on the live, still-running `rc1-test1` match showed exactly 6 engine
+   child processes (3 per side, matching `-concurrency 3`), all with the SAME start time as `cutechess-cli`
+   itself and ~5h41m of continuous uptime -- confirmed alive since the match began, never restarted between
+   games. cutechess-cli's own architecture (one persistent process pair per concurrency slot, `ucinewgame`
+   between games) was directly observed, not merely assumed.
+3. **Time-per-move, identical between the two engines.** Parsed from `games.pgn`'s move-time comments: both
+   `rc1-test0` and `v4.0.0` show avg=0.213s, max=0.490s, first-move-out-of-book avg=0.480s -- byte-for-byte the
+   same. The clock-management formula in `main.rs` is untouched by any change between `v4.0.0` and `rc1`, so this
+   is expected, not a coincidence; it directly rules out a timing-side explanation (neither engine spends its
+   clock differently).
+4. **Game endings and adjudication**, see the bullet list above -- no adjudicated games, no anomalous
+   termination pattern.
+
+**Correction of an earlier, wrong explanation.** A first guess attributed some of this gain to the cold-start fix
+(the magic-bitboard hardcoding) via a hypothesized per-game engine restart cost. **That hypothesis is wrong, and
+is retracted here**: cutechess-cli does not restart engines between games (point 2 above), the cold-start cost
+would in any case land before `uciok` and the game clock, and it is paid at most once per concurrency slot for
+the entire 3,000-game match, not 3,000 times -- it cannot explain a result of this size.
+
+**What +48.6 Elo most likely reflects instead** (not independently re-verified here, stated as the working
+explanation, not a new measurement): the accumulated effect of multiple real, separately-measured changes between
+`v4.0.0` and `rc1` -- IIR (+12.2 +/- 9.6 on its own SPRT), the quiescence-TT/check-evasions/LMP combination (+7.5
++/- 7.9 on its own measurement), and the NPS gain from `acc-fuse` (+7-13%, never before measured in Elo terms --
+more nodes per second at a fixed time budget plausibly buys real strength that nothing above captured). These
+were each measured against different reference points and were never combined into one SPRT before now, so their
+sum is not a prediction of this number, only context for why a double-digit combined gain is not implausible.
+
+**Elo-scale warning, important for anyone quoting this number**: `UHO_4060_v4.epd` is a sharp, imbalanced opening
+book (chosen for this project specifically because it draws less than `8moves_v3.pgn` and separates engines more
+cleanly), not a balanced book. Elo measured on an imbalanced book is not directly comparable to Elo measured on a
+balanced one, or to ratings from other projects/rating lists that use different books -- the number is internally
+valid (same book, same conditions, for comparing `rc1` to `v4.0.0`) but should not be read as "rc1 is +48.6 Elo
+stronger in general."
