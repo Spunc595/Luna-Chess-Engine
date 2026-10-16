@@ -1151,3 +1151,173 @@ Three independent changes to try, one SPRT each, not combined:
   searched). Changing it to store `new_depth` would make the TT entry's depth match the work actually done.
 - (b) Restrict IIR to PV and cut nodes only, instead of all non-check nodes without a TT move.
 - (c) Re-tune `IIR_MIN_DEPTH` (currently 4): try 3, 5 and 6, one value per SPRT, not combined.
+
+
+## Real-device verification: cold-start fix on Android arm64 (2026-10-13)
+
+**Device**: Lenovo Tab M11 (Termux, Android), CPU to be confirmed, likely MediaTek Helio G88 (2x Cortex-A75 +
+6x Cortex-A55). **Not** the Galaxy A16 5G cited by the MCEC organizer -- this run establishes the mechanism on
+real ARM64/Android hardware, not a measurement on the tournament's actual device, which remains unconfirmed and
+unmeasured.
+
+**Binaries**: `luna-rc1-android-arm64` (`release-4.1-rc1`, sha256 `4325b7eeb05150e0d3100cce7818f0fb2334fbe3bad345ea338ef9001c6acaa5`)
+and `luna-v4.0.0-android-arm64` (tag `v4.0.0`, sha256 `72caa67615d3741be085dc16712f78340618f67c220c9a2e68c06b38d421d9ab`),
+both built on the PC with NDK r27d, API level 21, sha256 verified on-device before every run. Measured externally
+(`phone_timing_probe.py`, a pure black-box UCI-over-pipe timer, no change to either binary) via Termux, 3 repeats
+per binary, per the PC-side instructions in `android_phone_test/ISTRUZIONI.md`.
+
+| build | avvio -> uciok (3 lanci) | isready -> readyok | go movetime 1000 -> bestmove (3 lanci) |
+|---|---|---|---|
+| v4.0.0 | 3219 / 3172 / 3172 ms | 0 ms | 660 / 673 / 690 ms |
+| rc1 | 33 / 27 / 21 ms | 0 ms | 683 / 696 / 703 ms |
+
+**Conclusion.** The magic-bitboard hardcoding (`attacks.rs`, cold-start fix, already verified on the PC in this
+same window) reduces real startup on ARM64 Android hardware from ~3.2s to **under 0.03s** -- consistent with, and
+even cleaner than, the PC-side measurement (there the whole cost was attributed to the same mechanism; here it is
+confirmed on a second, independent architecture). Search response time under "go movetime 1000" is essentially
+unchanged between the two builds (660-703ms both ways, differences within normal noise) -- the fix touches only
+startup, not the search loop, exactly as intended.
+
+**Why ~70% and not closer to 1000ms, by design, not a fixed margin.** `SearchInfo::new` (`search.rs:296-297`) sets
+`soft_limit = hard_limit * 60 / 100` whenever `time_limit > 500` -- for `movetime=1000` that is `soft_limit=600`.
+The stop check (`search.rs:533`, `if elapsed > info.soft_limit && (stability_counter >= 3 || depth > 8)`) only
+runs once per COMPLETED depth iteration, not continuously -- so the search keeps finishing whole iterations until
+one ends past 600ms, then stops before starting the next. The measured 660-703ms is exactly that: the first
+completed iteration whose own end time lands past the 600ms soft limit, on a device/position where each iteration
+takes tens of ms. `hard_limit` (1000ms) is the real ceiling, checked every node via `check_time`, and was never
+approached here -- nothing silently discounted the requested 1000ms, the engine simply decided (correctly, by its
+own soft/hard design) that it didn't need the rest.
+
+
+## Pre-registration: v4.1.0 verification, `release-4.1-rc1` vs `v4.0.0` -- Test 0/1/2 (NOT LAUNCHED, 2026-10-14)
+
+Test 0 is the release's headline Elo figure (Threads=1, the thread count every other Elo/SPRT number in this
+project's history was measured at). Test 1 and Test 2 are the non-regression gate for whether v4.1.0 ships at
+all under Threads=2 -- not feature SPRTs, a check that the accumulated changes since v4.0.0 (see the release
+notes draft) have not made the engine WORSE at a thread count nothing above has ever been measured at. All three
+against `v4.0.0` using the EXACT binary currently deployed on the lichess bot (`~/luna-bot/bot/engines/luna`,
+sha256 `2de537190dfee6c0f7b24ce4c8d4305f1c74ca05b6e9f74e07335c5dd7eacb0d`, copied, original never touched), not a
+fresh build from the `v4.0.0` tag -- deliberate: the bot's own binary is what actually plays real games today,
+and is the thing v4.1.0 is meant to replace.
+
+**Test 0**: `tc=10+0.1`, `Threads=1`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), openings
+`UHO_4060_v4.epd`. **This is the number that goes into the release notes as v4.1.0's headline Elo estimate, with
+its 95% CI** -- not Test 1 or Test 2, which stay framed as non-regression checks at Threads=2, not as the
+release's strength claim.
+
+**Test 1**: `tc=10+0.1`, `Threads=2`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), openings
+`UHO_4060_v4.epd` (sha256 `3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca`, already used and
+re-verified for the `integ-3` independent confirmation).
+
+**Test 2**: `tc=60+0.6`, `Threads=2`, 1,000 games fixed-length (500 paired rounds, `-repeat`), same binaries, same
+book.
+
+All three: `-games 2 -repeat`, no `-sprt` flag (fixed-length confirmation, per this project's established
+protocol for this kind of match -- an Elo estimate with its 95% CI, not an SPRT verdict). Queue order: **Test 0,
+then Test 1, then Test 2** (one candidate at a time, `queue_runner.sh`'s normal sequential behavior).
+Concurrency: Test 0 at **14** (16 OCPU) or **6** (8 OCPU), Tests 1/2 at **7** (16 OCPU) or **3** (8 OCPU) -- Test
+0 is Threads=1 so it uses the plain core-count/core-minus-2 formula, Tests 1/2 are Threads=2 so concurrency is
+halved to keep total engine threads within the core count. **If only 8 OCPU is available, only Test 0 and Test 1
+run tonight** (`--deadline-hours 12`) -- Test 2 waits. At 16 OCPU, all three run (`--deadline-hours 20`).
+
+**Decision rule, agreed before launch**: if the 95% CI's UPPER bound is below zero for Test 1 OR Test 2 (i.e. rc1
+is significantly worse at Threads=2, not just "not significantly better"), v4.1.0 does NOT ship until the cause
+is understood -- no exceptions, no averaging the tests together to paper over one bad result. Test 0's own CI is
+reported as the headline figure regardless of its own sign/width (it is the measurement, not a gate) -- but if
+Test 0 itself showed a clearly negative CI, that would obviously also stop the release; the explicit gate
+language above is about Tests 1/2 specifically because those are the ones measuring a previously untested
+condition (Threads=2), not because Test 0 is exempt from common sense. Otherwise, v4.1.0 ships with all three
+tests reported, with their intervals stated plainly (not reduced to a single pass/fail line) -- including if one
+or both of Tests 1/2 straddle zero inconclusively, which is still a valid basis to ship (those two are a
+non-regression check, not a strength claim: "not proven worse" is what they need to show).
+
+Not launched. No `.approved`. Awaiting Daniele's go-ahead and the Oracle resize.
+
+
+## Test 0 result: `release-4.1-rc1` vs `v4.0.0`, +48.6 Elo (2026-10-14/15)
+
+**This is the headline Elo figure for the v4.1.0 release.** `tc=10+0.1`, `Threads=1`, `Hash=64`, openings
+`UHO_4060_v4.epd`, 3,000 games fixed-length (1,500 paired rounds, `-repeat`), against the exact binary deployed
+on the lichess bot (sha256 `2de537190dfee6c0f7b24ce4c8d4305f1c74ca05b6e9f74e07335c5dd7eacb0d`). Launched
+2026-10-14T19:18:17Z, finished 2026-10-14T23:51:48Z (**4h33m31s**).
+
+- **W-L-D of rc1-test0 vs v4.0.0: 1,029 - 612 - 1,359** (3,000 games).
+- **Elo difference: +48.6 +/- 9.2**, LOS 100.0%, draw ratio 45.3%.
+- **Time losses: 0.** No adjudicated games (0%) -- all 1,641 decisive results ended by checkmate, all 1,359 draws
+  by the normal chess rules (904 threefold repetition, 195 fifty-move rule, 254 insufficient material, 6
+  stalemate).
+
+**+48.6 is a large number -- larger than any single change previously measured in this project -- so before
+trusting it, four possible artifacts were checked and ruled out, all read-only, without disturbing the live
+queue:**
+
+1. **Base-binary identity.** Node counts at depth 18, Threads=1, on the two standard bench positions, single
+   `nice -n 19` UCI session: the bot's binary (mediogioco 1,069,417 / finale_pedoni 1,431,971) matches EXACTLY a
+   fresh local PC build of the `v4.0.0` tag (commit `d293839`, peeled from annotated tag `650ebe6`) -- same two
+   numbers. The bot is genuinely running `v4.0.0`, not some other build.
+2. **No per-game engine restart.** `ps` on the live, still-running `rc1-test1` match showed exactly 6 engine
+   child processes (3 per side, matching `-concurrency 3`), all with the SAME start time as `cutechess-cli`
+   itself and ~5h41m of continuous uptime -- confirmed alive since the match began, never restarted between
+   games. cutechess-cli's own architecture (one persistent process pair per concurrency slot, `ucinewgame`
+   between games) was directly observed, not merely assumed.
+3. **Time-per-move, identical between the two engines.** Parsed from `games.pgn`'s move-time comments: both
+   `rc1-test0` and `v4.0.0` show avg=0.213s, max=0.490s, first-move-out-of-book avg=0.480s -- byte-for-byte the
+   same. The clock-management formula in `main.rs` is untouched by any change between `v4.0.0` and `rc1`, so this
+   is expected, not a coincidence; it directly rules out a timing-side explanation (neither engine spends its
+   clock differently).
+4. **Game endings and adjudication**, see the bullet list above -- no adjudicated games, no anomalous
+   termination pattern.
+
+**Correction of an earlier, wrong explanation.** A first guess attributed some of this gain to the cold-start fix
+(the magic-bitboard hardcoding) via a hypothesized per-game engine restart cost. **That hypothesis is wrong, and
+is retracted here**: cutechess-cli does not restart engines between games (point 2 above), the cold-start cost
+would in any case land before `uciok` and the game clock, and it is paid at most once per concurrency slot for
+the entire 3,000-game match, not 3,000 times -- it cannot explain a result of this size.
+
+**What +48.6 Elo most likely reflects instead** (not independently re-verified here, stated as the working
+explanation, not a new measurement): the accumulated effect of multiple real, separately-measured changes between
+`v4.0.0` and `rc1` -- IIR (+12.2 +/- 9.6 on its own SPRT), the quiescence-TT/check-evasions/LMP combination (+7.5
++/- 7.9 on its own measurement), and the NPS gain from `acc-fuse` (+7-13%, never before measured in Elo terms --
+more nodes per second at a fixed time budget plausibly buys real strength that nothing above captured). These
+were each measured against different reference points and were never combined into one SPRT before now, so their
+sum is not a prediction of this number, only context for why a double-digit combined gain is not implausible.
+
+**Elo-scale warning, important for anyone quoting this number**: `UHO_4060_v4.epd` is a sharp, imbalanced opening
+book (chosen for this project specifically because it draws less than `8moves_v3.pgn` and separates engines more
+cleanly), not a balanced book. Elo measured on an imbalanced book is not directly comparable to Elo measured on a
+balanced one, or to ratings from other projects/rating lists that use different books -- the number is internally
+valid (same book, same conditions, for comparing `rc1` to `v4.0.0`) but should not be read as "rc1 is +48.6 Elo
+stronger in general."
+
+
+## Test 1 result: `release-4.1-rc1` vs `v4.0.0`, Threads=2 non-regression, +49.1 Elo (2026-10-15)
+
+`tc=10+0.1`, `Threads=2`, `Hash=64`, openings `UHO_4060_v4.epd`, 3,000 games fixed-length (1,500 paired rounds,
+`-repeat`), same binaries as Test 0. Launched 2026-10-14T23:51:48Z, finished 2026-10-15T08:54:28Z (**9h02m40s**).
+
+- **W-L-D of rc1-test1 vs v4.0.0: 1,051 - 630 - 1,319** (3,000 games).
+- **Elo difference: +49.1 +/- 9.3**, LOS 100.0%, draw ratio 44.0%.
+- **Time losses: 0.**
+
+Consistent with Test 0 (+48.6 +/- 9.2 at Threads=1) -- the gain holds at Threads=2, inside the margin of the two
+CIs. Per the pre-registered decision rule, the non-regression gate is clearly passed (nowhere near a negative
+upper CI bound). Test 2 (60+0.6, Threads=2) still running at the time of this entry.
+
+
+## Test 2 result: `release-4.1-rc1` vs `v4.0.0`, 60+0.6 non-regression, +38.4 Elo (2026-10-16)
+
+`tc=60+0.6`, `Threads=2`, `Hash=64`, openings `UHO_4060_v4.epd`, 1,000 games fixed-length (500 paired rounds,
+`-repeat`), same binaries as Tests 0/1. Launched 2026-10-15T08:54:28Z, finished 2026-10-16T02:49:44Z
+(**17h55m16s**).
+
+- **W-L-D of rc1-test2 vs v4.0.0: 299 - 189 - 512** (1,000 games).
+- **Elo difference: +38.4 +/- 15.0**, LOS 100.0%, draw ratio 51.2%.
+- **Time losses: 0.**
+
+**All three pre-registered tests now complete. The gain holds at every tested condition**: +48.6 +/- 9.2
+(Threads=1, 10+0.1), +49.1 +/- 9.3 (Threads=2, 10+0.1), +38.4 +/- 15.0 (Threads=2, 60+0.6) -- all three CIs sit
+well clear of zero, and none has a negative upper bound. Per the pre-registered decision rule, **v4.1.0 is cleared
+to ship**: the non-regression gate (Tests 1/2) is passed, and Test 0 stands as the release's headline Elo figure
+(+48.6 +/- 9.2, Threads=1, 10+0.1 -- see its own entry above for the artifact checks and the Elo-scale warning on
+the `UHO_4060_v4.epd` book). Test 2's slightly lower point estimate and wider CI (longer time control, fewer
+games, both reducing the sample's resolving power) are consistent with the other two, not a contradiction.

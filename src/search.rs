@@ -54,6 +54,12 @@ const FUTILITY_MAX_DEPTH: i32 = 6;
 /// Safety margin per ply of Futility Pruning.
 const FUTILITY_MARGIN_PER_PLY: i32 = 130;
 
+/// Maximum depth within which Late Move Pruning (move-count-based pruning)
+/// is active. Beyond this depth the move-count threshold (see
+/// `lmp_move_limit` below) would already be larger than most real move
+/// lists, making the heuristic a no-op anyway.
+const LMP_MAX_DEPTH: i32 = 8;
+
 /// Minimum depth and minimum number of moves already searched before LMR
 /// can activate. The first moves (TT-move, good captures: already at the
 /// front thanks to `ordina_mosse`) are never reduced.
@@ -426,6 +432,21 @@ fn lmr_reduction(depth: i32, move_count: i32) -> i32 {
     get_lmr_table()[d][m]
 }
 
+/// Move-count threshold for Late Move Pruning: once this many moves have
+/// already been searched at this node (depth `depth`, which is always
+/// `new_depth`, the one actually being searched at this node — same
+/// convention as every other depth-indexed heuristic above), remaining
+/// quiet moves are skipped outright rather than reduced. `3 + depth^2` is
+/// the plain, untuned form of the formula used by several open-source
+/// engines (no "improving" distinction — deliberately excluded here to
+/// keep this patch to the one variable it is meant to test; RFP's own
+/// "improving" flag was tried separately and found neutral, see the note
+/// next to RFP above).
+#[inline(always)]
+fn lmp_move_limit(depth: i32) -> i32 {
+    3 + depth * depth
+}
+
 pub fn iterative_deepening(
     board: &mut Scacchiera,
     info: &mut SearchInfo,
@@ -576,7 +597,7 @@ fn negamax(
     // out-of-bounds index. We treat the node as a leaf (quiescence)
     // exactly as for new_depth <= 0.
     if ply >= MAX_PLY - 1 {
-        return quiescence(board, alpha, beta, info, sh, z, nnue, params);
+        return quiescence(board, alpha, beta, ply as i32, info, tt, sh, z, nnue, params);
     }
 
     let pv_node = beta - alpha > 1;
@@ -618,7 +639,7 @@ fn negamax(
     let new_depth = if tt_move.is_null() && !in_check && new_depth >= IIR_MIN_DEPTH { new_depth - 1 } else { new_depth };
 
     if new_depth <= 0 {
-        return quiescence(board, alpha, beta, info, sh, z, nnue, params);
+        return quiescence(board, alpha, beta, ply as i32, info, tt, sh, z, nnue, params);
     }
 
     // --- SHARED STATIC EVAL ---
@@ -761,6 +782,18 @@ fn negamax(
         // discarded move, not just that of the recursive search: it is
         // the cheapest of the three forms of pruning.
         if futility_applicable && is_quiet && !is_passed_push && moves_searched > 0 && futility_margin_value <= alpha {
+            continue;
+        }
+
+        // --- LATE MOVE PRUNING ---
+        // Unlike futility pruning above, this does not look at static_eval
+        // at all: once move ordering has already offered this many quiet
+        // moves without one of them raising alpha, the remaining quiet
+        // moves in the list (the ones ordering itself ranks lowest) are
+        // skipped outright. A separate mechanism from futility/RFP/NMP: it
+        // prunes on move index, not on a margin over the position's
+        // evaluation.
+        if can_prune && !is_passed_push && is_quiet && new_depth <= LMP_MAX_DEPTH && moves_searched >= lmp_move_limit(new_depth) {
             continue;
         }
 
@@ -913,7 +946,9 @@ fn quiescence(
     board: &mut Scacchiera,
     mut alpha: i32,
     beta: i32,
+    ply: i32,
     info: &mut SearchInfo,
+    tt: &TranspositionTable,
     sh: &SharedHistory,
     z: &ZobristKeys,
     nnue: Option<&LunaNNUE>,
@@ -932,15 +967,99 @@ fn quiescence(
     if info.check_time() { return 0; }
     info.nodes += 1;
     info.publish_nodes();
+
+    // --- PLY CAP (safety net, not a search change) ---
+    // negamax already refuses to recurse past MAX_PLY (see the `ply >=
+    // MAX_PLY - 1` guard right before it hands off to quiescence), but
+    // quiescence itself had no such limit: a sufficiently long chain of
+    // forced captures (the kind of thing simplified endgames produce) could
+    // in principle recurse past MAX_PLY from inside quiescence alone,
+    // without ever passing back through negamax's own check. In practice
+    // this is not known to happen -- the gate below (bench-suite node
+    // identity) exists specifically to confirm this patch changes NOTHING
+    // observable in ordinary play, not to fix an observed bug. Checked
+    // BEFORE the in-check branch below: this is a universal safety net,
+    // not conditioned on check status.
+    if ply >= MAX_PLY as i32 {
+        return eval(board, nnue, params);
+    }
+
+    // --- CHECK EVASIONS ---
+    // A side in check cannot "stand pat": declining to move is not a legal
+    // option, so stand_pat must never be used as a lower bound here. The
+    // only legal replies may be quiet (a king step, a block, an
+    // interposition) rather than a capture, so the usual
+    // captures/promotions-only filter below would silently search zero
+    // moves at a node that actually has legal replies. `genera_mosse_legali`
+    // (full legality, not the pseudo-legal capture filter used in the
+    // non-check path) is the correct generator here; if it returns empty,
+    // this is checkmate, same convention as negamax's own no-legal-move
+    // branch (`-MATE_SCORE + ply`, ply-relative to this search's root, not
+    // to the absolute game ply — see the FIX comment on that branch in
+    // negamax for why the distinction matters). No TT probe/store in this
+    // branch: the check-evasion patch never used the TT, and this merge
+    // does not add that on top of it -- `tt` is only threaded through the
+    // recursive call below because the function signature now requires it
+    // (plumbing for the sibling patch merged below, not a behaviour change
+    // here).
+    if board.in_scacco() {
+        let legal_moves = board.genera_mosse_legali(z);
+        if legal_moves.is_empty() {
+            return -MATE_SCORE + ply;
+        }
+
+        let mut moves = legal_moves;
+        crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+
+        for m in moves {
+            // Already verified legal by genera_mosse_legali: esegui_mossa
+            // here (this time WITH the real nnue, unlike the throwaway
+            // legality check inside genera_mosse_legali itself) cannot
+            // return false.
+            board.esegui_mossa(&m, z, nnue);
+            let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
+            board.annulla_mossa(&m, z, nnue);
+
+            if score >= beta { return beta; }
+            if score > alpha { alpha = score; }
+        }
+        return alpha;
+    }
+
+    // --- TRANSPOSITION TABLE PROBE ---
+    // Quiescence revisits the same tactical positions through different
+    // capture orders very often (the same square can be the target of
+    // several different attackers, explored in different sequences); a
+    // hit here skips move generation/ordering and the whole exchange
+    // entirely. Depth is always 0 (quiescence has no depth of its own),
+    // so any entry already in the table — whether stored by an earlier
+    // qsearch visit or inherited from a negamax node that transposed into
+    // this same position — is always "deep enough" for another qsearch
+    // probe. `ply` (threaded through from negamax, unlike before) is only
+    // needed for the mate-score ply-rebasing `score_to_tt`/`score_from_tt`
+    // already do for negamax; ordinary quiescence scores are unaffected
+    // by it. Only reached for a side NOT in check: the branch above already
+    // returned for the in-check case.
+    if let Some(entry) = tt.probe(board.hash, 0, ply, alpha, beta) {
+        return entry;
+    }
+    let tt_move = tt.get_move(board.hash);
+
+    let original_alpha = alpha;
+
     // NNUE if available, otherwise PST (see eval() above)
     let stand_pat = eval(board, nnue, params);
-    if stand_pat >= beta { return beta; }
+    if stand_pat >= beta {
+        tt.store(board.hash, 0, ply, beta, Bound::Beta, Mossa::null());
+        return beta;
+    }
 
     // --- DELTA PRUNING (global, over the entire node) ---
     // If even capturing the highest-value piece possible (a Queen) with
     // an additional safety margin cannot get us close to alpha, the
     // whole position is unrecoverable: we avoid generating/ordering moves
-    // and bail out immediately.
+    // and bail out immediately. No TT store here: this is a bound on
+    // stand_pat's own neighbourhood, not a searched result worth caching.
     if stand_pat + Pezzo::Regina.valore() + DELTA_MARGIN < alpha {
         return alpha;
     }
@@ -957,8 +1076,12 @@ fn quiescence(
     // already filtered to captures/promotions, so its contribution in
     // `score_move` will never be reached for these elements. We still
     // pass the real table (instead of a dummy one) so as not to introduce
-    // a second parameter type just for this call site.
-    crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+    // a second parameter type just for this call site. `tt_move`, when
+    // present, is now used to try the TT's own best move first, same as
+    // in negamax.
+    crate::movegen::ordina_mosse(&mut moves, board, tt_move, &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+
+    let mut best_move = Mossa::null();
 
     for m in moves {
         // --- SEE PRUNING (objectively losing captures) ---
@@ -999,14 +1122,81 @@ fn quiescence(
         // board.rs::annulla_mossa_veloce), so in that branch
         // annulla_mossa must NEVER be called explicitly.
         if board.esegui_mossa(&m, z, nnue) {
-            let score = -quiescence(board, -beta, -alpha, info, sh, z, nnue, params);
+            let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
-            if score >= beta { return beta; }
-            if score > alpha { alpha = score; }
+            if score >= beta {
+                tt.store(board.hash, 0, ply, beta, Bound::Beta, m);
+                return beta;
+            }
+            if score > alpha {
+                alpha = score;
+                best_move = m;
+            }
         }
     }
+
+    let flag = if alpha > original_alpha { Bound::Exact } else { Bound::Alpha };
+    tt.store(board.hash, 0, ply, alpha, flag, best_move);
     alpha
+}
+
+#[cfg(test)]
+mod ply_cap_tests {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+    use crate::evaluation::EvalParams;
+
+    // A position with one clearly profitable, undefended capture available
+    // (White bishop e4 takes the undefended black pawn d5). Chosen
+    // specifically so the two tests below can tell "the cap fired" apart
+    // from "there was nothing to search anyway" by the RETURNED VALUE
+    // alone: if the cap is bypassed, quiescence must find the capture and
+    // return a score visibly better than the raw static eval; if the cap
+    // fires, it returns the raw static eval unconditionally, ignoring the
+    // capture entirely.
+    const CAPTURE_AVAILABLE_FEN: &str = "4k3/8/8/3p4/4B3/8/8/4K3 w - - 0 1";
+
+    /// The cap must fire at ply == MAX_PLY: even with a profitable capture
+    /// sitting right there, quiescence must return the PLAIN static eval,
+    /// not search it.
+    #[test]
+    fn ply_cap_fires_exactly_at_max_ply_and_ignores_the_available_capture() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(CAPTURE_AVAILABLE_FEN, &z);
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let tt = crate::tt::TranspositionTable::new(1);
+
+        let score = quiescence(&mut board, -INFINITY, INFINITY, MAX_PLY as i32, &mut info, &tt, &sh, &z, None, &params);
+        let static_eval = eval(&board, None, &params);
+
+        assert_eq!(score, static_eval, "ply cap did not return the plain static eval (it searched the capture instead)");
+    }
+
+    /// One ply below the cap, the SAME position must be searched normally:
+    /// the available capture must be found, giving a score clearly better
+    /// than the raw static eval (not just "didn't crash"). The exact margin
+    /// isn't asserted -- only that it is a real, pawn-sized improvement,
+    /// which the raw eval cannot produce on its own.
+    #[test]
+    fn ply_cap_does_not_fire_one_ply_below_and_the_capture_is_found() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(CAPTURE_AVAILABLE_FEN, &z);
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let tt = crate::tt::TranspositionTable::new(1);
+
+        let score = quiescence(&mut board, -INFINITY, INFINITY, MAX_PLY as i32 - 1, &mut info, &tt, &sh, &z, None, &params);
+        let static_eval = eval(&board, None, &params);
+
+        assert!(
+            score > static_eval + 50,
+            "ply cap fired one ply too early: expected the capture to be found (score well above static eval {static_eval}), got {score}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1052,6 +1242,38 @@ mod mate_tests {
             );
         }
     }
+
+    /// Regression test for the check-evasion patch: a quiescence leaf where
+    /// the side to move is in check, has NO capture available, and has NO
+    /// legal move at all (checkmate) must be recognized as mate. Before
+    /// this patch, `quiescence`'s capture/promotion-only filter would leave
+    /// `moves` empty regardless of whether legal (quiet) replies existed,
+    /// and the function would simply return `stand_pat` — never checking
+    /// `in_scacco()` at all, so a checkmate reached exactly at the
+    /// depth-0/qsearch boundary was invisible to it.
+    #[test]
+    fn quiescence_detects_checkmate_with_no_captures_available() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(
+            "rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2",
+            &z,
+        );
+        // Play the mating move (Qd8-h4#) to reach the actual checkmate
+        // position: White to move, in check, no legal reply.
+        let mating_move = board.genera_mosse_legali(&z).into_iter()
+            .find(|m| m.to_uci() == "d8h4")
+            .expect("Qd8-h4 must be a legal move in this position");
+        board.esegui_mossa(&mating_move, &z, None);
+
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let tt = TranspositionTable::new(1);
+        let score = quiescence(&mut board, -INFINITY, INFINITY, 0, &mut info, &tt, &sh, &z, None, &params);
+
+        assert!(is_mate_score(score), "checkmate at a qsearch leaf not recognized, score={score}");
+        assert_eq!(score, -MATE_SCORE, "expected mate score at ply 0, got {score}");
+    }
 }
 
 #[cfg(test)]
@@ -1094,3 +1316,46 @@ mod node_count_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod coldstart_gate {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+    use crate::tt::TranspositionTable;
+    use crate::evaluation::EvalParams;
+
+    /// Regression gate for the magic-bitboard cold-start fix (see attacks.rs): the very
+    /// first real search of a process must not take meaningfully longer than its own
+    /// hard_limit. 1.1x, not 1.0x, to leave room for ordinary scheduling noise -- this is
+    /// NOT the same tolerance as a time-loss-safety margin, it exists only to catch a
+    /// regression back to a multi-second one-time setup cost hiding inside the first
+    /// search's reported time, which is exactly what this gate would have caught before the
+    /// fix (measured 3.4x-5x overshoot, see BENCHMARKS.md). Calls `init_attack_tables()`
+    /// explicitly first (same as main.rs does, before the UCI loop starts) rather than
+    /// relying on test execution order to have warmed it already.
+    #[test]
+    fn first_search_of_a_fresh_init_stays_within_1_1x_hard_limit() {
+        crate::attacks::init_attack_tables();
+
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", &z,
+        );
+        let tt = TranspositionTable::new(64);
+        let sh = SharedHistory::new();
+        let hard_limit: u128 = 480; // matches movetime at wtime=10000, winc=100, 10+0.1
+        let mut info = SearchInfo::new(hard_limit, 64);
+
+        let start = std::time::Instant::now();
+        let _ = iterative_deepening(&mut board, &mut info, &tt, &sh, &z, None, &params, 1, false);
+        let used = start.elapsed().as_millis();
+
+        assert!(
+            used <= hard_limit * 11 / 10,
+            "first search took {used}ms, more than 1.1x its own hard_limit ({hard_limit}ms) -- \
+             likely a cold-start regression (see attacks.rs's magic-bitboard fix)"
+        );
+    }
+}
+
