@@ -1,7 +1,13 @@
-# NOTE for whoever starts distributing binaries (planned: a Linux build from 4.0.0): a DISTRIBUTED binary
-# must NOT be built with `-C target-cpu=native`. It is fine for a build you make for yourself, but in a binary
-# somebody else downloads it demands the instruction set of the machine that built it, and it makes the
-# runtime AVX2 detection in src/nnue.rs pointless: that detection exists for the machines that lack AVX2.
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-cpu=native"]
+# `target-cpu=native` used to be the DEFAULT here for every `cargo build` on Windows, silently, with no opt-in.
+# That is what produced the actual v4.1.0 Windows release binary -- POPCNT/LZCNT/BMI/AVX2 baked in unconditionally,
+# not just behind the runtime-detected AVX2 kernel in src/nnue.rs -- while the release notes said "baseline x86-64"
+# (see the correction in the release notes and BENCHMARKS.md's G6 diagnosis, 16 October 2026). A DISTRIBUTED
+# binary must NOT be built with `-C target-cpu=native`: it demands the instruction set of the machine that built
+# it, and makes the runtime AVX2 detection in src/nnue.rs pointless (that detection exists precisely for the
+# machines that lack AVX2).
+#
+# A native build for your OWN machine is still fine and still faster -- it is now opt-in, explicit, every time:
+#   PowerShell:  $env:RUSTFLAGS = "-C target-cpu=native"; cargo build --release
+#   bash:        RUSTFLAGS="-C target-cpu=native" cargo build --release
+# For anything that will be distributed, use scripts/build_release.ps1 instead, which sets RUSTFLAGS="" explicitly
+# and verifies the result.
