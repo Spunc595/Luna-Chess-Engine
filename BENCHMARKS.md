@@ -1302,3 +1302,22 @@ stronger in general."
 Consistent with Test 0 (+48.6 +/- 9.2 at Threads=1) -- the gain holds at Threads=2, inside the margin of the two
 CIs. Per the pre-registered decision rule, the non-regression gate is clearly passed (nowhere near a negative
 upper CI bound). Test 2 (60+0.6, Threads=2) still running at the time of this entry.
+
+
+## Test 2 result: `release-4.1-rc1` vs `v4.0.0`, 60+0.6 non-regression, +38.4 Elo (2026-10-16)
+
+`tc=60+0.6`, `Threads=2`, `Hash=64`, openings `UHO_4060_v4.epd`, 1,000 games fixed-length (500 paired rounds,
+`-repeat`), same binaries as Tests 0/1. Launched 2026-10-15T08:54:28Z, finished 2026-10-16T02:49:44Z
+(**17h55m16s**).
+
+- **W-L-D of rc1-test2 vs v4.0.0: 299 - 189 - 512** (1,000 games).
+- **Elo difference: +38.4 +/- 15.0**, LOS 100.0%, draw ratio 51.2%.
+- **Time losses: 0.**
+
+**All three pre-registered tests now complete. The gain holds at every tested condition**: +48.6 +/- 9.2
+(Threads=1, 10+0.1), +49.1 +/- 9.3 (Threads=2, 10+0.1), +38.4 +/- 15.0 (Threads=2, 60+0.6) -- all three CIs sit
+well clear of zero, and none has a negative upper bound. Per the pre-registered decision rule, **v4.1.0 is cleared
+to ship**: the non-regression gate (Tests 1/2) is passed, and Test 0 stands as the release's headline Elo figure
+(+48.6 +/- 9.2, Threads=1, 10+0.1 -- see its own entry above for the artifact checks and the Elo-scale warning on
+the `UHO_4060_v4.epd` book). Test 2's slightly lower point estimate and wider CI (longer time control, fewer
+games, both reducing the sample's resolving power) are consistent with the other two, not a contradiction.
