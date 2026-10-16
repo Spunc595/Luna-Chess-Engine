@@ -132,8 +132,8 @@ fn main() {
     let book_path = book_path_next_to_exe();
     let mut book = OpeningBook::load(&book_path);
     match book {
-        Some(_) => println!("✅ Book: Active and loaded!"),
-        None => println!("⚠️ Book: '{}' not found.", book_path),
+        Some(_) => println!("info string Book: Active and loaded!"),
+        None => println!("info string Book: '{}' not found.", book_path),
     }
 
     let mut tt_size: usize = 256;
@@ -168,7 +168,7 @@ fn main() {
     // the engine is idle. See `join_pending` above.
     let mut search_state: Option<(JoinHandle<()>, Arc<AtomicBool>)> = None;
 
-    println!("Luna CE v4.1.0");
+    println!("info string Luna CE v4.1.0");
     io::stdout().flush().unwrap();
 
     let stdin = io::stdin();

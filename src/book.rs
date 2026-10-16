@@ -44,7 +44,7 @@ impl OpeningBook {
             return None;
         }
 
-        println!("📚 Book: Loaded {} positions in memory.", count);
+        println!("info string Book: Loaded {} positions in memory.", count);
         Some(OpeningBook { entries })
     }
 

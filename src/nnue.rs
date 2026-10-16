@@ -409,7 +409,7 @@ impl LunaNNUE {
         const TRAILING_PADDING: usize = 62;
         if buffer.len() != expected_payload + TRAILING_PADDING {
             println!(
-                "⚠️ NNUE: unexpected size ({} bytes, expected {}): not a compatible network. File ignored.",
+                "info string NNUE: unexpected size ({} bytes, expected {}): not a compatible network. File ignored.",
                 buffer.len(), expected_payload + TRAILING_PADDING
             );
             return None;
@@ -447,14 +447,14 @@ impl LunaNNUE {
         // than debugging a "confusing SPRT result" later.
         if let Some(max_w) = max_abs_output_weight_over_limit(&output_weights) {
             println!(
-                "⚠️ NNUE: max |output_weight| = {} exceeds the SIMD-safe limit of {} (QA * |w| would overflow the AVX2/NEON kernels' truncating 16-bit multiply). Network rejected.",
+                "info string NNUE: max |output_weight| = {} exceeds the SIMD-safe limit of {} (QA * |w| would overflow the AVX2/NEON kernels' truncating 16-bit multiply). Network rejected.",
                 max_w, MAX_SAFE_OUTPUT_WEIGHT
             );
             return None;
         }
 
         println!(
-            "✅ NNUE: loaded ({} input features, {} king buckets, {} hidden neurons).",
+            "info string NNUE: loaded ({} input features, {} king buckets, {} hidden neurons).",
             768 * NUM_BUCKETS, NUM_BUCKETS, HIDDEN
         );
 
