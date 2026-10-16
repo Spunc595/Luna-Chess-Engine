@@ -61,6 +61,37 @@ fn join_pending(search_state: &mut Option<(JoinHandle<()>, Arc<AtomicBool>)>) {
     }
 }
 
+/// UCI "Move Overhead" default (ms): the fixed safety margin subtracted from the remaining
+/// clock before 4.1.1, now a configurable option (see "setoption name Move Overhead" below).
+/// The unit test module below checks against this same constant, not a separate literal, so
+/// that changing this default without updating the test's own frozen `old_formula` (which
+/// hardcodes the historical value `50` on purpose, as the thing being compared against) is
+/// caught as a test failure rather than silently changing what "default" means.
+const DEFAULT_MOVE_OVERHEAD: u128 = 50;
+
+/// Pure move-time calculation for the "go wtime/btime [movestogo N]" case: own remaining
+/// time `t`, own increment `inc`, optional moves-to-go, and the configured move overhead
+/// (ms reserved against network/GUI latency -- UCI "Move Overhead" option). Extracted
+/// verbatim from the inline calculation that used to hardcode the overhead to 50; the
+/// formula itself is unchanged.
+fn compute_clock_movetime(t: u128, inc: u128, movestogo: Option<u128>, overhead: u128) -> u128 {
+    // Classic rated-tournament clocks (e.g. "40/90"-style TCEC controls) send "movestogo N":
+    // divide by N+1, not N, so this move's estimate leaves one move's worth of safety margin
+    // even if the actual time control boundary lands a move early (a GUI/arbiter rounding
+    // difference). With no "movestogo" (increment-only or sudden death, the common case for
+    // engine-engine and online play) fall back to the original fixed t/25 fraction.
+    let base = match movestogo {
+        Some(mtg) if mtg > 0 => t / (mtg + 1),
+        _ => t / 25,
+    };
+    // 80% of the increment, not 100%: a margin against network latency (the increment gets
+    // credited AFTER the move is sent, not before). The final cap still guarantees we never
+    // plan to think longer than the time actually left on the clock minus the overhead, even
+    // in edge cases with a small `t` and a proportionally large increment.
+    let inc_contribution = inc * 8 / 10;
+    (base + inc_contribution).min(t.saturating_sub(overhead)).max(1)
+}
+
 fn main() {
     // Force the magic-bitboard/attack tables to build now, not lazily on
     // whichever call touches them first (previously the engine's very
@@ -123,6 +154,12 @@ fn main() {
     // whether a network is loaded. Defaults to true — unchanged behavior
     // for every existing UCI caller that never sets this option.
     let mut use_nnue: bool = true;
+    // "setoption name Move Overhead value N" (see the "uci"/"setoption" handlers below):
+    // ms reserved against network/GUI latency, subtracted from the remaining clock before
+    // planning a move's time budget (see `compute_clock_movetime`). Defaults to the same
+    // 50ms that was previously hardcoded -- unchanged behavior for any caller that never
+    // sets this option.
+    let mut move_overhead: u128 = DEFAULT_MOVE_OVERHEAD;
     let mut s = Scacchiera::new_iniziale(z);
     s.refresh_nnue((*nnue).as_ref());
 
@@ -153,6 +190,7 @@ fn main() {
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 512");
                 println!("option name Threads type spin default 1 min 1 max 64");
+                println!("option name Move Overhead type spin default {} min 0 max 5000", DEFAULT_MOVE_OVERHEAD);
                 // Runtime toggle for NNUE evaluation, independent of whether
                 // a network actually loaded. Needed because the embedded
                 // net (see nnue.rs) always loads successfully unless its
@@ -217,6 +255,10 @@ fn main() {
                 } else if parts.len() >= 5 && parts[2] == "Threads" {
                     if let Ok(n) = parts[4].parse::<usize>() {
                         num_threads = n.max(1);
+                    }
+                } else if parts.len() >= 6 && parts[2] == "Move" && parts[3] == "Overhead" {
+                    if let Ok(n) = parts[5].parse::<u128>() {
+                        move_overhead = n;
                     }
                 } else if parts.len() >= 5 && parts[2] == "UseNNUE" {
                     join_pending(&mut search_state);
@@ -435,36 +477,7 @@ fn main() {
                         // touched by any wtime/winc calculation.
                         Some(mt) => mt,
                         None => match own_time {
-                            Some(t) => {
-                                // Classic rated-tournament clocks (e.g.
-                                // "40/90"-style TCEC controls) send
-                                // "movestogo N": divide by N+1, not N, so
-                                // this move's estimate leaves one move's
-                                // worth of safety margin even if the actual
-                                // time control boundary lands a move early
-                                // (a GUI/arbiter rounding difference). With
-                                // no "movestogo" (increment-only or sudden
-                                // death, the common case for engine-engine
-                                // and online play) fall back to the
-                                // original fixed t/25 fraction.
-                                let base = match movestogo_token {
-                                    Some(mtg) if mtg > 0 => t / (mtg + 1),
-                                    _ => t / 25,
-                                };
-                                // 80% of the increment, not 100%: a margin
-                                // against network latency (the increment
-                                // gets credited AFTER the move is sent, not
-                                // before). The final cap still guarantees
-                                // we never plan to think longer than the
-                                // time actually left on the clock, even in
-                                // edge cases with a small `t` and a
-                                // proportionally large increment (e.g.
-                                // t=200ms, inc=2000ms: without the cap
-                                // we'd plan >1.6s of thinking with only
-                                // 200ms really available).
-                                let inc_contribution = own_inc * 8 / 10;
-                                (base + inc_contribution).min(t.saturating_sub(50)).max(1)
-                            }
+                            Some(t) => compute_clock_movetime(t, own_inc, movestogo_token, move_overhead),
                             // "go nodes N" with no time info at all (the
                             // normal case for reproducible, node-capped
                             // self-play data generation): a generous
@@ -609,5 +622,69 @@ fn main() {
             _ => {}
         }
         io::stdout().flush().unwrap();
+    }
+}
+
+#[cfg(test)]
+mod move_overhead_tests {
+    use super::{compute_clock_movetime, DEFAULT_MOVE_OVERHEAD};
+
+    /// Frozen copy of the pre-4.1.1 formula (what `src/main.rs` computed inline before
+    /// "Move Overhead" existed, with the overhead hardcoded to the literal `50`). Never
+    /// edit this to "fix" a mismatch -- it exists only as the fixed point `compute_clock_
+    /// movetime` must reproduce exactly when called with the historical default overhead.
+    fn old_formula(t: u128, inc: u128, movestogo: Option<u128>) -> u128 {
+        let base = match movestogo {
+            Some(mtg) if mtg > 0 => t / (mtg + 1),
+            _ => t / 25,
+        };
+        let inc_contribution = inc * 8 / 10;
+        (base + inc_contribution).min(t.saturating_sub(50)).max(1)
+    }
+
+    /// Gate G1: wide grid, including t=0, t<50, t=50, huge increments, movestogo
+    /// absent/present, and overhead 0/50/5000. At the default overhead the new function
+    /// must match the frozen old formula on every single combination in the grid.
+    #[test]
+    fn matches_old_formula_at_default_overhead() {
+        let times: [u128; 10] = [0, 1, 10, 49, 50, 51, 100, 1_000, 60_000, 7_200_000];
+        let incs: [u128; 6] = [0, 1, 50, 2_000, 60_000, 10_000_000];
+        let movestogos: [Option<u128>; 6] = [None, Some(0), Some(1), Some(5), Some(40), Some(100)];
+        let overheads: [u128; 3] = [0, DEFAULT_MOVE_OVERHEAD, 5000];
+
+        let mut checked_at_default = 0u64;
+        for &t in &times {
+            for &inc in &incs {
+                for &mtg in &movestogos {
+                    for &overhead in &overheads {
+                        let new_val = compute_clock_movetime(t, inc, mtg, overhead);
+                        if overhead == DEFAULT_MOVE_OVERHEAD {
+                            let old_val = old_formula(t, inc, mtg);
+                            assert_eq!(
+                                new_val, old_val,
+                                "mismatch at t={} inc={} movestogo={:?} overhead={}",
+                                t, inc, mtg, overhead
+                            );
+                            checked_at_default += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // Sanity: make sure the default-overhead branch above actually ran on the whole
+        // grid, not silently on zero combinations (e.g. if DEFAULT_MOVE_OVERHEAD were
+        // changed to a value absent from `overheads`).
+        assert_eq!(checked_at_default, (times.len() * incs.len() * movestogos.len()) as u64);
+    }
+
+    /// The result is never 0 even when the clock/overhead math would otherwise produce it
+    /// (t=0, or overhead >= t): `.max(1)` in the formula guarantees a search always gets at
+    /// least 1ms, never a zero-or-negative budget.
+    #[test]
+    fn always_at_least_one_ms() {
+        for &overhead in &[0u128, 50, 5000] {
+            assert_eq!(compute_clock_movetime(0, 0, None, overhead), 1);
+            assert_eq!(compute_clock_movetime(overhead, 0, None, overhead), 1);
+        }
     }
 }
