@@ -68,6 +68,19 @@ fn join_pending(search_state: &mut Option<(JoinHandle<()>, Arc<AtomicBool>)>) {
 /// hardcodes the historical value `50` on purpose, as the thing being compared against) is
 /// caught as a test failure rather than silently changing what "default" means.
 const DEFAULT_MOVE_OVERHEAD: u128 = 50;
+/// Declared UCI max for "Move Overhead" ("option name Move Overhead ... max 5000" below).
+/// Unlike Hash/Threads, this option's declared range IS enforced in code: there is no real
+/// resource limit (unlike Hash's allocation) or internal floor need (unlike Threads' own
+/// `.max(1)`) to lean on instead, so without this clamp any value a GUI sends would be
+/// accepted as-is. Hash and Threads are intentionally left exactly as they were.
+const MAX_MOVE_OVERHEAD: u128 = 5000;
+
+/// Clamps a raw "setoption name Move Overhead value N" to the declared UCI range [0, 5000].
+/// The lower bound is automatic (`u128` cannot be negative); only the upper bound needs
+/// enforcing. Pure and separately unit-tested (Gate for Modifica 1's clamp requirement).
+fn clamp_move_overhead(n: u128) -> u128 {
+    n.min(MAX_MOVE_OVERHEAD)
+}
 
 /// Pure move-time calculation for the "go wtime/btime [movestogo N]" case: own remaining
 /// time `t`, own increment `inc`, optional moves-to-go, and the configured move overhead
@@ -190,7 +203,7 @@ fn main() {
                 println!("id author Daniele Marpino");
                 println!("option name Hash type spin default 256 min 1 max 512");
                 println!("option name Threads type spin default 1 min 1 max 64");
-                println!("option name Move Overhead type spin default {} min 0 max 5000", DEFAULT_MOVE_OVERHEAD);
+                println!("option name Move Overhead type spin default {} min 0 max {}", DEFAULT_MOVE_OVERHEAD, MAX_MOVE_OVERHEAD);
                 // Runtime toggle for NNUE evaluation, independent of whether
                 // a network actually loaded. Needed because the embedded
                 // net (see nnue.rs) always loads successfully unless its
@@ -258,7 +271,7 @@ fn main() {
                     }
                 } else if parts.len() >= 6 && parts[2] == "Move" && parts[3] == "Overhead" {
                     if let Ok(n) = parts[5].parse::<u128>() {
-                        move_overhead = n;
+                        move_overhead = clamp_move_overhead(n);
                     }
                 } else if parts.len() >= 5 && parts[2] == "UseNNUE" {
                     join_pending(&mut search_state);
@@ -627,7 +640,7 @@ fn main() {
 
 #[cfg(test)]
 mod move_overhead_tests {
-    use super::{compute_clock_movetime, DEFAULT_MOVE_OVERHEAD};
+    use super::{clamp_move_overhead, compute_clock_movetime, DEFAULT_MOVE_OVERHEAD, MAX_MOVE_OVERHEAD};
 
     /// Frozen copy of the pre-4.1.1 formula (what `src/main.rs` computed inline before
     /// "Move Overhead" existed, with the overhead hardcoded to the literal `50`). Never
@@ -686,5 +699,18 @@ mod move_overhead_tests {
             assert_eq!(compute_clock_movetime(0, 0, None, overhead), 1);
             assert_eq!(compute_clock_movetime(overhead, 0, None, overhead), 1);
         }
+    }
+
+    /// "setoption name Move Overhead value N": N is clamped to the declared [0, 5000] range
+    /// (lower bound automatic via `u128`). This is specific to Move Overhead -- Hash and
+    /// Threads are intentionally left exactly as they were, with no equivalent clamp.
+    #[test]
+    fn setoption_value_is_clamped_to_the_declared_range() {
+        assert_eq!(clamp_move_overhead(0), 0);
+        assert_eq!(clamp_move_overhead(50), 50);
+        assert_eq!(clamp_move_overhead(MAX_MOVE_OVERHEAD), MAX_MOVE_OVERHEAD);
+        assert_eq!(clamp_move_overhead(MAX_MOVE_OVERHEAD + 1), MAX_MOVE_OVERHEAD);
+        assert_eq!(clamp_move_overhead(99_999), MAX_MOVE_OVERHEAD);
+        assert_eq!(clamp_move_overhead(u128::MAX), MAX_MOVE_OVERHEAD);
     }
 }
