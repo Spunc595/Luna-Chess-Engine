@@ -724,7 +724,7 @@ fn negamax(
         Mossa::null()
     };
 
-    crate::movegen::ordina_mosse(&mut legal_moves, board, tt_move, &info.killer_moves[safe_ply], &sh.history, counter_move, &sh.capture_history);
+    crate::movegen::ordina_mosse(legal_moves.as_mut_slice(), board, tt_move, &info.killer_moves[safe_ply], &sh.history, counter_move, &sh.capture_history);
 
     // Futility Pruning parameters for this node: invariant for the whole
     // duration of the move loop, computed once outside the loop.
@@ -1009,7 +1009,7 @@ fn quiescence(
         }
 
         let mut moves = legal_moves;
-        crate::movegen::ordina_mosse(&mut moves, board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+        crate::movegen::ordina_mosse(moves.as_mut_slice(), board, Mossa::null(), &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
 
         for m in moves {
             // Already verified legal by genera_mosse_legali: esegui_mossa
@@ -1079,7 +1079,7 @@ fn quiescence(
     // a second parameter type just for this call site. `tt_move`, when
     // present, is now used to try the TT's own best move first, same as
     // in negamax.
-    crate::movegen::ordina_mosse(&mut moves, board, tt_move, &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+    crate::movegen::ordina_mosse(moves.as_mut_slice(), board, tt_move, &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
 
     let mut best_move = Mossa::null();
 
