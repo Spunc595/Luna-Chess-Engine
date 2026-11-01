@@ -272,6 +272,27 @@ fn max_abs_output_weight_over_limit(output_weights: &[[i16; HIDDEN]; 2]) -> Opti
     (max_w > MAX_SAFE_OUTPUT_WEIGHT as u16).then_some(max_w)
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+// SAFETY (caller contract): the caller must have verified `is_x86_feature_detected!("avx2")`
+// before calling this -- `#[target_feature]` only tells the compiler which instructions it may
+// emit, it does NOT check the running CPU itself. `half`/`w` are both `&[i16; HIDDEN]`-shaped
+// (HIDDEN=1024, a compile-time multiple of 16), so every one of the `HIDDEN/16` 32-byte-aligned
+// *or unaligned* loads/stores below (`_mm256_loadu_si256`/`_mm256_storeu_si256` tolerate any
+// alignment, unlike the `_a`-suffixed aligned variants) stays within both arrays' bounds.
+unsafe fn row_update_avx2<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16; HIDDEN]) {
+    use std::arch::x86_64::*;
+    const _: () = assert!(HIDDEN % 16 == 0);
+    let hp = half.as_mut_ptr();
+    let wp = w.as_ptr();
+    for k in 0..HIDDEN / 16 {
+        let a = _mm256_loadu_si256(hp.add(k * 16) as *const __m256i);
+        let b = _mm256_loadu_si256(wp.add(k * 16) as *const __m256i);
+        let r = if SUB { _mm256_sub_epi16(a, b) } else { _mm256_add_epi16(a, b) };
+        _mm256_storeu_si256(hp.add(k * 16) as *mut __m256i, r);
+    }
+}
+
 /// `half += w` (or `half -= w` when `SUB`), wrapping. `w` is exactly one
 /// feature row, so the single length check here replaces a per-element one.
 #[inline(always)]
@@ -279,6 +300,16 @@ fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
     let w: &[i16; HIDDEN] = w.try_into().unwrap();
     #[cfg(target_arch = "x86_64")]
     {
+        // TEMP AVX2 experiment (see PERF_NOTES.md): runtime-detected 16-lane path, same dispatch
+        // pattern `flatten`/`flatten_avx2` already use elsewhere in this file -- the ONLY place
+        // this file decides AVX2 vs SSE2/NEON is this `is_x86_feature_detected!` call (and its
+        // twin in `row_fused` below): never at compile time, never by target-cpu flags.
+        if is_x86_feature_detected!("avx2") {
+            // SAFETY: the AVX2 feature was just verified as available, satisfying
+            // `row_update_avx2`'s caller contract above.
+            unsafe { row_update_avx2::<SUB>(half, w) };
+            return;
+        }
         use std::arch::x86_64::*;
         // SAFETY: SSE2 is part of the x86_64 baseline; both arrays hold HIDDEN
         // i16 (HIDDEN % 8 == 0), so every 8-lane access below is in bounds.
@@ -312,6 +343,27 @@ fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
     row_update_scalar::<SUB>(half, w);
 }
 
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+// SAFETY (caller contract): same as `row_update_avx2` above -- caller must have verified
+// `is_x86_feature_detected!("avx2")`; `half` and every row in `subs`/`adds` are `&[i16; HIDDEN]`,
+// HIDDEN a compile-time multiple of 16, so the unaligned 32-byte loads/stores below never read or
+// write past any of these arrays.
+unsafe fn row_fused_avx2<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[i16; HIDDEN]; S], adds: [&[i16; HIDDEN]; A]) {
+    use std::arch::x86_64::*;
+    let hp = half.as_mut_ptr();
+    for k in 0..HIDDEN / 16 {
+        let mut v = _mm256_loadu_si256(hp.add(k * 16) as *const __m256i);
+        for s in subs.iter() {
+            v = _mm256_sub_epi16(v, _mm256_loadu_si256(s.as_ptr().add(k * 16) as *const __m256i));
+        }
+        for a in adds.iter() {
+            v = _mm256_add_epi16(v, _mm256_loadu_si256(a.as_ptr().add(k * 16) as *const __m256i));
+        }
+        _mm256_storeu_si256(hp.add(k * 16) as *mut __m256i, v);
+    }
+}
+
 /// `half -= subs[..]` then `half += adds[..]`, wrapping, in ONE pass over the half: each lane
 /// is loaded and stored once, however many rows contribute to it. Modular arithmetic makes
 /// the order of the terms irrelevant, so this equals the sequence of single-row updates.
@@ -320,6 +372,12 @@ const _: () = assert!(HIDDEN.is_multiple_of(8));
 fn row_fused<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[i16; HIDDEN]; S], adds: [&[i16; HIDDEN]; A]) {
     #[cfg(target_arch = "x86_64")]
     {
+        // TEMP AVX2 experiment (see PERF_NOTES.md): same runtime dispatch as `row_update` above.
+        if is_x86_feature_detected!("avx2") {
+            // SAFETY: the AVX2 feature was just verified as available.
+            unsafe { row_fused_avx2::<S, A>(half, subs, adds) };
+            return;
+        }
         use std::arch::x86_64::*;
         // SAFETY: SSE2 is part of the x86_64 baseline; every row holds HIDDEN i16 (HIDDEN % 8 == 0).
         unsafe {
