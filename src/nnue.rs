@@ -594,9 +594,27 @@ impl LunaNNUE {
     /// trained, and what makes the result already correctly signed for
     /// search.rs's negamax convention.
     pub fn evaluate_from_accumulator(&self, acc: &Accumulator, side_to_move_white: bool, board: &Scacchiera) -> i32 {
+        self.evaluate_with_flatten(acc, side_to_move_white, board, flatten)
+    }
+
+    /// Same computation as `evaluate_from_accumulator` above, parameterized over
+    /// which `flatten` implementation computes the SCReLU dot product. The public
+    /// method above is now a one-line wrapper passing the same runtime-dispatched
+    /// `flatten` it always called directly -- production behaviour is unchanged.
+    /// This indirection exists so `#[cfg(test)]` code (see `avx2_vs_scalar_real_
+    /// position_tests` below) can force the scalar or AVX2 path specifically and
+    /// compare full evaluations on real positions, without duplicating this
+    /// formula a second time in test code.
+    fn evaluate_with_flatten(
+        &self,
+        acc: &Accumulator,
+        side_to_move_white: bool,
+        board: &Scacchiera,
+        flatten_fn: impl Fn(&[i16; HIDDEN], &[i16; HIDDEN]) -> i32,
+    ) -> i32 {
         let (us, them) = if side_to_move_white { (&acc.white, &acc.black) } else { (&acc.black, &acc.white) };
 
-        let sum = flatten(us, &self.output_weights[0]) + flatten(them, &self.output_weights[1]);
+        let sum = flatten_fn(us, &self.output_weights[0]) + flatten_fn(them, &self.output_weights[1]);
         let out = sum / QA + self.output_bias as i32;
         let raw = out * SCALE / QAB;
 
@@ -1114,6 +1132,206 @@ mod row_update_tests {
             net.sub_row(&mut got, row);
             row_update_scalar::<true>(&mut want, w);
             assert_eq!(got, want, "sub_row method, row {row}");
+        }
+    }
+}
+
+/// `simd_tests::flatten_simd_matches_scalar` above already checks the scalar
+/// and AVX2 kernels against each other on synthetic accumulator/weight data.
+/// This checks the same thing end-to-end, through `evaluate_with_flatten`
+/// (the real per-position evaluation formula, not just the raw dot product),
+/// on REAL positions reached by playing random legal games from the start
+/// position with the REAL embedded `resources/net.bin`.
+///
+/// Looked for the project's own "equivalence at depth 10, seed 2026" FEN set
+/// (PERF_NOTES.md on `perf-opt` references it by that description) before
+/// writing this generator: that harness's actual FEN list and script are not
+/// in git history at all -- PERF_NOTES.md itself says the patches it was run
+/// against live in a local scratchpad directory outside the repository, and
+/// no `*.txt`/`*.fen`/`*.md`/`*.py`/`*.ps1`/`*.sh` file on `perf-opt` or
+/// `main` contains that list either. The other candidate, the luna-nnue
+/// repository's `results/eval_set.epd` (2,000 Stockfish-evaluated positions),
+/// was deliberately NOT copied here: it is outside this crate entirely (a
+/// separate repository), and luna-nnue's own DATA.md documents that its
+/// underlying games (Leela Chess Zero self-play, runs T77/T79) carry ODbL 1.0
+/// share-alike terms while the intermediate converted file actually sampled
+/// (Linrock's Hugging Face `bullet-training-data`) has NO declared license
+/// at all -- and that project's own stated policy is to never republish this
+/// data, only checksums/manifests of the trained network. So positions here
+/// come only from self-contained random play, with a fixed-seed PRNG and a
+/// preference for captures (see `choose_move` below), per the fallback
+/// agreed with Daniele.
+#[cfg(test)]
+mod avx2_vs_scalar_real_position_tests {
+    use super::*;
+    use crate::board::{Colore, Mossa};
+    use crate::zobrist::get_zobrist_keys;
+    use std::collections::HashSet;
+
+    /// Fixed, arbitrary seed -- deterministic across runs and machines.
+    const SEED: u64 = 0xA51C_E5EE_D000_1234;
+    const MIN_POSITIONS: usize = 2000;
+    const MAX_PLIES_PER_GAME: usize = 120;
+    const MIN_SPARSE_POSITIONS: usize = 50;
+
+    /// Histogram buckets: <=8, 9-11, 12-15, 16-23, 24-32 pieces.
+    fn piece_histogram(counts: &[u32]) -> [usize; 5] {
+        let mut hist = [0usize; 5];
+        for &c in counts {
+            let idx = match c {
+                0..=8 => 0,
+                9..=11 => 1,
+                12..=15 => 2,
+                16..=23 => 3,
+                _ => 4,
+            };
+            hist[idx] += 1;
+        }
+        hist
+    }
+
+    fn xorshift64(state: &mut u64) -> u64 {
+        let mut x = *state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *state = x;
+        x
+    }
+
+    fn piece_count(board: &Scacchiera) -> u32 {
+        board.pezzi.iter().map(|bb| bb.count_ones()).sum()
+    }
+
+    /// Picks a move from `legal`: with probability 1/2, among the captures
+    /// only (if any exist); otherwise (or if there are no captures at all)
+    /// among every legal move. Plain uniform-random play almost never
+    /// trades pieces (captures are a small minority of legal moves in most
+    /// positions), so it rarely reaches a sparse endgame even over many
+    /// plies -- this bias exists to actually reach some.
+    fn choose_move(legal: &[Mossa], rng_state: &mut u64) -> Mossa {
+        let captures: Vec<Mossa> = legal.iter().copied().filter(|m| m.is_cattura()).collect();
+        let prefer_capture = !captures.is_empty() && xorshift64(rng_state) % 2 == 0;
+        let pool: &[Mossa] = if prefer_capture { &captures } else { legal };
+        let idx = (xorshift64(rng_state) as usize) % pool.len();
+        pool[idx]
+    }
+
+    /// Plays random legal games from the start position with a fixed-seed
+    /// PRNG, through the engine's own real incremental-update path (the same
+    /// `esegui_mossa` a real game uses, with the real embedded net), up to
+    /// `MAX_PLIES_PER_GAME` plies per game, collecting every position reached
+    /// until at least `min_positions` boards are gathered (raw, before
+    /// dedup). A finished game (no legal moves, or the ply cap) starts a
+    /// fresh one, carrying the running PRNG state forward, so the whole
+    /// sequence stays reproducible from `SEED` alone. Returns the raw
+    /// positions plus how many games were played.
+    fn collect_real_positions(net: &LunaNNUE, min_positions: usize) -> (Vec<Scacchiera>, usize) {
+        let z = get_zobrist_keys();
+        let mut rng_state = SEED;
+        let mut positions = Vec::new();
+        let mut games = 0usize;
+
+        while positions.len() < min_positions {
+            games += 1;
+            let mut board = Scacchiera::new_iniziale(z);
+            board.refresh_nnue(Some(net));
+            positions.push(board.clone());
+
+            for _ in 0..MAX_PLIES_PER_GAME {
+                let legal = board.genera_mosse_legali(z);
+                if legal.is_empty() {
+                    break; // checkmate or stalemate: start a fresh game below
+                }
+                let mv = choose_move(&legal, &mut rng_state);
+                let played = board.esegui_mossa(&mv, z, Some(net));
+                assert!(played, "genera_mosse_legali produced a move esegui_mossa rejected: {}", mv.to_uci());
+                positions.push(board.clone());
+                if positions.len() >= min_positions {
+                    break;
+                }
+            }
+        }
+        (positions, games)
+    }
+
+    /// `evaluate_with_flatten` forcing the scalar kernel.
+    fn eval_scalar(net: &LunaNNUE, board: &Scacchiera) -> i32 {
+        net.evaluate_with_flatten(&board.nnue_acc, board.turno == Colore::Bianco, board, flatten_scalar)
+    }
+
+    /// `evaluate_with_flatten` forcing the AVX2 kernel. Caller must have
+    /// verified `is_x86_feature_detected!("avx2")` first (done once, by the
+    /// test below, before this is called on any position).
+    #[cfg(target_arch = "x86_64")]
+    fn eval_avx2(net: &LunaNNUE, board: &Scacchiera) -> i32 {
+        net.evaluate_with_flatten(
+            &board.nnue_acc,
+            board.turno == Colore::Bianco,
+            board,
+            |acc, w| unsafe { simd::flatten_avx2(acc, w) },
+        )
+    }
+
+    #[test]
+    fn scalar_and_avx2_match_exactly_on_real_positions() {
+        let avx2_available = {
+            #[cfg(target_arch = "x86_64")]
+            { is_x86_feature_detected!("avx2") }
+            #[cfg(not(target_arch = "x86_64"))]
+            { false }
+        };
+        if !avx2_available {
+            eprintln!("AVX2 not available on this CPU/target -- skipping scalar-vs-AVX2 comparison.");
+            return;
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            let net = LunaNNUE::load_embedded().expect("resources/net.bin failed to parse");
+            let (raw_positions, games) = collect_real_positions(&net, MIN_POSITIONS);
+
+            // Dedup by zobrist hash: random play revisits the same position
+            // (especially the start position, once per game) many times.
+            let mut seen = HashSet::new();
+            let mut distinct: Vec<&Scacchiera> = Vec::new();
+            for board in &raw_positions {
+                if seen.insert(board.hash) {
+                    distinct.push(board);
+                }
+            }
+
+            let piece_counts: Vec<u32> = distinct.iter().map(|b| piece_count(b)).collect();
+            let min_pieces = *piece_counts.iter().min().unwrap();
+            let max_pieces = *piece_counts.iter().max().unwrap();
+            let hist = piece_histogram(&piece_counts);
+            let sparse = piece_counts.iter().filter(|&&c| c < 12).count();
+            eprintln!(
+                "scalar_and_avx2_match_exactly_on_real_positions: seed=0x{SEED:016x}, games={games}, \
+                 generated={}, distinct={}, pieces(min={min_pieces}, max={max_pieces}), \
+                 histogram(<=8={}, 9-11={}, 12-15={}, 16-23={}, 24-32={}), sparse(<12)={sparse}",
+                raw_positions.len(), distinct.len(), hist[0], hist[1], hist[2], hist[3], hist[4]
+            );
+            assert!(raw_positions.len() >= MIN_POSITIONS);
+            assert!(
+                sparse >= MIN_SPARSE_POSITIONS,
+                "only {sparse} positions with <12 pieces among {} distinct positions (need >= {MIN_SPARSE_POSITIONS}) \
+                 -- not a representative enough sample",
+                distinct.len()
+            );
+
+            let mut compared = 0usize;
+            for board in &distinct {
+                let scalar = eval_scalar(&net, board);
+                let avx2 = eval_avx2(&net, board);
+                assert_eq!(
+                    scalar, avx2,
+                    "scalar/AVX2 evaluation mismatch at {} (scalar={scalar}, avx2={avx2})",
+                    board.to_fen()
+                );
+                compared += 1;
+            }
+            eprintln!("scalar_and_avx2_match_exactly_on_real_positions: {compared} distinct positions compared, 0 differences");
         }
     }
 }
