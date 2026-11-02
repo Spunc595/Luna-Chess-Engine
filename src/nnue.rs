@@ -52,6 +52,26 @@ pub const HIDDEN: usize = 1024;
 /// silently misalign every feature index.
 const NUM_BUCKETS: usize = 4;
 
+/// Number of trained feature-weight rows (one per input feature, across
+/// all king buckets): the same count `parse` below allocates
+/// `feature_weights` with, and the first term of `NET_BIN_LEN`. A single
+/// named constant instead of writing `768 * NUM_BUCKETS * HIDDEN` twice.
+const FEATURE_WEIGHT_COUNT: usize = 768 * NUM_BUCKETS * HIDDEN;
+
+/// Expected byte length of `resources/net.bin` (and any valid external
+/// `luna.nnue`): the sum of every field `parse` reads below
+/// (feature_weights, feature_bias, output_weights, output_bias) plus 62
+/// bytes of trailing alignment padding (see `parse`'s own comment on
+/// `#[repr(C, align(64))]`). Computed once, here, from `FEATURE_WEIGHT_COUNT`
+/// and `HIDDEN`, so the runtime check in `parse` and the compile-time check
+/// on `EMBEDDED_NNUE` below read the same number instead of two separately
+/// written ones that could silently drift apart.
+const NET_BIN_LEN: usize = FEATURE_WEIGHT_COUNT * 2 // feature_weights
+    + HIDDEN * 2                                     // feature_bias
+    + 2 * HIDDEN * 2                                  // output_weights
+    + 2                                                // output_bias
+    + 62;                                              // trailing alignment padding
+
 /// Final centipawn scale factor, quantization factors for the
 /// accumulator (QA) and the output layer (QB) — same names/values as
 /// akimbo's own `consts`, since they're baked into how `resources/net.bin`
@@ -254,6 +274,16 @@ impl<'a> Reader<'a> {
 /// of only fixing it for builds that opt in.
 static EMBEDDED_NNUE: &[u8] = include_bytes!("../resources/net.bin");
 
+/// Compile-time half of the size gate: `include_bytes!` above already
+/// gives the compiler `EMBEDDED_NNUE`'s exact length, so a mismatch
+/// against `NET_BIN_LEN` (the same constant `parse`'s runtime check
+/// uses below) can fail the BUILD, not just reject the network every
+/// time the resulting binary starts.
+const _: () = assert!(
+    EMBEDDED_NNUE.len() == NET_BIN_LEN,
+    "resources/net.bin has the wrong size for this build's NUM_BUCKETS/HIDDEN (expected NET_BIN_LEN bytes, see src/nnue.rs)"
+);
+
 /// See the SIMD safety gate comment in `parse` below for why this exact
 /// bound (`32767 / QA`, floored) exists.
 const MAX_SAFE_OUTPUT_WEIGHT: i16 = 128;
@@ -392,32 +422,27 @@ impl LunaNNUE {
         // Unlike the old HalfKP format, akimbo's net.bin has no self-
         // describing header (no magic number, no version field: it's a
         // raw dump of a `#[repr(C)]` struct) — so the file's exact byte
-        // length is the ONLY available structural check, computed here
-        // from the architecture's own dimensions rather than hardcoded
-        // separately, so it can never silently drift out of sync with the
-        // parsing logic below. The real file (and any correctly-shaped
-        // one) is 6,297,664 bytes: the sum of every field below, PLUS 62
+        // length is the ONLY available structural check, computed once as
+        // `NET_BIN_LEN` above from the architecture's own dimensions
+        // rather than hardcoded separately here, so it can never silently
+        // drift out of sync with the parsing logic below. The real file
+        // (and any correctly-shaped one) is 6,297,664 bytes: the sum of
+        // every field below, PLUS 62
         // bytes of trailing alignment padding (the source struct carries
         // `#[repr(C, align(64))]` on its Accumulator type, which pads the
         // whole struct's size up to a multiple of 64) — intentionally
         // read past by the byte count below but never interpreted.
-        let feature_weight_count = 768 * NUM_BUCKETS * HIDDEN;
-        let expected_payload = feature_weight_count * 2 // feature_weights
-            + HIDDEN * 2                                 // feature_bias
-            + 2 * HIDDEN * 2                              // output_weights
-            + 2;                                          // output_bias
-        const TRAILING_PADDING: usize = 62;
-        if buffer.len() != expected_payload + TRAILING_PADDING {
+        if buffer.len() != NET_BIN_LEN {
             println!(
                 "info string NNUE: unexpected size ({} bytes, expected {}): not a compatible network. File ignored.",
-                buffer.len(), expected_payload + TRAILING_PADDING
+                buffer.len(), NET_BIN_LEN
             );
             return None;
         }
 
         let mut r = Reader::new(buffer);
 
-        let mut feature_weights = vec![0i16; feature_weight_count];
+        let mut feature_weights = vec![0i16; FEATURE_WEIGHT_COUNT];
         for w in feature_weights.iter_mut() { *w = r.read_i16()?; }
 
         let mut feature_bias = [0i16; HIDDEN];
