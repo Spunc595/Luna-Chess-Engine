@@ -47,7 +47,12 @@ The optimized binary is produced at `target/release/luna` (`luna.exe` on Windows
 
 **About the releases**: each release contains the source code and an Android ARM64 build. From 4.0.0, it also contains a Linux ARM64 build and a Windows x86_64 build. For every other platform, compile it yourself with `cargo build --release` as above.
 
-Release files are named `luna-v<version>-<platform>-<arch>`, e.g. `luna-v3.1.5-android-arm64` (and, from 4.0.0, `luna-v4.0.0-linux-arm64` and `luna-v4.0.0-windows-x86_64`).
+Release files are named `luna-v<version>-<platform>-<arch>`, e.g.
+`luna-v3.1.5-android-arm64` (from 4.0.0 also
+`luna-v4.0.0-linux-arm64` and `luna-v4.0.0-windows-x86_64.exe`).
+Starting with v4.1.0 the Linux build is named
+`luna-v<version>-linux-aarch64`, and each release carries a single
+`SHA256SUMS` file instead of one `.sha256` file per asset.
 
 **Windows builds and CPU requirements.** `luna-v4.0.0-windows-x86_64.exe` was built for the `x86-64-v2` microarchitecture level (SSE4.1, SSE4.2, POPCNT, CMPXCHG16B) — evidence from disassembly (POPCNT/SSE4.1/SSE4.2 present, no LZCNT/BMI1/BMI2, AVX2 confined to the runtime-gated NNUE kernel); not dynamically verified with Intel SDE. `luna-v4.1.0-windows-x86_64.exe` was built by mistake for the build machine's own CPU (`-C target-cpu=native`): it requires POPCNT, LZCNT, BMI1/BMI2 and AVX2 unconditionally (roughly Intel Haswell, 2013, or AMD Excavator, 2015, or newer) and fails to start with an illegal-instruction error on older CPUs. `luna-v4.1.0-windows-x86_64-baseline.exe`, added to the same release as an extra asset, is the same v4.1.0 source built with no `target-cpu` override (`RUSTFLAGS=""`); it contains SSE3, CMPXCHG16B and FXSR (part of the `x86_64-pc-windows-msvc` target's own default feature set, not something enabled by this project) but no POPCNT, LZCNT or BMI1/BMI2, and no AVX2 outside the NNUE kernel's own runtime check — not dynamically tested on a CPU without AVX2.
 
