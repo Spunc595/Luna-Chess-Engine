@@ -870,6 +870,147 @@ mod safety_gate_tests {
     }
 }
 
+/// Tests against the REAL, shipped `resources/net.bin` (via `EMBEDDED_NNUE`
+/// and `LunaNNUE::parse`/`load_embedded`), not synthetic weight arrays --
+/// `safety_gate_tests` above checks the gate function in isolation;
+/// these check that the gate actually holds for the network this engine
+/// ships, and that it still rejects/accepts correctly on single-byte
+/// perturbations of that real data.
+#[cfg(test)]
+mod embedded_net_tests {
+    use super::*;
+
+    /// (a) The real, shipped `resources/net.bin` must parse, and the
+    /// output weights it actually contains -- read from the parsed
+    /// struct, not a hand-written copy -- must already respect the
+    /// SIMD-safety limit this engine enforces at load time.
+    #[test]
+    fn embedded_network_parses_and_its_output_weights_are_within_limit() {
+        let net = LunaNNUE::load_embedded().expect("resources/net.bin failed to parse");
+        assert_eq!(max_abs_output_weight_over_limit(&net.output_weights), None);
+
+        // Independent of `max_abs_output_weight_over_limit`'s own arithmetic:
+        // scan every real output weight directly and recompute the max
+        // |weight| a second, unrelated way, so a bug shared between the
+        // gate and this check could not hide the same thing twice.
+        let max_abs = net.output_weights.iter()
+            .flat_map(|half| half.iter())
+            .map(|&w| i32::from(w).abs())
+            .max()
+            .unwrap();
+        eprintln!("embedded net.bin: max |output_weight| = {max_abs}");
+        assert!(max_abs <= MAX_SAFE_OUTPUT_WEIGHT as i32);
+    }
+
+    /// Byte offset of `output_weights[0][0]` within the embedded buffer:
+    /// right after `feature_weights` and `feature_bias`, in the same
+    /// field order `parse` reads them in.
+    const OUTPUT_WEIGHT_0_0_OFFSET: usize = FEATURE_WEIGHT_COUNT * 2 + HIDDEN * 2;
+
+    /// Byte offset of `output_weights[1][HIDDEN - 1]`, the LAST output
+    /// weight `parse` reads (index `2 * HIDDEN - 1` counting both halves
+    /// back-to-back) -- so the boundary tests below are not only ever
+    /// checked on the first weight in the file.
+    const OUTPUT_WEIGHT_LAST_OFFSET: usize = OUTPUT_WEIGHT_0_0_OFFSET + (2 * HIDDEN - 1) * 2;
+
+    /// A copy of the real `EMBEDDED_NNUE` bytes with the i16 at `offset`
+    /// overwritten to `value` -- same length as the original, every other
+    /// byte untouched, so a parse failure on this copy can only come from
+    /// the weight-limit gate, never the size gate.
+    fn embedded_bytes_with_output_weight_at(offset: usize, value: i16) -> Vec<u8> {
+        let mut bytes = EMBEDDED_NNUE.to_vec();
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        bytes
+    }
+
+    /// (b), control half: exactly `MAX_SAFE_OUTPUT_WEIGHT` (128) itself is
+    /// still accepted. Proves the copy's length and every other byte are
+    /// fine on their own, so the rejection in the next test can only be
+    /// about the value 129 specifically, not an unrelated read/length
+    /// failure in this hand-built copy.
+    #[test]
+    fn output_weight_at_the_exact_limit_is_still_accepted() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_0_0_OFFSET, MAX_SAFE_OUTPUT_WEIGHT);
+        assert!(LunaNNUE::parse(&bytes).is_some());
+    }
+
+    /// (b): one past the limit (129) is rejected. `parse` has exactly two
+    /// `None`-returning checks (size, then output-weight limit); this copy
+    /// has the real, correct length (only one i16 changed), and the test
+    /// above shows the same byte position with 128 parses fine -- so this
+    /// rejection can only be the weight-limit gate, not the size gate or a
+    /// read failure.
+    #[test]
+    fn output_weight_one_over_the_limit_is_rejected() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_0_0_OFFSET, MAX_SAFE_OUTPUT_WEIGHT + 1);
+        assert!(LunaNNUE::parse(&bytes).is_none());
+    }
+
+    /// Negative side of the same boundary: exactly `-MAX_SAFE_OUTPUT_WEIGHT`
+    /// (-128) is still accepted.
+    #[test]
+    fn output_weight_at_the_negative_limit_is_still_accepted() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_0_0_OFFSET, -MAX_SAFE_OUTPUT_WEIGHT);
+        assert!(LunaNNUE::parse(&bytes).is_some());
+    }
+
+    /// Negative side: one past the limit (-129) is rejected.
+    #[test]
+    fn output_weight_one_past_the_negative_limit_is_rejected() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_0_0_OFFSET, -MAX_SAFE_OUTPUT_WEIGHT - 1);
+        assert!(LunaNNUE::parse(&bytes).is_none());
+    }
+
+    /// Worst case: `i16::MIN` (-32768), whose absolute value does not fit
+    /// in an `i16` at all (the same extreme `safety_gate_tests::
+    /// rejects_worst_case_i16_min` checks against the gate function in
+    /// isolation) -- here against the real parse() path, must be rejected,
+    /// not accepted and not a panic.
+    #[test]
+    fn output_weight_i16_min_is_rejected() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_0_0_OFFSET, i16::MIN);
+        assert!(LunaNNUE::parse(&bytes).is_none());
+    }
+
+    /// (b) repeated on the LAST output weight in the file, not just the
+    /// first: exactly at the limit (128) is still accepted.
+    #[test]
+    fn last_output_weight_at_the_exact_limit_is_still_accepted() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_LAST_OFFSET, MAX_SAFE_OUTPUT_WEIGHT);
+        assert!(LunaNNUE::parse(&bytes).is_some());
+    }
+
+    /// (b) repeated on the LAST output weight: one past the limit (129)
+    /// is rejected there too.
+    #[test]
+    fn last_output_weight_one_over_the_limit_is_rejected() {
+        let bytes = embedded_bytes_with_output_weight_at(OUTPUT_WEIGHT_LAST_OFFSET, MAX_SAFE_OUTPUT_WEIGHT + 1);
+        assert!(LunaNNUE::parse(&bytes).is_none());
+    }
+
+    /// (c): one byte short is rejected by the SIZE gate -- the very first
+    /// check in `parse`, which returns `None` before reading a single
+    /// weight, so this cannot be the weight-limit gate from the tests
+    /// above (no weight is ever read on this path).
+    #[test]
+    fn one_byte_short_is_rejected() {
+        let mut bytes = EMBEDDED_NNUE.to_vec();
+        bytes.pop();
+        assert_eq!(bytes.len(), NET_BIN_LEN - 1);
+        assert!(LunaNNUE::parse(&bytes).is_none());
+    }
+
+    /// (d): one byte too many is rejected by the same size gate as (c),
+    /// for the same reason (checked before any weight is read).
+    #[test]
+    fn one_byte_too_many_is_rejected() {
+        let mut bytes = EMBEDDED_NNUE.to_vec();
+        bytes.push(0);
+        assert_eq!(bytes.len(), NET_BIN_LEN + 1);
+        assert!(LunaNNUE::parse(&bytes).is_none());
+    }
+}
+
 #[cfg(test)]
 mod row_update_tests {
     use super::*;
