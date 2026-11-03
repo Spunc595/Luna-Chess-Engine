@@ -1164,7 +1164,7 @@ unmeasured.
 and `luna-v4.0.0-android-arm64` (tag `v4.0.0`, sha256 `72caa67615d3741be085dc16712f78340618f67c220c9a2e68c06b38d421d9ab`),
 both built on the PC with NDK r27d, API level 21, sha256 verified on-device before every run. Measured externally
 (`phone_timing_probe.py`, a pure black-box UCI-over-pipe timer, no change to either binary) via Termux, 3 repeats
-per binary, per the PC-side instructions in `android_phone_test/ISTRUZIONI.md`.
+per binary, per the PC-side instructions in `android_phone_test/ISTRUZIONI.md` (file not present in the repository; see docs/BUILD_ANDROID.md).
 
 | build | avvio -> uciok (3 lanci) | isready -> readyok | go movetime 1000 -> bestmove (3 lanci) |
 |---|---|---|---|
