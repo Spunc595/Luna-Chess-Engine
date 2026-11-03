@@ -1,3 +1,15 @@
+# Performance work log (branch `perf-opt`)
+
+This is a working log written during the optimisation attempts that
+led to the 4.2.0 release. It is kept as a record of what was tried,
+not as documentation of the final state. Several hypotheses recorded
+here were later disproved by controlled, paired measurements (see the
+4.2.0 release notes); where a statement here conflicts with those
+measurements, the measurements are right. Timings in this log were
+taken on a noisy machine and should not be read as precise.
+
+---
+
 # PERF_NOTES.md — tentativi su `perf-opt`, esiti negativi registrati
 
 Questo file registra i tentativi SCARTATI (o comunque non adottati) sul ramo `perf-opt`, con i
