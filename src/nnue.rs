@@ -349,7 +349,7 @@ fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
     let w: &[i16; HIDDEN] = w.try_into().unwrap();
     #[cfg(target_arch = "x86_64")]
     {
-        // TEMP AVX2 experiment (see PERF_NOTES.md): runtime-detected 16-lane path, same dispatch
+        // Runtime-detected AVX2 path (16 lanes of i16 per instruction), same dispatch
         // pattern `flatten`/`flatten_avx2` already use elsewhere in this file -- the ONLY place
         // this file decides AVX2 vs SSE2/NEON is this `is_x86_feature_detected!` call (and its
         // twin in `row_fused` below): never at compile time, never by target-cpu flags.
@@ -432,7 +432,7 @@ const _: () = assert!(HIDDEN.is_multiple_of(8));
 fn row_fused<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[i16; HIDDEN]; S], adds: [&[i16; HIDDEN]; A]) {
     #[cfg(target_arch = "x86_64")]
     {
-        // TEMP AVX2 experiment (see PERF_NOTES.md): same runtime dispatch as `row_update` above.
+        // Same runtime-detected AVX2 dispatch as `row_update` above.
         if is_x86_feature_detected!("avx2") {
             // SAFETY: the AVX2 feature was just verified as available.
             unsafe { row_fused_avx2::<S, A>(half, subs, adds) };
@@ -1321,11 +1321,12 @@ mod row_update_tests {
 /// on REAL positions reached by playing random legal games from the start
 /// position with the REAL embedded `resources/net.bin`.
 ///
-/// Looked for the project's own "equivalence at depth 10, seed 2026" FEN set
-/// (PERF_NOTES.md on `perf-opt` references it by that description) before
-/// writing this generator: that harness's actual FEN list and script are not
-/// in git history at all -- PERF_NOTES.md itself says the patches it was run
-/// against live in a local scratchpad directory outside the repository, and
+/// Looked for the project's own "equivalence at depth 10, seed 2026" FEN set,
+/// referenced by that description in this project's internal development
+/// notes, before writing this generator: that harness's actual FEN list and
+/// script are not in git history at all -- those notes themselves say the
+/// patches it was run against live in a local scratchpad directory outside
+/// the repository, and
 /// no `*.txt`/`*.fen`/`*.md`/`*.py`/`*.ps1`/`*.sh` file on `perf-opt` or
 /// `main` contains that list either. The other candidate, the luna-nnue
 /// repository's `results/eval_set.epd` (2,000 Stockfish-evaluated positions),
