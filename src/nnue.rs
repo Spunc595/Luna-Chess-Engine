@@ -323,6 +323,25 @@ unsafe fn row_update_avx2<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16; H
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+// SAFETY (caller contract): SSE2 is part of the x86_64 baseline, so no feature
+// check is needed; `half`/`w` are both `&[i16; HIDDEN]`-shaped (HIDDEN a
+// compile-time multiple of 8), so every 8-lane unaligned load/store below
+// stays within both arrays' bounds.
+fn row_update_sse2<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16; HIDDEN]) {
+    use std::arch::x86_64::*;
+    unsafe {
+        let hp = half.as_mut_ptr();
+        let wp = w.as_ptr();
+        for k in 0..HIDDEN / 8 {
+            let a = _mm_loadu_si128(hp.add(k * 8) as *const __m128i);
+            let b = _mm_loadu_si128(wp.add(k * 8) as *const __m128i);
+            let r = if SUB { _mm_sub_epi16(a, b) } else { _mm_add_epi16(a, b) };
+            _mm_storeu_si128(hp.add(k * 8) as *mut __m128i, r);
+        }
+    }
+}
+
 /// `half += w` (or `half -= w` when `SUB`), wrapping. `w` is exactly one
 /// feature row, so the single length check here replaces a per-element one.
 #[inline(always)]
@@ -340,19 +359,8 @@ fn row_update<const SUB: bool>(half: &mut [i16; HIDDEN], w: &[i16]) {
             unsafe { row_update_avx2::<SUB>(half, w) };
             return;
         }
-        use std::arch::x86_64::*;
-        // SAFETY: SSE2 is part of the x86_64 baseline; both arrays hold HIDDEN
-        // i16 (HIDDEN % 8 == 0), so every 8-lane access below is in bounds.
-        unsafe {
-            let hp = half.as_mut_ptr();
-            let wp = w.as_ptr();
-            for k in 0..HIDDEN / 8 {
-                let a = _mm_loadu_si128(hp.add(k * 8) as *const __m128i);
-                let b = _mm_loadu_si128(wp.add(k * 8) as *const __m128i);
-                let r = if SUB { _mm_sub_epi16(a, b) } else { _mm_add_epi16(a, b) };
-                _mm_storeu_si128(hp.add(k * 8) as *mut __m128i, r);
-            }
-        }
+        row_update_sse2::<SUB>(half, w);
+        return;
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -394,6 +402,28 @@ unsafe fn row_fused_avx2<const S: usize, const A: usize>(half: &mut [i16; HIDDEN
     }
 }
 
+#[cfg(target_arch = "x86_64")]
+// SAFETY (caller contract): SSE2 is part of the x86_64 baseline, so no feature
+// check is needed; `half` and every row in `subs`/`adds` are `&[i16; HIDDEN]`,
+// HIDDEN a compile-time multiple of 8, so every 8-lane unaligned load/store
+// below stays within bounds.
+fn row_fused_sse2<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[i16; HIDDEN]; S], adds: [&[i16; HIDDEN]; A]) {
+    use std::arch::x86_64::*;
+    unsafe {
+        let hp = half.as_mut_ptr();
+        for k in 0..HIDDEN / 8 {
+            let mut v = _mm_loadu_si128(hp.add(k * 8) as *const __m128i);
+            for s in subs.iter() {
+                v = _mm_sub_epi16(v, _mm_loadu_si128(s.as_ptr().add(k * 8) as *const __m128i));
+            }
+            for a in adds.iter() {
+                v = _mm_add_epi16(v, _mm_loadu_si128(a.as_ptr().add(k * 8) as *const __m128i));
+            }
+            _mm_storeu_si128(hp.add(k * 8) as *mut __m128i, v);
+        }
+    }
+}
+
 /// `half -= subs[..]` then `half += adds[..]`, wrapping, in ONE pass over the half: each lane
 /// is loaded and stored once, however many rows contribute to it. Modular arithmetic makes
 /// the order of the terms irrelevant, so this equals the sequence of single-row updates.
@@ -408,21 +438,8 @@ fn row_fused<const S: usize, const A: usize>(half: &mut [i16; HIDDEN], subs: [&[
             unsafe { row_fused_avx2::<S, A>(half, subs, adds) };
             return;
         }
-        use std::arch::x86_64::*;
-        // SAFETY: SSE2 is part of the x86_64 baseline; every row holds HIDDEN i16 (HIDDEN % 8 == 0).
-        unsafe {
-            let hp = half.as_mut_ptr();
-            for k in 0..HIDDEN / 8 {
-                let mut v = _mm_loadu_si128(hp.add(k * 8) as *const __m128i);
-                for s in subs.iter() {
-                    v = _mm_sub_epi16(v, _mm_loadu_si128(s.as_ptr().add(k * 8) as *const __m128i));
-                }
-                for a in adds.iter() {
-                    v = _mm_add_epi16(v, _mm_loadu_si128(a.as_ptr().add(k * 8) as *const __m128i));
-                }
-                _mm_storeu_si128(hp.add(k * 8) as *mut __m128i, v);
-            }
-        }
+        row_fused_sse2::<S, A>(half, subs, adds);
+        return;
     }
     #[cfg(target_arch = "aarch64")]
     {
@@ -1163,6 +1180,109 @@ mod row_update_tests {
             assert_eq!(got.white, want.white, "white half, step {step}");
             assert_eq!(got.black, want.black, "black half, step {step}");
             acc0 = want;
+        }
+    }
+
+    /// Punto 3b (fase 2, 4.2.0): the SSE2 path was extracted into its own
+    /// named function (`row_update_sse2`/`row_fused_sse2`) so it can be
+    /// exercised directly instead of only through the runtime-dispatched
+    /// `row_update`/`row_fused` (which always picks AVX2 on this machine).
+    /// This checks SSE2, AVX2 and scalar agree bit-for-bit on full-range
+    /// random i16 data, including the wrapping extremes `random_row` forces
+    /// into a few lanes every call.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn sse2_matches_avx2_and_scalar_full_range() {
+        // SSE2 is the x86_64 baseline, so it is always exercised below.
+        // AVX2 is only compared when the running CPU actually has it --
+        // `row_update_avx2`/`row_fused_avx2` are unsafe to call otherwise
+        // (their own SAFETY comment requires the caller to have checked
+        // this first). Skipping just the AVX2 half on an AVX2-less CPU
+        // must not skip, or fail, the SSE2-vs-scalar half.
+        let has_avx2 = is_x86_feature_detected!("avx2");
+        let mut seed = 0x243F6A8885A308D3u64;
+        for _ in 0..4000 {
+            let w = random_row(&mut seed);
+            let base = random_row(&mut seed);
+
+            for sub in [false, true] {
+                let mut sse2 = base;
+                let mut scalar = base;
+                if sub {
+                    row_update_sse2::<true>(&mut sse2, &w);
+                    row_update_scalar::<true>(&mut scalar, &w);
+                } else {
+                    row_update_sse2::<false>(&mut sse2, &w);
+                    row_update_scalar::<false>(&mut scalar, &w);
+                }
+                assert_eq!(sse2, scalar, "row_update_sse2 vs scalar, sub={sub}");
+
+                if has_avx2 {
+                    let mut avx2 = base;
+                    if sub {
+                        unsafe { row_update_avx2::<true>(&mut avx2, &w) };
+                    } else {
+                        unsafe { row_update_avx2::<false>(&mut avx2, &w) };
+                    }
+                    assert_eq!(avx2, scalar, "row_update_avx2 vs scalar, sub={sub}");
+                }
+            }
+
+            let sub1 = random_row(&mut seed);
+            let add1 = random_row(&mut seed);
+            let mut sse2 = base;
+            let mut scalar = base;
+            row_fused_sse2::<1, 1>(&mut sse2, [&sub1], [&add1]);
+            row_update_scalar::<true>(&mut scalar, &sub1);
+            row_update_scalar::<false>(&mut scalar, &add1);
+            assert_eq!(sse2, scalar, "row_fused_sse2 vs scalar");
+
+            if has_avx2 {
+                let mut avx2 = base;
+                unsafe { row_fused_avx2::<1, 1>(&mut avx2, [&sub1], [&add1]) };
+                assert_eq!(avx2, scalar, "row_fused_avx2 vs scalar");
+            }
+        }
+    }
+
+    /// Same three-way comparison (SSE2, AVX2, scalar), but on REAL rows from
+    /// the shipped `resources/net.bin` instead of synthetic full-range data --
+    /// real trained weights don't cover the i16 range uniformly, so this
+    /// guards against a bug that only full-range synthetic data would hide.
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn sse2_matches_avx2_and_scalar_on_real_net_rows() {
+        // Same reasoning as `sse2_matches_avx2_and_scalar_full_range` above:
+        // SSE2-vs-scalar always runs; AVX2 is only compared when present.
+        let has_avx2 = is_x86_feature_detected!("avx2");
+        let net = LunaNNUE::load_embedded().expect("embedded net must parse");
+        let mut seed = 0x9E3779B97F4A7C15u64;
+        let rows = net.feature_weights.len() / HIDDEN;
+        for row in 0..rows {
+            let w: &[i16; HIDDEN] = net.feature_weights[row * HIDDEN..(row + 1) * HIDDEN].try_into().unwrap();
+            let base = random_row(&mut seed);
+
+            let mut sse2 = base;
+            let mut scalar = base;
+            row_update_sse2::<false>(&mut sse2, w);
+            row_update_scalar::<false>(&mut scalar, w);
+            assert_eq!(sse2, scalar, "row_update_sse2 vs scalar on real row {row}");
+            if has_avx2 {
+                let mut avx2 = base;
+                unsafe { row_update_avx2::<false>(&mut avx2, w) };
+                assert_eq!(avx2, scalar, "row_update_avx2 vs scalar on real row {row}");
+            }
+
+            let mut sse2 = base;
+            let mut scalar = base;
+            row_fused_sse2::<1, 0>(&mut sse2, [w], []);
+            row_update_scalar::<true>(&mut scalar, w);
+            assert_eq!(sse2, scalar, "row_fused_sse2(sub-only) vs scalar on real row {row}");
+            if has_avx2 {
+                let mut avx2 = base;
+                unsafe { row_fused_avx2::<1, 0>(&mut avx2, [w], []) };
+                assert_eq!(avx2, scalar, "row_fused_avx2(sub-only) vs scalar on real row {row}");
+            }
         }
     }
 
