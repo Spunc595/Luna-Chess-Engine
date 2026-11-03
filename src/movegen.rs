@@ -185,8 +185,128 @@ const PST_KING: [i32; 64] = [
      20, 30, 10,  0,  0, 10, 30, 20
 ];
 
-pub fn genera_mosse(s: &Scacchiera) -> Vec<Mossa> {
-    let mut mosse = Vec::with_capacity(64);
+use std::mem::MaybeUninit;
+
+/// Fixed-capacity, stack-allocated replacement for `Vec<Mossa>` on the per-node move-generation
+/// path: 256 is comfortably above the maximum number of legal chess moves in any position (218,
+/// the published record), so `push` never needs a bounds check against anything the move
+/// generator itself can produce; the `debug_assert!` below still catches a future bug that
+/// generated well past that bound. No heap allocation, ever -- see PARTE 1 in the perf-opt log
+/// for why this replaces `genera_mosse`/`genera_mosse_legali`'s two per-node `Vec`s.
+pub struct MoveList {
+    // `MaybeUninit`, not `[Mossa; 256]`: a plain array literal `[Mossa::null(); 256]` would
+    // write all 256 slots (~1KB) on every single call to `new()` -- measured to be slower than
+    // the heap `Vec::with_capacity` this replaces, since `with_capacity` reserves space WITHOUT
+    // touching it. Only the first `len` slots are ever written (by `push`) or read (via
+    // `as_slice`/`as_mut_slice`/the iterators below); nothing past `len` is ever inspected.
+    mosse: [MaybeUninit<Mossa>; 256],
+    len: usize,
+}
+
+impl MoveList {
+    #[inline(always)]
+    pub fn new() -> Self {
+        // Safe: an array of `MaybeUninit<T>` requires no initialization of its own -- unlike
+        // `[Mossa::null(); 256]`, this touches zero bytes.
+        MoveList { mosse: unsafe { MaybeUninit::uninit().assume_init() }, len: 0 }
+    }
+
+    #[inline(always)]
+    pub fn push(&mut self, m: Mossa) {
+        debug_assert!(self.len < 256, "MoveList overflow: more than 256 moves generated for one position");
+        self.mosse[self.len].write(m);
+        self.len += 1;
+    }
+
+    #[inline(always)]
+    fn as_slice(&self) -> &[Mossa] {
+        // Safe: `MaybeUninit<T>` has the same size/alignment/ABI as `T` (guaranteed by std),
+        // and indices 0..len have all been written by `push`.
+        unsafe { std::slice::from_raw_parts(self.mosse.as_ptr() as *const Mossa, self.len) }
+    }
+
+    // Used by examples/perft_check.rs, tests/perft.rs and the Index impl below, none of which
+    // are reachable from the `luna` binary target itself -- hence the allow, not dead code.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    // Used by examples/check_nnue.rs and tests/nnue_incremental.rs, same reason as `len` above.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn iter(&self) -> std::slice::Iter<'_, Mossa> {
+        self.as_slice().iter()
+    }
+
+    #[inline(always)]
+    pub fn as_mut_slice(&mut self) -> &mut [Mossa] {
+        // Safe: same reasoning as `as_slice`.
+        unsafe { std::slice::from_raw_parts_mut(self.mosse.as_mut_ptr() as *mut Mossa, self.len) }
+    }
+
+    /// Same semantics as `Vec::retain`: keeps only the elements for which `f` returns true,
+    /// compacting in place, no allocation.
+    pub fn retain<F: FnMut(&Mossa) -> bool>(&mut self, mut f: F) {
+        let slice = self.as_mut_slice();
+        let mut new_len = 0;
+        for i in 0..slice.len() {
+            if f(&slice[i]) {
+                slice[new_len] = slice[i];
+                new_len += 1;
+            }
+        }
+        self.len = new_len;
+    }
+}
+
+impl std::ops::Index<usize> for MoveList {
+    type Output = Mossa;
+    #[inline(always)]
+    fn index(&self, i: usize) -> &Mossa {
+        &self.as_slice()[i]
+    }
+}
+
+/// By-value iterator for `MoveList` (`for m in list`): each already-written slot is read out as
+/// a plain `Mossa` (it is `Copy`, so reading it this way is not a use-after-move of anything).
+pub struct MoveListIntoIter {
+    list: MoveList,
+    idx: usize,
+}
+
+impl Iterator for MoveListIntoIter {
+    type Item = Mossa;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Mossa> {
+        if self.idx < self.list.len {
+            // Safe: index `idx < len` was written by `push`.
+            let m = unsafe { self.list.mosse[self.idx].assume_init_read() };
+            self.idx += 1;
+            Some(m)
+        } else {
+            None
+        }
+    }
+}
+
+impl IntoIterator for MoveList {
+    type Item = Mossa;
+    type IntoIter = MoveListIntoIter;
+    #[inline(always)]
+    fn into_iter(self) -> Self::IntoIter {
+        MoveListIntoIter { list: self, idx: 0 }
+    }
+}
+
+pub fn genera_mosse(s: &Scacchiera) -> MoveList {
+    let mut mosse = MoveList::new();
     let us = s.turno;
     let them = us.opposto();
 
@@ -270,7 +390,7 @@ pub fn genera_mosse(s: &Scacchiera) -> Vec<Mossa> {
     mosse
 }
 
-fn genera_arrocco(s: &Scacchiera, mosse: &mut Vec<Mossa>, all: u64) {
+fn genera_arrocco(s: &Scacchiera, mosse: &mut MoveList, all: u64) {
     let us = s.turno;
     if s.in_scacco() { return; }
 
@@ -303,7 +423,7 @@ fn genera_arrocco(s: &Scacchiera, mosse: &mut Vec<Mossa>, all: u64) {
     }
 }
 
-fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>) {
+fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut MoveList) {
     let rank = to / 8;
     if rank == prom_rank {
         for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
@@ -314,7 +434,7 @@ fn add_pawn_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>
     }
 }
 
-fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mossa>) {
+fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut MoveList) {
     let rank = to / 8;
     if rank == prom_rank {
         for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
@@ -328,7 +448,7 @@ fn add_capture_move(from: usize, to: usize, prom_rank: usize, list: &mut Vec<Mos
 // Updated to also receive killer moves and the history heuristic
 // (history[color][from][to], see search.rs::SearchInfo::history).
 pub fn ordina_mosse(
-    mosse: &mut Vec<Mossa>,
+    mosse: &mut [Mossa],
     board: &Scacchiera,
     tt_move: Mossa,
     killers: &[Mossa; 2],
