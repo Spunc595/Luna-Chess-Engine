@@ -58,6 +58,18 @@ Starting with v4.1.0 the Linux build is named
 
 Starting with v4.1.1, the Windows executable `luna-v4.1.1-windows-x86_64.exe` is a baseline build: it is `target\release\luna.exe` as produced by `scripts/build_release.ps1` with `RUSTFLAGS=""` (no `target-cpu` override), renamed for the release. The script checks the compiler's enabled CPU features (only SSE, SSE2, SSE3, CMPXCHG16B and FXSR are allowed) and the disassembly of the executable (no POPCNT, LZCNT or BMI1/BMI2 instructions, and an upper limit on 256-bit AVX2 register use). The only AVX2 code in the source is the NNUE kernel, which is selected at runtime when the CPU supports it. It was not tested dynamically on a CPU without AVX2 or without POPCNT.
 
+Starting with v4.2.0, the Windows executable is also built with
+profile-guided optimisation (PGO, via `cargo-pgo`): it is profiled
+on a fixed, reproducible self-play workload
+(`scripts/pgo_workload.py`, `scripts/pgo_openings.txt`) and rebuilt
+with that profile. PGO changes only how the compiler lays out the
+code: node counts were identical to the build without PGO in every
+position we measured, and the CPU requirements are unchanged
+(baseline x86-64: SSE3 and CMPXCHG16B; no POPCNT, LZCNT or
+BMI1/BMI2 instructions, checked on the disassembly). The Linux
+ARM64 and Android builds are not PGO builds. See
+`docs/BUILD_PGO.md`.
+
 If you compile it yourself, `cargo build --release` no longer uses `target-cpu=native` on Windows (it did in v4.1.0 by mistake). That gives a portable executable. For the fastest build for your own machine, set `RUSTFLAGS="-C target-cpu=native"` yourself; the result will only run on CPUs at least as recent as yours. The AVX2 NNUE kernel activates at runtime on CPUs that support it, regardless of the target you build for - see the NNUE network section below.
 
 ### NNUE network
