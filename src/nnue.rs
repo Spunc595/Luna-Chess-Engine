@@ -1223,6 +1223,7 @@ mod row_update_tests {
 mod avx2_vs_scalar_real_position_tests {
     use super::*;
     use crate::board::{Colore, Mossa};
+    use crate::movegen::MoveList;
     use crate::zobrist::get_zobrist_keys;
     use std::collections::HashSet;
 
@@ -1267,12 +1268,16 @@ mod avx2_vs_scalar_real_position_tests {
     /// trades pieces (captures are a small minority of legal moves in most
     /// positions), so it rarely reaches a sparse endgame even over many
     /// plies -- this bias exists to actually reach some.
-    fn choose_move(legal: &[Mossa], rng_state: &mut u64) -> Mossa {
+    fn choose_move(legal: &MoveList, rng_state: &mut u64) -> Mossa {
         let captures: Vec<Mossa> = legal.iter().copied().filter(|m| m.is_cattura()).collect();
         let prefer_capture = !captures.is_empty() && xorshift64(rng_state) % 2 == 0;
-        let pool: &[Mossa] = if prefer_capture { &captures } else { legal };
-        let idx = (xorshift64(rng_state) as usize) % pool.len();
-        pool[idx]
+        if prefer_capture {
+            let idx = (xorshift64(rng_state) as usize) % captures.len();
+            captures[idx]
+        } else {
+            let idx = (xorshift64(rng_state) as usize) % legal.len();
+            legal[idx]
+        }
     }
 
     /// Plays random legal games from the start position with a fixed-seed
