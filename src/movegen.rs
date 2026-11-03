@@ -615,3 +615,92 @@ mod see_tests {
         assert_eq!(see(&board, &m), 100);
     }
 }
+
+/// Punto 3 (fase 2, 4.2.0): formal, committable tests for `MoveList`, beyond
+/// the throwaway `examples/movelist_maxlen_check.rs` used to eyeball the
+/// 218-move count during the investigation.
+#[cfg(test)]
+mod movelist_tests {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+
+    /// The published maximum number of legal moves in any reachable chess
+    /// position (218) on a specifically constructed FEN. If this ever
+    /// stopped being 218 -- a changed move generator, a different FEN --
+    /// this test must be re-checked by hand, not "fixed" by changing the
+    /// expected number.
+    #[test]
+    fn stress_fen_has_218_legal_moves_within_generator_capacity() {
+        let z = ZobristKeys::default();
+        let mut board = Scacchiera::from_fen(
+            "R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1",
+            &z,
+        );
+        let legal = board.genera_mosse_legali(&z);
+        assert_eq!(legal.len(), 218, "expected the published 218-move maximum");
+
+        let pseudo = genera_mosse(&board);
+        assert!(
+            pseudo.len() <= 256,
+            "pseudo-legal MoveList overflowed its 256-slot capacity: {}",
+            pseudo.len()
+        );
+    }
+
+    /// `retain` must keep only the elements for which the predicate is
+    /// true, compacting in place while preserving the RELATIVE order of
+    /// the survivors (same contract as `Vec::retain`).
+    #[test]
+    fn retain_keeps_matching_elements_in_relative_order() {
+        let mut list = MoveList::new();
+        // 6 distinct moves, built from distinct (from, to) pairs so each
+        // is trivially distinguishable by `.da()`.
+        for from in 0..6usize {
+            list.push(Mossa::new(from, from + 10, MoveFlag::None, None));
+        }
+        // Keep only the moves whose `from` square is even: 0, 2, 4.
+        list.retain(|m| m.da() % 2 == 0);
+        assert_eq!(list.len(), 3);
+        let survivors: Vec<usize> = list.iter().map(|m| m.da()).collect();
+        assert_eq!(survivors, vec![0, 2, 4], "relative order must be preserved");
+    }
+
+    /// `retain` with a predicate that matches nothing must empty the list
+    /// (not panic, not leave stale entries reachable through `len`/`iter`).
+    #[test]
+    fn retain_with_always_false_empties_the_list() {
+        let mut list = MoveList::new();
+        for from in 0..5usize {
+            list.push(Mossa::new(from, from + 20, MoveFlag::None, None));
+        }
+        list.retain(|_| false);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.iter().count(), 0);
+    }
+
+    /// `into_iter` (by-value, `for m in list`) must yield every pushed move
+    /// exactly once, in insertion order.
+    #[test]
+    fn into_iter_yields_every_move_once_in_insertion_order() {
+        let mut list = MoveList::new();
+        let expected: Vec<usize> = (0..10).collect();
+        for &from in &expected {
+            list.push(Mossa::new(from, from + 1, MoveFlag::None, None));
+        }
+        let collected: Vec<usize> = list.into_iter().map(|m| m.da()).collect();
+        assert_eq!(collected, expected);
+    }
+
+    /// A freshly constructed `MoveList` (nothing ever pushed) must report
+    /// `is_empty() == true` and `len() == 0`, and its iterators must
+    /// produce zero elements -- not panic, not read uninitialized memory.
+    #[test]
+    fn empty_list_reports_zero_length_and_iterates_to_nothing() {
+        let list = MoveList::new();
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+        assert_eq!(list.iter().count(), 0);
+        assert_eq!(list.into_iter().count(), 0);
+    }
+}
