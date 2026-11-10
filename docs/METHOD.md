@@ -125,7 +125,7 @@ rapporto di velocità:
 
 Per i confronti di velocità della 4.2.0 (PGO, AVX2, `MoveList`) è stato
 effettivamente usato **"media geometrica dei rapporti con bootstrap"** —
-non è un'invenzione del piano, è la regola scritta e seguita per quelle
+non è un metodo inventato qui, è la regola scritta e seguita per quelle
 misure specifiche, fissata in protocolli di lavoro non pubblicati nel
 repository (non in `BENCHMARKS.md`/`PERF_NOTES.md`/`HISTORY.md`). Il
 metodo, così come fissato in quei protocolli:
