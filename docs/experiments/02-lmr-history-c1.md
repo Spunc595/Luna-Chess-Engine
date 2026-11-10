@@ -404,10 +404,18 @@ esperimento, non un errore rispetto al precedente.
 
 ## Hash dei binari
 
-*(Da compilare al momento della build per la misura, non ora)*
+**COMPILATO 2026-11-10** (su Oracle, `cargo build --release`, nessun
+flag, `rustc 1.97.1`):
 
-- Build di riferimento (`rif`): commit `___`, sha256 `___`
-- Build nuova, per ciascun K pre-registrato: commit `___`, sha256 `___`
+- Build di riferimento (`rif`): commit `80b1648`, sha256
+  `651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436`
+  (identico al binario già usato nel pilota — build riproducibile).
+- Build candidato (K=250): commit `80b1648` + `c9844e9628c510df6ce61e38a82d75f78db0e1fe`,
+  sha256 `e56bac5ac31bce0c6a3f5d7adbae67bd5f1993096d3c5c82183cb2b6b78eef27`.
+- Sanity dei nodi su Oracle (`go depth 18`, Threads 1, le due
+  posizioni standard): riferimento 590.820/980.165 (identici
+  all'attesa), candidato 887.494/1.289.973 (identici all'attesa) —
+  **entrambi confermati, nessuna discrepanza.**
 
 ### Riferimento, candidato e procedura di build (AGGIUNTO 2026-11-10)
 
@@ -584,10 +592,77 @@ Nessuna partita nuova. Solo numeri, nessun giudizio.
 
 ## Seed e versioni degli script
 
-- Seed per l'ordine delle aperture: 20261103 (standard di progetto),
-  passato a `sprt_match.sh` come sesto argomento.
-- `scripts/sprt_match.sh` e `scripts/sprt_report.py`: versione = quella
-  del commit di origin/main al momento del lancio (da riportare).
+**COMPILATO 2026-11-10:**
+
+- Seed per l'ordine delle aperture dello SPRT vero: **20261103**
+  (standard di progetto). Seed del pilota (diverso, per costruzione):
+  20261110.
+- `scripts/sprt_match.sh`: versione di `origin/main` `80b1648`
+  (invariato, non modificato in questa sessione). **NON usabile
+  direttamente per questo esperimento** senza una variante dedicata:
+  vedi "Comando SPRT preparato" più sotto per il blocco esatto.
+- `scripts/sprt_report.py`: stessa versione, `80b1648`.
+- `cutechess-cli`: versione **1.5.1** (Qt 6.4.2, Ubuntu 24.04.4
+  LTS/arm64), installata su Oracle in `~/cutechess/build/`. Modello
+  SPRT: vedi "Modello SPRT realmente usato dallo strumento" sopra.
+- `rustc`/`cargo`: **1.97.1** (su Oracle, `~/.cargo/bin`) — diverso
+  dalla toolchain usata per le misure sulla macchina Windows locale in
+  questa stessa sessione (1.92.0): non un problema, perché riferimento
+  e candidato sono compilati entrambi con la STESSA toolchain di
+  Oracle, l'unica che conta per questo confronto.
+- `git`: 2.43.0 (su Oracle, solo per riferimento — gli archivi sono
+  stati creati localmente con `git archive` e trasferiti via `scp`,
+  non clonati su Oracle).
+
+## Comando SPRT preparato, NON eseguito (AGGIUNTO 2026-11-10)
+
+### BLOCCO trovato: `scripts/sprt_match.sh` non supporta i parametri di questo protocollo
+
+Letto `scripts/sprt_match.sh` (`80b1648`, invariato): **`elo1` e il
+libro sono CABLATI nello script, non parametri**:
+```
+SPRT="-sprt elo0=0 elo1=10 alpha=0.05 beta=0.05"   # elo1=10 fisso
+OPEN=$HOME/sprt2/openings/8moves_v3.pgn            # libro fisso, format=pgn
+```
+Questo protocollo richiede `elo1=5` e il libro `UHO_4060_v4.epd`
+(formato `epd`, non `pgn`). **Lo script condiviso NON è stato
+modificato** (stessa logica già applicata a `-recover`). Per lanciare
+davvero questo SPRT serve una variante dedicata (stesso schema già
+usato per `scripts/pilot_c1_concurrency.sh`, non ancora scritta: in
+attesa di conferma, come per `-recover`, se preferisci una copia
+dedicata o una modifica allo script condiviso). Concurrency, Hash,
+Threads, tc, `-repeat`, `-recover` nello script sono già quelli
+giusti e non vanno cambiati.
+
+### Riga di comando `cutechess-cli` equivalente (quella che la variante dedicata dovrebbe eseguire)
+
+```
+~/cutechess/build/cutechess-cli \
+  -engine name=A cmd=./luna dir=/home/ubuntu/c1_pilot/sprt_candidato proto=uci option.Hash=64 option.Threads=1 \
+  -engine name=B cmd=./luna dir=/home/ubuntu/c1_pilot/sprt_riferimento proto=uci option.Hash=64 option.Threads=1 \
+  -each tc=10+0.1 -openings file=/home/ubuntu/UHO_4060_v4.epd format=epd order=random -srand 20261103 \
+  -games 2 -rounds 8000 -repeat -concurrency 2 \
+  -draw movenumber=40 movecount=6 score=10 -resign movecount=4 score=600 -recover \
+  -ratinginterval 100 -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 \
+  -pgnout ~/c1_pilot/sprt_run/match.pgn > ~/c1_pilot/sprt_run/cutechess.log 2>&1
+```
+- `A` = candidato (K=250, sha256 `e56bac5a...eef27`), `B` = riferimento
+  (sha256 `651cf1a7...31a436`) — stessa convenzione A=candidato/
+  B=riferimento usata nei match storici G1-G5/D4/G2b.
+- `-rounds 8000` = tetto di 16.000 partite / 2 (`-games 2 -repeat`).
+- Percorso output: `~/c1_pilot/sprt_run/` (nuovo, non ancora creato).
+- Avvio staccato dalla sessione: `tmux new -d -s c1_sprt '<comando sopra>'`
+  (o `nohup ... &` con `disown`, equivalente). Controllo: `tmux attach
+  -t c1_sprt` per vedere l'output live, oppure `tail -f
+  ~/c1_pilot/sprt_run/cutechess.log` e `grep -c '^\[Event'
+  ~/c1_pilot/sprt_run/match.pgn` per il conteggio partite, senza
+  bisogno di restare attaccati alla sessione SSH.
+- Condizioni rilette ORA (2026-11-10, non prima): `nproc=4` ✓, bot
+  `luna-bot` fermo (`inactive`) ✓, spazio libero 5,7 GB ✓ (sopra la
+  soglia di 1 GB).
+
+**NON eseguito.** In attesa del via esplicito di Daniele, che deve
+anche decidere la questione dello script condiviso sopra.
 
 ## Dati e licenze
 
