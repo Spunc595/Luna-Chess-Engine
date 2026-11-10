@@ -83,6 +83,23 @@ più ampia di mosse (circa il 26-34% contro il 10-16% di K=250), con
 una quota di -1 significativamente più alta — questo è il motivo per
 cui K=125/100 sono stati proposti come varianti più "aggressive".
 
+**IMPORTANTE (2026-11-10), su COSA è stata misurata questa tabella**:
+i numeri sopra vengono da una copia con **C1 ATTIVO allo stesso K**
+(non dalla ricerca di BASE senza C1 della Fase 1) — cioè l'albero di
+ricerca visitato è già quello modificato da C1 per quel K, non quello
+originale. Questo è rilevante perché introduce una RETROAZIONE: una
+mossa con history alta viene ridotta di meno da C1 -> è cercata più a
+fondo -> una ricerca più profonda su una mossa già buona trova più
+spesso un cutoff -> il cutoff aggiorna di nuovo (al rialzo, per
+gravity) la history di quella stessa cella -> la prossima volta che
+quella cella compare in una posizione simile, l'history è ANCORA più
+alta di quanto sarebbe stata senza C1. Questo ciclo di
+auto-rinforzo (non presente nella misura di Fase 1, che usava la
+ricerca di base) è una spiegazione plausibile — non l'unica, non
+verificata oltre questa osservazione — del perché la coda positiva
+(+2) sia più pesante di quanto i percentili della Fase 1 (misurati
+SENZA C1) avrebbero suggerito.
+
 ## Tipo: FUNZIONALE
 
 Il gate di accettazione è l'SPRT, non la velocità (docs/METHOD.md §5).
@@ -107,6 +124,12 @@ rapporto (terzile alto / terzile basso) è:
 Altrimenti: esito "premessa non verificata", si chiude l'esperimento
 senza spendere partite SPRT. Soglie proposte dall'operatore (Daniele),
 non dall'assistente; non modificabili dopo aver visto i dati.
+
+**CORREZIONE DI ATTRIBUZIONE (2026-11-10)**: la frase sopra è
+sbagliata. Le soglie del criterio offline (>=1,3 sul bench, >=1,2 sul
+campione, >=10.000 riduzioni per terzile) le ha proposte
+**l'assistente**, in Fase 1, non Daniele. Testo originale lasciato
+sopra, non cancellato, per lo storico.
 
 ## Regola di decisione
 
@@ -138,10 +161,9 @@ come completamente indipendenti nel rischio di falso positivo — vedi
 - Nodi diversi dal riferimento, in qualunque posizione, PRIMA di
   lanciare qualunque partita: stop immediato, bug da correggere prima
   di procedere.
-- Una singola partita persa per tempo in un match SPRT: il match è
-  invalido per questo criterio (stessa regola usata per i match
-  storici, vedi `sprt_report.py`), si segnala e non si decide su quel
-  match.
+- **SOSTITUITO (2026-11-10)**: ~~Una singola partita persa per tempo
+  in un match SPRT: il match è invalido per questo criterio~~ — vedi
+  "Controllo delle terminazioni" più sotto per la regola nuova.
 - Se durante l'SPRT emerge un segno fortemente contrario (es. crash,
   mosse illegali) non dovuto a un carico della macchina: stop
   immediato, non si aspetta il tetto di partite.
@@ -217,16 +239,33 @@ partite per la stessa separazione di Elo rispetto ai test storici
 G1-G5/D4/G2b con lo stesso elo1 — un effetto del cambio di libro,
 non solo della finestra elo1=5 più stretta.
 
-**Tetto di partite: 16.000** (proposto: ~1,2x la stima peggiore sopra
-con l'assunzione conservativa `d=0,453`, per dare una probabilità
-ragionevole di risoluzione anche nel caso peggiore). Questo è **il
-doppio** della convenzione attuale di progetto (8.000, Clausola 1,
-`BENCHMARKS.md:650`): un costo esplicito di Oracle che Daniele deve
-confermare prima del lancio, non una scelta presa in autonomia qui.
-Se il tetto resta 8.000: il caso "effetto vicino a 0 o 5 Elo" (il più
-plausibile, vedi "Effetto atteso" sotto) molto probabilmente NON si
-risolve e finisce INCONCLUSIVO al tetto — dichiarato qui, prima dei
-dati.
+**Tetto di partite: 16.000, DA CONFERMARE DA DANIELE** (proposto:
+~1,2x la stima peggiore sopra con l'assunzione conservativa
+`d=0,453`, per dare una probabilità ragionevole di risoluzione anche
+nel caso peggiore). Questo è **il doppio** della convenzione attuale
+di progetto (8.000, Clausola 1, `BENCHMARKS.md:650`): un costo
+esplicito di Oracle che Daniele deve confermare prima del lancio, non
+una scelta presa in autonomia qui. Se il tetto resta 8.000: il caso
+"effetto vicino a 0 o 5 Elo" (il più plausibile, vedi "Effetto atteso"
+sotto) molto probabilmente NON si risolve e finisce INCONCLUSIVO al
+tetto — dichiarato qui, prima dei dati.
+
+### Durata (CORRETTO 2026-11-10): dato storico reale, non stima
+
+Sostituita la stima iniziale di 25 s/partita con il dato storico
+misurato da 3 match reali sulla stessa macchina Oracle, stesso TC
+(10+0,1), concurrency 2: G2b 14,39 s/partita (2.405 partite), G5 14,38
+s/partita (962 partite), D4 14,24 s/partita (2.202 partite) — **media
+≈14,34 s/partita**. Con questa media:
+- 12.800 partite (stima del caso peggiore a elo0/elo1, `d=0,50`) ≈
+  **51 ore**.
+- 16.000 partite (il tetto proposto sopra, **da confermare da
+  Daniele**) ≈ **64 ore**.
+
+Se lo SPRT gira sulla stessa macchina Oracle usata dal bot, il bot
+resta offline (o degradato a Threads=1 — vedi "CORREZIONE" nella
+sezione "Macchina e carico") per TUTTA questa durata, non solo per
+l'avvio: 51-64 ore sono giorni, non ore di un pomeriggio.
 
 ## Controllo del tempo
 
@@ -251,7 +290,7 @@ dentro al motore.
 del 2026-11-10), non per questo SPRT: per questo esperimento
 `-recover` resta, **nessuna modifica a `sprt_match.sh`**.
 
-### Controllo delle terminazioni (NUOVO, 2026-11-10)
+### Controllo delle terminazioni (CORRETTO 2026-11-10)
 
 Dopo la run (o periodicamente durante, non solo alla fine), contare
 per CIASCUN lato, dal PGN/log, il numero di: crash, disconnessioni,
@@ -259,13 +298,26 @@ sconfitte per tempo — stesso metodo già usato da `scripts/sprt_report.py`
 per il suo conteggio "GAMES LOST ON TIME" (`grep`/parsing delle
 `Termination` nel PGN che contengono "time", più le terminazioni
 anomale — illegal/stall/disconnect/crash — che lo stesso script separa
-già in una categoria dedicata). **Se questo conteggio è > 0 per il
-lato candidato (la build con C1), la run non si accetta senza
-un'indagine** — non si scarta automaticamente né si accetta
-ciecamente: si segnala e si capisce la causa prima di decidere.
-Perdite/crash sul lato di riferimento (`base_d3` o equivalente) sono
-comunque un segnale di macchina/ambiente da investigare, anche se non
-bloccano la decisione sul lato candidato allo stesso modo.
+già in una categoria dedicata).
+
+**Regola (sostituisce la precedente "> 0 = non si accetta")**:
+perdite a tempo per lato, calcolate sul totale delle partite di quel
+lato. Se, per OGNI lato, la percentuale è **<= 0,05%** E i due lati
+sono bilanciati (nessuno dei due ha più del doppio delle perdite a
+tempo dell'altro): si segnala il numero e si va avanti, la run resta
+valida su questo criterio. Altrimenti (sopra 0,05% su un lato, o uno
+sbilanciamento >2x fra i lati): si indaga prima di decidere, non si
+accetta né si scarta automaticamente.
+
+**Questa soglia (0,05%) è PROPOSTA, da confermare da Daniele** prima
+del lancio — non è ancora definitiva. Nota di contesto (non vincolante
+per questo esperimento, solo un precedente): `BENCHMARKS.md:1119-1121`
+documenta una regola simile già usata per il test IIR, con soglia
+diversa: "a single time loss does not by itself invalidate the run;
+it invalidates only if attributable to a machine anomaly, or if time
+losses exceed 0.5% of games" — dieci volte più permissiva della soglia
+proposta qui (0,05%). La differenza è una scelta di Daniele per questo
+esperimento, non un errore rispetto al precedente.
 
 ## Hash dei binari
 
@@ -273,6 +325,28 @@ bloccano la decisione sul lato candidato allo stesso modo.
 
 - Build di riferimento (`rif`): commit `___`, sha256 `___`
 - Build nuova, per ciascun K pre-registrato: commit `___`, sha256 `___`
+
+### Riferimento, candidato e procedura di build (AGGIUNTO 2026-11-10)
+
+- **Riferimento (`rif`)**: `origin/main` al commit `80b1648`, SENZA
+  C1 — nessun cherry-pick del commit di codice C1.
+- **Candidato**: stesso commit `80b1648` + SOLO il commit di codice C1
+  (`c9844e9628c510df6ce61e38a82d75f78db0e1fe`, K=250) sopra — nessun
+  altro commit del branch `lmr/history-c1` (i commit di questo stesso
+  branch sono tutti documentazione, tranne quello).
+- **Stessa toolchain e stessi flag per entrambi**: `cargo build
+  --release` da un archivio pulito (`git archive`) del commit
+  pertinente — stessa convenzione usata per tutte le build storiche
+  del progetto (`BENCHMARKS.md:70-71,112`, fra molte altre). Nessun
+  `RUSTFLAGS`/`target-cpu` speciale per aarch64 risulta documentato nel
+  repository per le build Oracle: la procedura storica compila
+  `cargo build --release` DIRETTAMENTE SU Oracle (nativo, non
+  cross-compilato) — `BENCHMARKS.md:868` ("binary built on Oracle from
+  the tag sources") per il bot, stesso schema per i binari di SPRT. Si
+  compilano quindi entrambe le build (`rif` e candidato) SUL box
+  Oracle stesso, con `cargo build --release`, nessun flag aggiuntivo.
+- I campi hash sopra restano vuoti fino a quando le due build non
+  saranno effettivamente compilate.
 
 ## Book e suo sha256 (EMENDATO 2026-11-10)
 
@@ -295,9 +369,7 @@ Non la macchina Windows locale (laptop, CPU AMD Ryzen 3 3200U, 2 core
 fisici, 4 logici): diagnosticata in questa stessa sessione (misura di
 velocità del Punto A, Fase 3) come rumorosa (carico di fondo 10-40% a
 seconda del momento, più processi VS Code/Explorer/webview2 in
-esecuzione) e con il clock corrente throttlato al 65% del massimo
-(1700/2600 MHz) anche con piano "Prestazioni elevate" e alimentazione
-da rete. Con solo 2 core fisici, una concurrency=2 di cutechess
+esecuzione). Con solo 2 core fisici, una concurrency=2 di cutechess
 occuperebbe l'intera macchina per giorni, rendendola inutilizzabile
 per il resto del lavoro.
 
@@ -307,6 +379,29 @@ tutti gli SPRT storici del progetto G1-G5/D4/G2b). Condizioni esatte
 dichiarare al momento del lancio, non ora: non documentato nel
 repository come regola generale (docs/METHOD.md §6), quindi va
 dichiarato esplicitamente per QUESTO match quando si lancia.
+
+### CORREZIONE (2026-11-10): Oracle ha oggi 2 core fisici, non 4
+
+Verificato per lettura su Oracle (`nproc`, `lscpu`): **2 core fisici
+(Ampere Neoverse-N1), 1 thread/core, nessun SMT** — NON 4 come scritto
+sopra e come dice il commento in `scripts/sprt_match.sh` (non
+modificato). Non è un errore di misura: `BENCHMARKS.md:1067` documenta
+che la VM Oracle fu "recreated as A1.Flex 2 OCPU/12GB after the
+2026-10-05 outage"; `BENCHMARKS.md:1125` mostra invece "A1.Flex 4
+OCPU/24GB" per una run del 2026-10-09 — la dimensione della VM è
+cambiata più volte nel tempo, e oggi (2026-11-10) è di nuovo a 2 OCPU.
+Il commento "4 cores" in `sprt_match.sh` era corretto quando scritto,
+non lo è più ora.
+
+**Conseguenza**: con concurrency=2, lo SPRT occupa TUTTA la macchina
+(2 core totali, nessuno libero). Il bot `luna-bot` è configurato
+Threads=2, Hash=512 (verificato in `config.yml`) — usa già entrambi i
+core quando cerca. Non è possibile far girare SPRT e bot insieme senza
+che si contendano la CPU. Due strade, decisione di Daniele da
+registrare AL MOMENTO DEL LANCIO (non qui, non ora):
+- fermare il bot per la durata dello SPRT (stesso precedente già
+  usato in `BENCHMARKS.md:1068`: "bot stopped for the run"), oppure
+- usare un'altra macchina per lo SPRT.
 
 ## Seed e versioni degli script
 
