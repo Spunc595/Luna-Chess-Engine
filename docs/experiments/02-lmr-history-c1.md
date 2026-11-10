@@ -146,6 +146,39 @@ sopra, non cancellato, per lo storico.
     D4/G2b in BENCHMARKS.md — chiuso, non riprovato sulla stessa base,
     il ramo resta archiviato).
 
+### REGOLA DI CONFERMA con gli slot invertiti (proposta dall'assistente, CONFERMATA da Daniele, 2026-11-10)
+
+**Motivo**: nel pilota riferimento-contro-riferimento (stesso binario
+nei due slot A e B), lo slot A ha vinto più del previsto per puro
+caso — z≈2,42 rispetto a un pareggio atteso (calcolo per intero più
+sotto, sezione "Statistiche del pentanomiale del pilota"). Probabile
+caso (un singolo campione a z≈2,4 non è straordinario), ma non
+escluso: un effetto sistematico legato allo SLOT (non al colore, già
+compensato da `-repeat`) resterebbe confuso con il segnale di C1 in
+un singolo SPRT, perché il candidato è SEMPRE nello slot A e il
+riferimento SEMPRE nello slot B, per tutta la run.
+
+**Regola**: se lo SPRT di K=250 (slot A=candidato, B=riferimento)
+**ACCETTA** il candidato (LLR raggiunge il limite H1), PRIMA di
+qualunque decisione di merge si ripete lo SPRT con gli **slot
+invertiti** (candidato come B, riferimento come A), stessi parametri
+(stesso tetto di 16.000 partite, stesso libro, stesso tc/Hash/
+Threads/concurrency), **seed 20261110** (non 20261103, per non
+riusare lo stesso ordine di aperture della prima run). Solo se anche
+questa conferma **ACCETTA**, si procede alla revisione del codice.
+Se la conferma è **INCONCLUSIVA o NEGATIVA**, non si procede (il
+risultato della prima run, da solo, non basta — potrebbe essere
+l'effetto di slot, non di C1).
+
+**Nota**: il LLR calcolato da `cutechess-cli` durante la run NON
+sfrutta l'informazione delle coppie a colori invertiti (`-repeat`
+garantisce che ogni apertura sia giocata da entrambi i colori, ma il
+modello BayesElo/trinomiale di `sprt.cpp` tratta ogni partita come
+un'osservazione indipendente — non costruisce un'analisi pentanomiale
+appaiata al volo). Questa regola di conferma è quindi un controllo
+ESTERNO allo strumento, non qualcosa che il `-sprt` di `cutechess-cli`
+fa già da solo.
+
 ## Zona grigia
 
 Se un K è ACCETTATO e l'altro NEGATIVO o INCONCLUSIVO: entra solo il K
@@ -266,15 +299,39 @@ Drift atteso del log-likelihood-ratio per partita, al vero valore
 
 | Effetto vero | d=0,50 (assunto) | d=0,453 (misurato a +48,6 Elo) | d=0,365 (**MISURATO dal pilota, a parità di forza — 73/200**) |
 |---|---|---|---|
+| -5 Elo (sotto elo0) | — | — | **≈5.420 partite** |
 | 0 Elo (= elo0, caso peggiore) | ≈12.800 partite | ≈14.000 partite | **≈16.250 partite** |
+| 2,5 Elo (**esattamente il punto di mezzo fra elo0 ed elo1**) | — | — | **nessun limite finito — vedi nota sotto** |
 | 5 Elo (= elo1, caso peggiore) | ≈12.800 partite | ≈14.000 partite | **≈16.250 partite** |
+| 7 Elo (oltre elo1) | — | — | **≈9.030 partite** |
 | 10 Elo (oltre elo1, risoluzione più rapida) | ≈4.300 partite | ≈4.700 partite | **≈5.420 partite** |
 
-La colonna `d=0,365` è la più affidabile delle tre: è l'unico dato
+**(AGGIUNTO 2026-11-10)** A 2,5 Elo (il punto medio esatto fra elo0=0
+ed elo1=5), il punteggio atteso `s(2,5)=0,503598` coincide, nei limiti
+della precisione usata, con il punto medio `(s0+s5)/2=0,503595`: il
+drift atteso del LLR è ESSENZIALMENTE ZERO, quindi la formula di Wald
+non dà un numero finito — è il punto in cui la risoluzione del test
+è più lenta in assoluto, non solo lenta. In pratica, su QUALUNQUE
+tetto finito di partite (16.000 incluso), un effetto vero vicino a
+2,5 Elo quasi certamente NON si risolve: **per un effetto vero
+compreso fra 0 e 5 Elo, l'esito più probabile di questo SPRT è
+INCONCLUSIVO al tetto di 16.000 partite**, non un ACCETTA o un
+NEGATIVO netto. Dichiarato qui, prima di sapere l'esito reale.
+
+La colonna `d=0,365` è la più affidabile delle quattro: è l'unico dato
 reale per `UHO_4060_v4.epd` a parità di forza (non estrapolato da un
 distacco ampio). Con questa colonna, la stima del caso peggiore
-(≈16.250) è ORA VICINA al tetto di 16.000 confermato sotto, non
+(≈16.250) è VICINA al tetto di 16.000 confermato sotto, non
 comodamente sotto come sembrava con le assunzioni precedenti.
+
+**Nota (AGGIUNTO 2026-11-10)**: tutte le stime di questa tabella usano
+il modello di Wald (normale, partite indipendenti), NON il modello
+reale di `cutechess-cli` (BayesElo/trinomiale — vedi sotto). Il LLR
+calcolato da `cutechess-cli` NON sfrutta l'informazione delle coppie
+a colori invertiti generate da `-repeat`: tratta ogni partita come
+un'osservazione indipendente, non fa un'analisi pentanomiale appaiata
+al volo per ridurre la varianza. Questo vale sia per questa tabella
+(che già assume partite indipendenti) sia per l'SPRT vero in corso.
 
 **Nessuno script di calcolo per questo esiste nel repository** (cercato,
 confermato assente): il calcolo sopra è fatto ora, con la formula
@@ -589,6 +646,28 @@ Nessuna partita nuova. Solo numeri, nessun giudizio.
 - **Termination** (solo il campo del PGN): "adjudication" 146/200,
   nessun tag 54/200 (finali normali: matto, 3-fold, 50 mosse,
   materiale insufficiente, stallo).
+
+### Statistiche del pentanomiale del pilota (AGGIUNTO 2026-11-10, calcolate dall'assistente)
+
+Per ogni coppia (stessa apertura, colori invertiti), somma del
+punteggio di A sulla coppia (valore nullo di riferimento = 1,0, cioè
+"A pareggia il conto" su una coppia qualunque se i due binari sono
+davvero identici). Varianza e deviazione standard campionarie (`n-1`
+partite); errore standard della media = `dev.std / sqrt(n)`; `z` =
+`(media - 1,0) / errore standard`.
+
+| Gruppo | n | media | varianza (camp.) | dev. std | errore standard | z (vs 1,0) |
+|---|---|---|---|---|---|---|
+| Tutte le 100 coppie | 100 | 1,1150 | 0,2265 | 0,4760 | 0,04760 | **2,4162** |
+| Prima metà (round 1-50) | 50 | 1,1900 | 0,2030 | 0,4505 | 0,06371 | **2,9822** |
+| Seconda metà (round 51-100) | 50 | 1,0400 | 0,2433 | 0,4932 | 0,06975 | **0,5735** |
+
+`z≈2,42` su tutte le 100 coppie coincide con il valore citato da
+Daniele. Nota, senza interpretarla oltre: lo z scende da 2,98 (prima
+metà) a 0,57 (seconda metà) — un singolo campione di questa ampiezza
+non permette di dire se sia un effetto che si attenua nel tempo o
+semplice rumore campionario su `n=50` per metà; non investigato oltre
+questi numeri.
 
 ## Seed e versioni degli script
 
