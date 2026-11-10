@@ -2,8 +2,8 @@
   Modello di protocollo per un esperimento su Luna.
 
   Come si usa:
-  1. Copia questo file in docs/experiments/NN-nome.md (NN = numero del punto
-     del piano, nome = nome breve dell'esperimento).
+  1. Copia questo file in docs/experiments/NN-nome.md (NN = numero
+     progressivo dell'esperimento, nome = nome breve dell'esperimento).
   2. Riempi TUTTO fino alla sezione "Esito" incluso COMMITTALO prima di
      guardare qualunque risultato. Il commit del protocollo è quello che
      va riportato come "hash del commit del protocollo" qui sotto e nel
@@ -40,15 +40,41 @@
        PIÙ `cargo test`. Solo DOPO questo gate si misura la velocità.
      - Funzionale: il gate è l'SPRT. Non si misura la velocità come
        criterio di accettazione: un cambiamento funzionale cambia i nodi
-       per costruzione. -->
+       per costruzione.
+     - Funzionale CHE probabilmente guadagna anche velocità (es. una
+       riduzione di `HIDDEN`): è comunque funzionale. L'accettazione resta
+       l'SPRT; la velocità si misura a parte, come informazione aggiuntiva,
+       non come criterio che decide se il cambiamento entra o no
+       (docs/METHOD.md §5). -->
 
 ## Metrica offline e soglia
 
-<!-- Il criterio economico da superare PRIMA di spendere partite SPRT
-     (docs/METHOD.md, regola generale 5 del piano): quale numero, quale
-     soglia, su quale campione. Se l'esperimento non ha un criterio
-     offline sensato, dillo esplicitamente e spiega perché si salta
-     direttamente a SPRT. -->
+<!-- Il criterio economico da superare PRIMA di spendere partite SPRT:
+     quale numero, quale soglia, su quale campione. Se l'esperimento non
+     ha un criterio offline sensato, dillo esplicitamente e spiega perché
+     si salta direttamente a SPRT. -->
+
+## Regola di decisione
+
+<!-- Fissata PRIMA dei dati, in modo che non si possa spostare dopo aver
+     visto i risultati.
+     - Per una misura di velocità (non funzionale): soglia su G (media
+       geometrica dei rapporti) e sul limite inferiore del suo intervallo
+       di confidenza — es. "G >= 1,05 E limite inferiore > 1,03" (vedi
+       docs/METHOD.md §3b per lo schema completo: 100 posizioni, 3 giri,
+       mediana per posizione, bootstrap 10.000 ricampionamenti).
+     - Per un SPRT (funzionale): i limiti elo0/elo1/alpha/beta qui sotto,
+       e cosa succede a ciascun esito (H0 accettato, H1 accettato, cap di
+       partite raggiunto senza decisione). -->
+
+## Zona grigia
+
+<!-- Cosa si fa se il risultato cade fra la soglia di scarto e quella di
+     proseguimento (es. un G sopra il rumore ma sotto la soglia del
+     candidato, o un SPRT che tocca il tetto di partite senza incrociare
+     né elo0 né elo1). Decidere ORA se si tratta come "scartato", "sospeso
+     in attesa di ri-misura su una base diversa" (vedi la lezione G2/G2b,
+     docs/METHOD.md §7) o qualcos'altro — non lasciarlo indefinito. -->
 
 ## Condizione di stop
 
@@ -57,6 +83,14 @@
      un numero di partite che supera un tetto. Dichiarare la condizione
      ora, non decidere a posteriori guardando i risultati parziali. -->
 
+## Effetto atteso e numero di partite previsto
+
+<!-- Quanto effetto (Elo, o percentuale di velocità) ci si aspetta
+     realisticamente, e quante partite/misure servono per avere una
+     possibilità ragionevole di rilevarlo con i limiti scelti sotto.
+     Collegato al campo successivo: se l'effetto atteso è piccolo rispetto
+     a elo1, dillo qui, non solo nei limiti SPRT. -->
+
 ## Limiti SPRT (solo esperimenti funzionali)
 
 - elo0 = <!-- -->
@@ -64,13 +98,21 @@
 - alpha = <!-- default nel progetto: 0.05 (BENCHMARKS.md:827) -->
 - beta = <!-- default nel progetto: 0.05 (BENCHMARKS.md:827) -->
 
+<!-- Motiva i limiti scelti rispetto all'effetto atteso dichiarato sopra:
+     con elo1=10, un guadagno atteso inferiore a 5 Elo è poco rilevabile
+     (il test è disegnato per distinguere H0 da un effetto di almeno
+     elo1, non per stimare con precisione un effetto molto più piccolo).
+     Se l'effetto atteso è piccolo, dillo e scegli elo0/elo1 di
+     conseguenza, invece di usare i default senza controllo. -->
+
 ## Controllo del tempo
 
 <!-- Tempo di controllo (tc) usato, IDENTICO per il lato di test e per il
      lato di controllo (docs/METHOD.md §6). Se l'esperimento riguarda
      direttamente il time management, dichiara qui se si misura "a tempo
-     vero" (obbligatorio per cambi di time management — mai a nodi fissi,
-     vedi punto D/4 del piano) o a profondità fissa. -->
+     vero" (obbligatorio per un cambiamento di time management: mai a nodi
+     fissi, perché l'intera idea è il comportamento sotto un orologio
+     reale) o a profondità fissa. -->
 
 ## Thread
 
@@ -110,6 +152,15 @@
 <!-- Seed fissi usati (per generazione posizioni, bootstrap, ordine delle
      aperture, ecc.) e hash/versione di ogni script coinvolto, così che
      la misura sia riproducibile da capo. -->
+
+## Dati e licenze
+
+<!-- Se l'esperimento genera o usa dati (posizioni self-play, output di
+     un'altra rete, dataset esterni): provenienza di ciascun dato e sua
+     licenza, e se la licenza dei dati usati per generarli si applica
+     anche a cosa viene generato (es. un dataset derivato da partite di
+     una rete con licenza non permissiva). Se non genera né usa dati
+     oltre a quelli già nel repository, scrivi "non applicabile". -->
 
 ## Numero di test previsti sullo stesso tema
 
