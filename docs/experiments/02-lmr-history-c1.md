@@ -48,6 +48,41 @@ verranno ricercate a profondità leggermente maggiore (meno ridotte),
 mosse con history bassa/negativa a profondità leggermente minore (più
 ridotte), a parità di tutto il resto.
 
+### CORREZIONE (Fase 2b, 2026-11-10): effetto atteso misurato, non solo dedotto
+
+Il codice è corretto e fedele alla formula pre-registrata sopra
+(`reduction -= (hist/K).clamp(-2,2)`, divisione intera troncata verso
+zero). L'errore era nella descrizione dell'effetto atteso qui sotto,
+scritta prima di misurarlo: con K=250 e la distribuzione REALE della
+history (Fase 1: p5=-132, p95=256 sul campione di 20 posizioni),
+l'aggiustamento è effettivamente 0 per la maggioranza delle mosse
+ridotte, ma NON "quasi solo +1" come scritto in una versione
+precedente di questa sezione — misurato su copia scratch (non
+committata, eliminata), sulle stesse 2 posizioni del bench e sul
+campione di 20 posizioni, divisione intera troncata:
+
+| K | gruppo | n | -2 | -1 | 0 | +1 | +2 |
+|---|---|---|---|---|---|---|---|
+| 250 | bench_mediogioco | 92.349 | 0,55% | 0,39% | **89,61%** | 3,62% | 5,83% |
+| 250 | bench_finale_pedoni | 81.030 | 0,16% | 1,14% | **83,95%** | 7,20% | 7,54% |
+| 250 | campione 20 pos. | 1.487.118 | 0,69% | 3,86% | **88,39%** | 2,32% | 4,74% |
+| 125 | bench_mediogioco | 104.000 | 2,63% | 13,99% | 68,27% | 4,38% | 10,73% |
+| 125 | bench_finale_pedoni | 105.157 | 1,27% | 4,16% | 70,33% | 4,85% | 19,38% |
+| 125 | campione 20 pos. | 1.362.189 | 4,39% | 12,48% | 73,92% | 2,28% | 6,93% |
+| 100 | bench_mediogioco | 105.812 | 2,27% | 5,48% | 77,10% | 3,41% | 11,74% |
+| 100 | bench_finale_pedoni | 104.136 | 2,84% | 7,79% | 66,40% | 4,47% | 18,50% |
+| 100 | campione 20 pos. | 1.435.195 | 7,62% | 13,82% | 67,89% | 2,46% | 8,21% |
+
+Con K=250: l'aggiustamento è 0 per ~84-90% delle mosse ridotte (come
+previsto per `|history| < 250`), ma della parte restante **+2 è
+spesso comparabile o maggiore di +1** (coda positiva estrema più
+pesante del previsto), e c'è una quota piccola ma non nulla di -1/-2
+(0,2-3,9%) — NON "quasi niente" come la descrizione precedente
+implicava. K=125 e K=100 attivano l'aggiustamento su una quota molto
+più ampia di mosse (circa il 26-34% contro il 10-16% di K=250), con
+una quota di -1 significativamente più alta — questo è il motivo per
+cui K=125/100 sono stati proposti come varianti più "aggressive".
+
 ## Tipo: FUNZIONALE
 
 Il gate di accettazione è l'SPRT, non la velocità (docs/METHOD.md §5).
