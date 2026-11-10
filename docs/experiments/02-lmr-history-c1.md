@@ -250,22 +250,30 @@ una scelta presa in autonomia qui. Se il tetto resta 8.000: il caso
 sotto) molto probabilmente NON si risolve e finisce INCONCLUSIVO al
 tetto — dichiarato qui, prima dei dati.
 
-### Durata (CORRETTO 2026-11-10): dato storico reale, non stima
+### Durata (CORRETTO/EMENDATO 2026-11-10): dato storico reale, due concurrency
 
 Sostituita la stima iniziale di 25 s/partita con il dato storico
 misurato da 3 match reali sulla stessa macchina Oracle, stesso TC
-(10+0,1), concurrency 2: G2b 14,39 s/partita (2.405 partite), G5 14,38
-s/partita (962 partite), D4 14,24 s/partita (2.202 partite) — **media
-≈14,34 s/partita**. Con questa media:
-- 12.800 partite (stima del caso peggiore a elo0/elo1, `d=0,50`) ≈
-  **51 ore**.
-- 16.000 partite (il tetto proposto sopra, **da confermare da
-  Daniele**) ≈ **64 ore**.
+(10+0,1), **concurrency 2**: G2b 14,39 s/partita (2.405 partite), G5
+14,38 s/partita (962 partite), D4 14,24 s/partita (2.202 partite) —
+**media ≈14,34 s/partita**. Il numero di core disponibile durante
+quelle misure storiche **va confermato da Daniele** (riferisce 4; il
+controllo odierno dell'istanza mostra 2 — vedi "Macchina e carico").
 
-Se lo SPRT gira sulla stessa macchina Oracle usata dal bot, il bot
-resta offline (o degradato a Threads=1 — vedi "CORREZIONE" nella
-sezione "Macchina e carico") per TUTTA questa durata, non solo per
-l'avvio: 51-64 ore sono giorni, non ore di un pomeriggio.
+| Partite | Concurrency 2 (dato storico) | Concurrency 3 (ASSUNZIONE: scala linearmente, da verificare col pilota) |
+|---|---|---|
+| 12.800 | ≈51 ore | ≈34 ore |
+| 16.000 (tetto proposto, **da confermare da Daniele**) | ≈64 ore | ≈43 ore |
+
+La colonna concurrency 3 è un'estrapolazione lineare (3/2 = 1,5x più
+rapida), NON misurata: il pilota sopra verifica se la scala è
+realistica su questa macchina prima di impegnare la run vera su
+quell'assunzione.
+
+Il bot `luna-bot` resta **fermo** (condizione di questo esperimento,
+non opzione — vedi "Macchina e carico") per TUTTA questa durata,
+pilota incluso, non solo per l'avvio: 34-64 ore sono comunque giorni,
+non ore di un pomeriggio.
 
 ## Controllo del tempo
 
@@ -279,9 +287,12 @@ come sono stati eseguiti G1-G5/D4.
 ## Thread
 
 Threads = 1 per entrambi i lati, Hash = 64, stesso TC (10+0.1) per
-entrambi i lati — come `scripts/sprt_match.sh`. Concurrency 2 lato
-cutechess (2 partite simultanee, come nello script), non Threads>1
-dentro al motore.
+entrambi i lati — come `scripts/sprt_match.sh`, non Threads>1 dentro
+al motore. **Concurrency (EMENDATO 2026-11-10): NON fissata a 2 qui**
+— decisa da un pilota prima della run vera, vedi "Pilota per la
+scelta della concurrency" nella sezione "Macchina e carico": 3 se il
+pilota passa, 2 (quella di `scripts/sprt_match.sh`) come ripiego se
+non passa.
 
 ### `-recover`: SI TIENE (corretto 2026-11-10, non più in discussione)
 
@@ -347,6 +358,10 @@ esperimento, non un errore rispetto al precedente.
   Oracle stesso, con `cargo build --release`, nessun flag aggiuntivo.
 - I campi hash sopra restano vuoti fino a quando le due build non
   saranno effettivamente compilate.
+- **Il pilota (vedi "Macchina e carico") usa SOLO la build di
+  riferimento, in due copie identiche** — nessuna build candidata
+  coinvolta, per costruzione: il pilota misura solo macchina/
+  concurrency, non deve poter dare alcuna informazione su C1.
 
 ## Book e suo sha256 (EMENDATO 2026-11-10)
 
@@ -380,28 +395,57 @@ dichiarare al momento del lancio, non ora: non documentato nel
 repository come regola generale (docs/METHOD.md §6), quindi va
 dichiarato esplicitamente per QUESTO match quando si lancia.
 
-### CORREZIONE (2026-11-10): Oracle ha oggi 2 core fisici, non 4
+### CORREZIONE (2026-11-10, emendata): bot fermo, 4 core richiesti, concurrency da pilota
 
-Verificato per lettura su Oracle (`nproc`, `lscpu`): **2 core fisici
-(Ampere Neoverse-N1), 1 thread/core, nessun SMT** — NON 4 come scritto
-sopra e come dice il commento in `scripts/sprt_match.sh` (non
-modificato). Non è un errore di misura: `BENCHMARKS.md:1067` documenta
-che la VM Oracle fu "recreated as A1.Flex 2 OCPU/12GB after the
-2026-10-05 outage"; `BENCHMARKS.md:1125` mostra invece "A1.Flex 4
-OCPU/24GB" per una run del 2026-10-09 — la dimensione della VM è
-cambiata più volte nel tempo, e oggi (2026-11-10) è di nuovo a 2 OCPU.
-Il commento "4 cores" in `sprt_match.sh` era corretto quando scritto,
-non lo è più ora.
+**Bot**: `luna-bot` resta FERMO per TUTTA la durata della run (misura
+vera e pilota incluso) — condizione di questo esperimento, non
+un'opzione. Stesso precedente già usato in `BENCHMARKS.md:1068` ("bot
+stopped for the run"). Mentre è fermo non gioca su Lichess.
 
-**Conseguenza**: con concurrency=2, lo SPRT occupa TUTTA la macchina
-(2 core totali, nessuno libero). Il bot `luna-bot` è configurato
-Threads=2, Hash=512 (verificato in `config.yml`) — usa già entrambi i
-core quando cerca. Non è possibile far girare SPRT e bot insieme senza
-che si contendano la CPU. Due strade, decisione di Daniele da
-registrare AL MOMENTO DEL LANCIO (non qui, non ora):
-- fermare il bot per la durata dello SPRT (stesso precedente già
-  usato in `BENCHMARKS.md:1068`: "bot stopped for the run"), oppure
-- usare un'altra macchina per lo SPRT.
+**Core**: gli SPRT storici del progetto girano con 4 core disponibili
+e il bot fermo (così riferisce Daniele). Nel controllo di oggi
+(sola lettura, `nproc`/`lscpu`) l'istanza risultava invece con
+**2 core fisici** (Ampere Neoverse-N1, nessun SMT) — NON 4 come dice
+il commento in `scripts/sprt_match.sh` (non modificato: riportato
+come discrepanza, non corretto nello script). Non è necessariamente
+un errore di misura: `BENCHMARKS.md:1067` documenta che la VM fu
+"recreated as A1.Flex 2 OCPU/12GB after the 2026-10-05 outage", mentre
+`BENCHMARKS.md:1125` mostra "A1.Flex 4 OCPU/24GB" per una run del
+2026-10-09 — la dimensione è cambiata nel tempo.
+
+**CONDIZIONE AL LANCIO (misura vera E pilota)**: verificare `nproc`
+da shell PRIMA di partire. Se `nproc` non riporta **4**, NON lanciare
+(né il pilota né la run vera): avvisare Daniele, che ripristina i 4
+core dalla console Oracle prima di procedere.
+
+### Pilota per la scelta della concurrency (fissato ORA, prima dei dati)
+
+- **Candidato**: concurrency **3** (un core libero per cutechess e
+  sistema). Ripiego: concurrency **2** (quella di `scripts/sprt_match.sh`).
+- **Pilota**: 200 partite **riferimento contro riferimento** (due
+  copie della STESSA build di riferimento — nessuna build candidata:
+  il pilota non deve dare alcuna informazione su C1), stessi parametri
+  dello SPRT (`UHO_4060_v4.epd` sha256 di questo protocollo, tc
+  10+0,1, Threads=1, Hash=64, `-repeat`, `-recover` come lo script),
+  concurrency 3, bot fermo, `nproc=4` verificato, **seed 20261110**
+  (diverso dal seed 20261103 dello SPRT vero).
+- Le partite del pilota **non entrano** nei risultati dello SPRT.
+- **Il pilota PASSA se TUTTE queste condizioni valgono**:
+  (a) zero perdite a tempo, zero crash/disconnessioni/terminazioni
+      anomale (stesso conteggio di "Controllo delle terminazioni");
+  (b) load average a 1 minuto <= 3,0 durante il pilota (campionato
+      ogni 30 s);
+  (c) secondi/partita <= 12 (a concurrency 2 lo storico è 14,34 s; a
+      concurrency 3, se la scala fosse lineare, ci si aspetta
+      ~9-10 s — sotto 12 il vantaggio di concurrency 3 è reale);
+  (d) nessun segnale fortemente anomalo (partite troncate, motori non
+      partiti).
+- **Se il pilota NON passa**: concurrency 2 per tutta la run, SENZA
+  un secondo pilota. **Se passa**: concurrency 3 per tutta la run.
+  La concurrency scelta resta COSTANTE per tutta la run e va
+  dichiarata nel report prima del lancio della misura vera.
+- **Dopo la prima ora della run vera** (non solo del pilota):
+  controllare load average e perdite a tempo per lato, stesso metodo.
 
 ## Seed e versioni degli script
 
