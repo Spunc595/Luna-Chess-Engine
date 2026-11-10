@@ -210,6 +210,66 @@ per la stessa ragione della lezione G2/G2b (docs/METHOD.md §7).
 
 Non applicabile: nessun dato generato, nessuna rete esterna usata.
 
+## Script di misura e di analisi
+
+Lo script usato per le misure E1/E2/F/PGO della 4.2.0 **non è stato
+reperito**: ricerca effettuata su (a) il bundle
+`lavoro\backup\perf42_20261103.bundle` (storia completa, 168 commit,
+3 teste: `perf-4.2-dev`, `perf-4.2-avx2-only`, `perf-opt`) con `git
+grep` di "bootstrap", "pgo_test_fens", "20261103", "geometric",
+"interleav" su ogni commit — nessun file `.py`/`.ps1`/`.sh` oltre al
+già noto `scripts/bench_suite.py` (che misura solo le 2 posizioni
+standard a profondità 18, non le 100 con bootstrap); (b) le cartelle
+scratchpad di sessioni precedenti e i progetti `.claude` — vuote o
+senza riferimenti; (c) le cartelle accanto ai CSV storici citati in
+`HANDOFF_4.2.0.md` (`lavoro\pgo\`, `lavoro\pgo42\`) — contengono solo
+i CSV, i binari ed i `.tar` del sorgente, nessuno script.
+
+Questo esperimento usa quindi **script nuovi**, scritti per questo
+esperimento, non un riuso:
+
+- `scripts/measure_speed_fase3.py` — misura: tre motori UCI
+  (riferimento, nuova, copia byte-identica), rotazione a quadrato
+  latino fra le tre build per posizione e per giro (`offset =
+  (posizione + giro) mod 3`, dichiarata nel docstring dello script),
+  tempo = orologio a parete (`time.perf_counter`) intorno al comando
+  `go depth`, non il tempo riportato dal motore. Uscita: CSV grezzo
+  con lo STESSO schema dei CSV storici della 4.2.0
+  (`posizione,build,giro,nodi,tempo_ms`, `tempo_ms` con decimali),
+  più una colonna in fondo (`ordine_rotazione`). Un mismatch di nodi
+  fra rif e nuova viene scritto comunque nel CSV e segnalato in un
+  file `<output>.mismatches.txt`, non scartato in silenzio.
+- `scripts/speed_stats_fase3.py` / `scripts/analyze_speed_fase3.py` —
+  analisi: mediana dei giri per posizione, rapporto tempo_rif /
+  tempo_x, media geometrica G, IC95% per bootstrap sulle posizioni
+  (10.000 ricampionamenti, seme da riga di comando) — lo stesso
+  METODO documentato nei `PREREG_*.md` locali, non la stessa
+  implementazione.
+- `scripts/test_speed_stats_fase3.py` — test sintetico con risultato
+  noto (rapporti tutti = 1,03 -> G = 1,03 e IC degenerato; rapporti
+  simmetrici attorno a 1 -> G = 1 e IC che contiene 1), eseguito e
+  verde PRIMA di qualunque misura reale.
+- **Validazione aggiuntiva su dati reali**: `analyze_speed_fase3.py`
+  eseguito sui CSV storici `pgo42_E1_measurements.csv` (rif vs E1) e
+  `pgo_test_measurements.csv` (A vs B, seme 20261103 per entrambi)
+  riproduce ESATTAMENTE (entro le tolleranze dichiarate prima
+  dell'esecuzione: G entro 0,0005, estremi IC entro 0,002) i valori
+  riportati in `HANDOFF_4.2.0.md` righe 105 e 107: E1 G=0,9908
+  IC95%[0,9837;0,9980]; PGO G=1,0661 IC95%[1,0582;1,0740]. Mancano su
+  disco (citati in HANDOFF_4.2.0.md righe 61, 72 ma non trovati)
+  `pgo42_E2b_measurements.csv` e `pgo_train_measurements.csv`: un
+  buco di documentazione segnalato qui, non un blocco per questo
+  esperimento.
+
+Sha256 degli script (commit `b7a167587426286156e33371a533fdc671672814`):
+- `scripts/measure_speed_fase3.py`: `0196be1feaa478d202350a66d27db05e9da2bf2ce36f33652270e1c4fb2e36d8`
+- `scripts/speed_stats_fase3.py`: `dd3c28e4dfdaa4e1c015eae198d78a6059de6d806a5fec0d898705328f9a1138`
+- `scripts/analyze_speed_fase3.py`: `e4df191cf25242d4caceffe5650348f925d01a586c0f49d41208ba2f2c451043`
+- `scripts/test_speed_stats_fase3.py`: `ef2e379ec259caa578ddfb437bb8171c8f5b5a8e94665302ecdd983f1b295d57`
+
+Le soglie e la regola di decisione NON cambiano per questo motivo:
+restano quelle fissate sopra, prima dei dati.
+
 ## Hash del commit del protocollo
 
 Da riportare nel report, dopo il commit di questo stesso file.
