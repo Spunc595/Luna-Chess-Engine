@@ -618,6 +618,37 @@ fn score_move_qsearch(m: &Mossa, board: &Scacchiera, tt_move: Mossa, capture_his
 }
 
 #[cfg(test)]
+mod score_move_qsearch_tests {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+
+    fn sq(file: char, rank: u8) -> usize {
+        let f = (file as u8 - b'a') as usize;
+        let r = (rank - 1) as usize;
+        r * 8 + f
+    }
+
+    /// Punto A verification (e): a quiet promotion (promotion, NOT a
+    /// capture) must score 15000 + promoted piece value in
+    /// `score_move_qsearch`, same as `score_move`. This branch never
+    /// calls `see()`, so it is untouched by the Punto A change itself,
+    /// but no existing gate position was confirmed to exercise it --
+    /// hence this dedicated test.
+    #[test]
+    fn quiet_promotion_scores_15000_plus_value() {
+        let z = ZobristKeys::default();
+        let board = Scacchiera::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1", &z);
+        let m = Mossa::new(sq('a', 7), sq('a', 8), MoveFlag::Promotion, Some(Pezzo::Regina));
+        let capture_history: [[[AtomicI32; 6]; 64]; 6] =
+            std::array::from_fn(|_| std::array::from_fn(|_| std::array::from_fn(|_| AtomicI32::new(0))));
+        assert_eq!(
+            score_move_qsearch(&m, &board, Mossa::null(), &capture_history),
+            15000 + Pezzo::Regina.valore()
+        );
+    }
+}
+
+#[cfg(test)]
 mod see_tests {
     use super::*;
     use crate::zobrist::ZobristKeys;
