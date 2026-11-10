@@ -24,6 +24,35 @@
 
 <!-- Una frase verificabile: cosa ci si aspetta e perché. -->
 
+## Stato dell'arte
+
+<!-- AGGIUNTO 2026-11-10: campo valido per i protocolli scritti da
+     questa data in avanti. I protocolli già scritti (01, 02, la bozza
+     sulla mobilità sicura) non si aggiornano retroattivamente.
+
+     Fonti consultate e data della ricerca (es. Chess Programming
+     Wiki, TalkChess, codice/discussioni di altri motori, letteratura)
+     — se non si è cercato, scrivi "non cercato", non lasciare il
+     campo vuoto.
+
+     Poi UNA delle tre formule, obbligatoria:
+     - "già noto (riferimenti: ...)"
+     - "variante di <tecnica nota> (riferimenti: ...)"
+     - "non trovato nelle fonti elencate"
+
+     AVVERTENZA: "non trovato" NON significa "nuovo" — dice solo che
+     non l'abbiamo trovato in QUELLE fonti con QUELLA ricerca limitata.
+     Non scrivere mai "nuovo" o "originale" senza una ricerca
+     documentata qui.
+
+     Esempio (neutro, non riferito a un esperimento reale):
+     "Cercato su Chess Programming Wiki e TalkChess il 2026-11-10:
+     variante di 'history-based LMR adjustment' (riferimenti: pagina
+     CPW 'Late Move Reductions', thread TalkChess del 2019 su
+     continuation history e LMR) — non trovato un uso identico della
+     stessa formula su history grezza invece che su continuation
+     history." -->
+
 ## Cambiamento esatto
 
 <!-- File, funzione, righe toccate. Per un cambiamento funzionale, anche
@@ -53,6 +82,31 @@
      quale numero, quale soglia, su quale campione. Se l'esperimento non
      ha un criterio offline sensato, dillo esplicitamente e spiega perché
      si salta direttamente a SPRT. -->
+
+## Valore di conoscenza
+
+<!-- AGGIUNTO 2026-11-10: campo valido per i protocolli scritti da
+     questa data in avanti (stessa regola di "Stato dell'arte" sopra:
+     non retroattivo).
+
+     Formulato PRIMA dei risultati: cosa si impara comunque, anche se
+     l'Elo risulta nullo o negativo — quale misura, distribuzione,
+     correlazione, o risultato negativo esce comunque
+     dall'esperimento, al di là del semplice "accettato/respinto".
+     Dove verrà registrato (docs/PERF_NOTES.md, docs/METHOD.md, un
+     altro file). Se potrebbe valere una nota pubblica: sì/no, e con
+     quale regola (prima di pubblicare qualunque cosa all'esterno, si
+     chiede conferma a Daniele — questo non cambia, va solo ricordato
+     qui).
+
+     Esempio (neutro, non riferito a un esperimento reale):
+     "Anche con Elo nullo, la distribuzione dell'aggiustamento
+     calcolato per mossa (percentili, quota a 0 / non a 0) resta un
+     dato utile su quanto il segnale usato sia effettivamente attivo
+     in pratica — da registrare in docs/PERF_NOTES.md indipendentemente
+     dall'esito SPRT. Possibile nota pubblica se il meccanismo è
+     interessante anche a Elo nullo; da confermare con Daniele prima
+     di qualunque pubblicazione." -->
 
 ## Regola di decisione
 
@@ -196,3 +250,11 @@
 ### Risultati misurati
 
 ### Esito (positivo / negativo / non concludente) e perché, se noto
+
+### Cosa abbiamo imparato (anche se negativo)
+
+<!-- AGGIUNTO 2026-11-10: campo valido per i protocolli scritti da
+     questa data in avanti (non retroattivo). Risponde a quanto
+     dichiarato in "Valore di conoscenza" sopra, con i numeri REALI
+     dell'esperimento: cosa si è effettivamente imparato, al di là
+     dell'esito accettato/respinto/non concludente. -->
