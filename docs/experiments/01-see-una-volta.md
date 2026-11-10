@@ -270,6 +270,60 @@ Sha256 degli script (commit `b7a167587426286156e33371a533fdc671672814`):
 Le soglie e la regola di decisione NON cambiano per questo motivo:
 restano quelle fissate sopra, prima dei dati.
 
+## Esito della misura (2026-11-10)
+
+**Gate di correttezza**: nodi IDENTICI rif/nuova su tutte le 300
+posizione/giro misurate (100 posizioni x 3 giri), 0 mismatch. `cargo
+test --release` verde (vedi Fase 2). 900 righe grezze nel CSV
+(`misura_fase3_reale.csv`, sha256
+`4c8dc94ef827991d1a02830d653ab6b091bfb59f149c6a51cb178742bfe20be6`),
+durata 1353,6 s (≈22,6 min).
+
+**Statistica** (bootstrap 10.000 ricampionamenti):
+
+| Confronto | Seme | G | IC95% |
+|---|---|---|---|
+| rif / nuova | 20261103 (decide) | 1,0130 | [1,0027; 1,0266] |
+| rif / nuova | 20261110 (controllo) | 1,0130 | [1,0028; 1,0261] |
+| rif / copia (byte-identica) | 20261103 | 1,0115 | [0,9993; 1,0263] |
+| rif / copia (byte-identica) | 20261110 | 1,0115 | [0,9993; 1,0260] |
+
+**Validità della run**: la copia byte-identica dà G = 1,0115, FUORI
+dall'intervallo richiesto [0,995; 1,005] (l'IC95% include 1, ma questo
+non basta: la regola richiede ENTRAMBE le condizioni). **La run è NON
+VALIDA.** Per la stessa copia di sé stesso, un apparente guadagno di
+velocità dell'1,15% è più grande della soglia di rumore ammessa
+(0,5%): il "segnale" di G=1,0130 su rif/nuova (+1,3%) non è
+distinguibile dal rumore di questa run.
+
+**La regola di decisione NON è stata applicata** a rif/nuova per
+questo motivo (come previsto dal protocollo in caso di run non
+valida): i numeri sopra sono riportati, non usati per decidere.
+
+**Carico macchina durante la misura** (campionamento ogni 30 s,
+`carico_fase3.csv`, sha256
+`10908ed91d847a363c01b9cf35fd61c68e672bac2b6cf699205821a682255d28`,
+45 campioni, 2026-11-10 09:59:51 - 10:22:01):
+- logico 0: media 12,83%, min 6,14%, max 39,08%
+- logico 1: media 10,69%, min 4,36%, max 40,28%
+- logico 2 (core fissato per la ricerca): media 97,40%, min 7,91%
+  (ultimo campione, a processo già terminato), max 100%
+- logico 3 (gemello SMT del 2): media 6,66%, min 1,47%, max 33,16%
+- "% Processor Performance": non raccolto (il contatore
+  `\Processor Information(_Total)\% Processor Performance` non è
+  risolvibile su questa macchina con `Get-Counter`, nome
+  probabilmente localizzato diversamente; colonna "NA" nel CSV).
+
+Causa più probabile della non-validità: picchi di carico di fondo
+(fino al 40% su logico 0/1, fino al 33% sul gemello SMT del core
+fissato) durante una misura su CPU a 2 core fisici — coerente con la
+diagnosi già fatta prima del "vai" (velocità ~2,1-2,3x più lenta dello
+storico, dispersione fino al 16% tra giri sulla stessa build).
+
+**Decisione**: non si ripete senza un via libera esplicito. Il ramo
+resta con l'esperimento NON deciso (né accettato né respinto): manca
+un dato valido, non un risultato negativo.
+
 ## Hash del commit del protocollo
 
 Da riportare nel report, dopo il commit di questo stesso file.
