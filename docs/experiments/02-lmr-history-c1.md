@@ -31,7 +31,7 @@ entrano in questo blocco — vedi punto 1c del report):
 
 ```
 let hist = sh.history[side_to_move][m.da()][m.a()].load(Ordering::Relaxed);
-let hist_adj = (hist / K).clamp(-2, 2);   // K da scegliere, vedi sotto
+let hist_adj = (hist / K).clamp(-2, 2);   // K=250 per la prima misura, vedi "Numero di test previsti"
 reduction = (reduction - hist_adj).clamp(0, new_depth - 2);
 ```
 
@@ -123,31 +123,75 @@ risultati entrambi inconclusivi. È plausibile che anche questo
 cambiamento risulti in un effetto sotto la soglia elo1 scelta sotto,
 o nullo — dichiarato qui, prima dei dati, apposta.
 
-## Limiti SPRT (solo se il criterio offline è superato)
+## Limiti SPRT (EMENDATO 2026-11-10, dopo la Fase 1)
 
 - elo0 = 0
-- elo1 = 10
-- alpha = 0.05 (default di progetto, `BENCHMARKS.md:827`)
-- beta = 0.05 (default di progetto, `BENCHMARKS.md:827`)
+- elo1 = **5** (emendato da 10: Daniele ha scelto una finestra più
+  stretta, pagata con più partite — vedi calcolo sotto)
+- alpha = 0.05
+- beta = 0.05
 
-Motivazione: questi sono i limiti di default del progetto, usati per
-quasi tutti gli SPRT storici (G1, G2, G3, G5, D4, G2b — vedi
-`BENCHMARKS.md`). Un elo1 più basso (es. 5) richiederebbe circa 4 volte
-più partite per la stessa potenza statistica (il numero di partite
-scala circa come 1/elo1²), il che — vista la macchina necessaria (vedi
-"Macchina e carico" sotto, Oracle, risorsa condivisa con altri
-esperimenti del progetto) — non è praticabile ora. Questo è un
-compromesso dichiarato, non un'omissione: con elo1=10, un guadagno
-reale ma piccolo (1-5 Elo) molto probabilmente NON supererà la soglia
-elo1 e il test finirà INCONCLUSIVO al tetto di partite, anche se
-l'ipotesi fosse vera in piccola misura. Si accetta questo rischio
-perché misurare con precisione un effetto così piccolo costerebbe più
-partite di quante l'infrastruttura attuale possa permettersi per un
-singolo esperimento.
+### Calcolo del numero atteso di partite (formula standard di Wald/SPRT)
 
-**Tetto di partite: 8.000** (convenzione attuale di progetto, "Clausola
-1" in `BENCHMARKS.md:650`, che sostituisce il vecchio tetto di 12.000
-usato nei test più vecchi come G2).
+Modello trinomiale (vittoria/pareggio/sconfitta), punteggio per
+partita `s = w + d/2`. Punteggio atteso da un dato Elo (formula
+logistica standard): `s(elo) = 1 / (1 + 10^(-elo/400))`.
+
+- s(0) = 0,50000
+- s(5) = 0,50719
+- s(10) = 0,51439
+
+Varianza del punteggio per partita, a `s=0,5` e tasso di pareggi `d`:
+`Var = (1-d)/4` (derivazione: con `w=l=(1-d)/2` a `s=0,5`, i pareggi
+contribuiscono zero alla varianza perché la loro deviazione dalla
+media è esattamente zero in quel punto).
+
+**Tasso di pareggi, ASSUNZIONE dichiarata (non misurato per
+UHO_4060_v4.epd a parità di forza)**: `d=0,50`. L'unico dato reale nel
+repository per questo libro è 45,3% (`BENCHMARKS.md:1245`), ma misurato
+a +48,6 Elo di distacco (un distacco ampio riduce i pareggi
+indipendentemente dal libro), quindi probabilmente SOTTOSTIMA il tasso
+a parità di forza. 0,50 è una stima di mezzo, dichiarata come tale.
+Sensibilità mostrata sotto anche con `d=0,453` (il valore misurato,
+come limite conservativo).
+
+Confini SPRT (Wald, normale): `a = ln((1-beta)/alpha) = ln(19) ≈
+2,9444`, `b = -a ≈ -2,9444` (simmetrico perché alpha=beta).
+
+Drift atteso del log-likelihood-ratio per partita, al vero valore
+`s_vero`: `E[Z] = (s1-s0)/Var * (s_vero - (s0+s1)/2)`.
+
+**Numero atteso di partite** (formula di Wald per il caso normale,
+`E[N] = [(1-alpha)*b_eff + alpha*a_eff] / E[Z]` al confine pertinente):
+
+| Effetto vero | d=0,50 | d=0,453 (misurato, conservativo) |
+|---|---|---|
+| 0 Elo (= elo0, caso peggiore) | **≈12.800 partite** | ≈14.000 partite |
+| 5 Elo (= elo1, caso peggiore, simmetrico a 0 per alpha=beta) | ≈12.800 partite | ≈14.000 partite |
+| 10 Elo (oltre elo1, risoluzione più rapida) | ≈4.300 partite | ≈4.700 partite |
+
+**Nessuno script di calcolo per questo esiste nel repository** (cercato,
+confermato assente): il calcolo sopra è fatto ora, con la formula
+standard di Wald applicata al modello trinomiale — mostrato per
+intero, non un numero preso da altrove.
+
+**Nota non ovvia**: usare `UHO_4060_v4.epd` (tasso di pareggi più
+basso di `8moves_v3.pgn`, usato storicamente da `sprt_match.sh`)
+AUMENTA la varianza per partita a parità di `s`, quindi RICHIEDE PIÙ
+partite per la stessa separazione di Elo rispetto ai test storici
+G1-G5/D4/G2b con lo stesso elo1 — un effetto del cambio di libro,
+non solo della finestra elo1=5 più stretta.
+
+**Tetto di partite: 16.000** (proposto: ~1,2x la stima peggiore sopra
+con l'assunzione conservativa `d=0,453`, per dare una probabilità
+ragionevole di risoluzione anche nel caso peggiore). Questo è **il
+doppio** della convenzione attuale di progetto (8.000, Clausola 1,
+`BENCHMARKS.md:650`): un costo esplicito di Oracle che Daniele deve
+confermare prima del lancio, non una scelta presa in autonomia qui.
+Se il tetto resta 8.000: il caso "effetto vicino a 0 o 5 Elo" (il più
+plausibile, vedi "Effetto atteso" sotto) molto probabilmente NON si
+risolve e finisce INCONCLUSIVO al tetto — dichiarato qui, prima dei
+dati.
 
 ## Controllo del tempo
 
@@ -160,9 +204,26 @@ come sono stati eseguiti G1-G5/D4.
 
 ## Thread
 
-Threads = 1 per entrambi i lati (`scripts/sprt_match.sh`: `option.Threads=1`
-per entrambi i motori). Concurrency 2 lato cutechess (2 partite
-simultanee, come nello script), non Threads>1 dentro al motore.
+Threads = 1 per entrambi i lati, Hash = 64, stesso TC (10+0.1) per
+entrambi i lati — come `scripts/sprt_match.sh`. Concurrency 2 lato
+cutechess (2 partite simultanee, come nello script), non Threads>1
+dentro al motore.
+
+### Modifica proposta a `-recover` (NON applicata ora, da confermare)
+
+`scripts/sprt_match.sh` include `-recover` di default (riga con
+`-draw ... -resign ... -recover`). Daniele ha chiesto NO `-recover`
+per questo esperimento, stessa logica già adottata per i match di
+sicurezza (`docs/METHOD.md`, regola del 2026-11-10: un crash deve
+risultare come tale, non essere mascherato da un riavvio automatico
+del motore). **Modifica proposta, non fatta**: togliere `-recover`
+dalla riga di comando di `cutechess-cli` in `sprt_match.sh` (o
+duplicare lo script in una variante senza quel flag, per non toccare
+lo script usato dagli altri esperimenti in corso). Mi fermo su questo
+punto: nessuna modifica a `sprt_match.sh` è stata fatta in questa
+sessione, in attesa di conferma su QUALE delle due strade preferire
+(modificare lo script condiviso, o crearne una copia dedicata a questo
+esperimento).
 
 ## Hash dei binari
 
@@ -171,14 +232,20 @@ simultanee, come nello script), non Threads>1 dentro al motore.
 - Build di riferimento (`rif`): commit `___`, sha256 `___`
 - Build nuova, per ciascun K pre-registrato: commit `___`, sha256 `___`
 
-## Book e suo sha256
+## Book e suo sha256 (EMENDATO 2026-11-10)
 
-`8moves_v3.pgn`, sha256
-`5835239f88cc2c7511b177c32392a69f3ede21819cf0616f80a7f907cd21d17e`
-(`BENCHMARKS.md:1112`), stesso libro per entrambi i lati, order=random
-con seed (vedi sotto) — come `scripts/sprt_match.sh`. NON
-`UHO_4060_v4.epd` (quello è per i match di sicurezza, non per gli
-SPRT di questo script).
+`UHO_4060_v4.epd`, sha256
+`3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca`
+(`BENCHMARKS.md:1209`) — scelta di Daniele, diversa dal libro
+`8moves_v3.pgn` usato di default da `scripts/sprt_match.sh` per gli
+SPRT storici G1-G5/D4/G2b. Stesso libro per entrambi i lati,
+`-repeat` (ogni apertura giocata da entrambi i lati). Conseguenza
+dichiarata: un Elo misurato con questo libro non è direttamente
+comparabile a un Elo misurato con `8moves_v3.pgn` (tassi di pareggio
+diversi — vedi il calcolo del numero di partite sopra); e vale
+l'avvertenza generale di `BENCHMARKS.md:1285-1289` su questo libro
+(deliberatamente sbilanciato, pensato per separare più nettamente due
+motori, non per un Elo "neutro").
 
 ## Macchina e carico
 
@@ -210,25 +277,20 @@ dichiarato esplicitamente per QUESTO match quando si lancia.
 
 Non applicabile: nessun dato generato, nessuna rete esterna usata.
 
-## Numero di test previsti sullo stesso tema
+## Numero di test previsti sullo stesso tema (EMENDATO 2026-11-10)
 
-2: **K=250** ("mite": all'estremo p95 del campione di 100 posizioni,
-history≈256, l'aggiustamento è ≈1 ply; all'estremo p5, history≈-132,
-≈-1 ply) e **K=125** ("aggressivo": stesso p95≈256 dà un aggiustamento
-≈2 ply; p5≈-132 dà ≈-1 ply) — vedi report di chat per i percentili
-completi da cui sono derivati. Trattati
-come test CORRELATI, non indipendenti: stessa ipotesi, stesso
-meccanismo, stessa history. Nessuna correzione formale esiste nel
-repository per il rischio di falso positivo cumulato
-(docs/METHOD.md §7): la mitigazione scelta qui è procedurale, non
-statistica — se il primo K (quello più mite, vedi report) risulta
-INCONCLUSIVO o NEGATIVO, il secondo K si misura comunque (sono
-entrambi pre-registrati ora); se il primo K è ACCETTATO, il secondo si
-misura comunque per completare quanto pre-registrato, ma un K
-ACCETTATO dopo che l'altro era già ACCETTATO non si considera una
-conferma indipendente dello stesso effetto (stessa lezione G2/G2b,
-docs/METHOD.md §7) — vedi "Zona grigia" sopra per cosa succede in quel
-caso.
+**UN SOLO K per ora: K=250** ("mite": all'estremo p95 del campione di
+20 posizioni, history≈256, l'aggiustamento è ≈1 ply; all'estremo p5,
+history≈-132, ≈-1 ply — vedi report di chat per i percentili
+completi). `K=125` ("aggressivo", ≈2 ply all'estremo positivo) è
+pre-registrato come SECONDO test, ma si misura SOLO SE K=250 non
+risulta NEGATIVO (cioè se è ACCETTATO o INCONCLUSIVO) — a differenza
+della versione precedente di questo protocollo, che prevedeva
+entrambi comunque. Trattati come test CORRELATI, non indipendenti
+(stessa ipotesi, stesso meccanismo, stessa history): se K=250 è
+ACCETTATO e si misura anche K=125, un K=125 ACCETTATO non si considera
+una conferma indipendente (stessa lezione G2/G2b, docs/METHOD.md §7)
+— vedi "Zona grigia" sopra.
 
 ## Hash del commit del protocollo
 
