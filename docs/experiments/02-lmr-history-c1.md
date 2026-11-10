@@ -287,11 +287,10 @@ come sono stati eseguiti G1-G5/D4.
 
 Threads = 1 per entrambi i lati, Hash = 64, stesso TC (10+0.1) per
 entrambi i lati — come `scripts/sprt_match.sh`, non Threads>1 dentro
-al motore. **Concurrency (EMENDATO 2026-11-10): NON fissata a 2 qui**
-— decisa da un pilota prima della run vera, vedi "Pilota per la
-scelta della concurrency" nella sezione "Macchina e carico": 3 se il
-pilota passa, 2 (quella di `scripts/sprt_match.sh`) come ripiego se
-non passa.
+al motore. **Concurrency: 2** (quella di `scripts/sprt_match.sh`) —
+deciso dal pilota eseguito il 2026-11-10 (NON passato sul criterio del
+carico massimo, 3,33 contro soglia 3,0: vedi "Esito del pilota" nella
+sezione "Macchina e carico"), non fissato a priori.
 
 ### `-recover`: SI TIENE (corretto 2026-11-10, non più in discussione)
 
@@ -441,7 +440,48 @@ core dalla console Oracle prima di procedere.
       partiti).
 - **Se il pilota NON passa**: concurrency 2 per tutta la run, SENZA
   un secondo pilota. **Se passa**: concurrency 3 per tutta la run.
-  La concurrency scelta resta COSTANTE per tutta la run e va
+
+### Esito del pilota (eseguito 2026-11-10)
+
+Eseguito su Oracle (`nproc=4` verificato prima del lancio, bot
+`luna-bot` fermo dalle 12:28:33 UTC con conferma esplicita di
+Daniele), via `scripts/pilot_c1_concurrency.sh` (nuovo, non modifica
+`scripts/sprt_match.sh`), riferimento = `origin/main` `80b1648`
+compilato nativamente su Oracle (`cargo build --release`, nessun
+flag), sha256 binario `651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436`,
+due copie identiche. 200 partite (100 round, `-games 2 -repeat`),
+concurrency 3, seme 20261110, libro `UHO_4060_v4.epd` (sha256 del
+protocollo), `-recover`. Durata: 2026-11-10T12:30:29Z →
+2026-11-10T13:01:35Z = 1.866 s = **9,33 s/partita**.
+
+| Criterio | Soglia | Misurato | Esito |
+|---|---|---|---|
+| (a) perdite a tempo/crash/disconnessioni/anomale | 0 | **0** (nessuna occorrenza di "time"/"illegal"/"disconnect"/"stall"/"crash"/"abandon" nel PGN/log) | PASSA |
+| (b) load average 1 min, massimo | <= 3,0 | **3,33** (media campioni 3,09; 55/60 campioni sopra 3,0) | **NON PASSA** |
+| (c) secondi/partita | <= 12 | **9,33** | PASSA |
+| (d) altro segnale anomalo | nessuno | nessuno (tutte le 200 partite terminate normalmente: scacco matto, adjudication, 3-fold, 50 mosse, materiale insufficiente, stallo) | PASSA |
+
+**VERDETTO: il pilota NON PASSA** (fallisce solo il criterio (b): il
+carico satura e supera leggermente le 4 CPU disponibili anche a
+concurrency 3, probabilmente per l'overhead di `cutechess-cli` stesso
+oltre ai 6 processi motore). **Concurrency SCELTA PER LA RUN VERA: 2**
+(ripiego, quella di `scripts/sprt_match.sh`) — nessun secondo pilota,
+come da regola.
+
+Punteggio riferimento-contro-riferimento (informativo, NON un
+criterio): A 75 - 52 - 73 B, punteggio 0,557 (55,7%) su 200 partite —
+più lontano dal 50% atteso per due copie identiche di quanto ci si
+aspetterebbe, ma su un campione di 200 partite con molti pareggi
+questa deviazione è compatibile con rumore statistico ordinario (non
+investigato oltre: non è un criterio del pilota, e le partite del
+pilota non entrano comunque nei risultati dello SPRT).
+
+File: `~/c1_pilot/results/{header.txt,match.pgn,cutechess.log,load_samples.csv}`
+su Oracle. sha256: `match.pgn` `788c1d3f667d2d53fe8c52a5267877ea64f23d44c514ddf562941273541aec01`,
+`load_samples.csv` `0cafb639bbbe9e0942340014be4ed532f63bd6bfbe32d4e370b4928ce786e37a`,
+`pilot_c1_concurrency.sh` `388a31a1fa471b859b1c7ee1e3650ef3125f12789d60d7409a35f771439c53b7`.
+
+La concurrency scelta resta COSTANTE per tutta la run e va
   dichiarata nel report prima del lancio della misura vera.
 - **Dopo la prima ora della run vera** (non solo del pilota):
   controllare load average e perdite a tempo per lato, stesso metodo.
