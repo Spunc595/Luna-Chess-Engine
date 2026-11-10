@@ -244,21 +244,28 @@ entrambi i lati — come `scripts/sprt_match.sh`. Concurrency 2 lato
 cutechess (2 partite simultanee, come nello script), non Threads>1
 dentro al motore.
 
-### Modifica proposta a `-recover` (NON applicata ora, da confermare)
+### `-recover`: SI TIENE (corretto 2026-11-10, non più in discussione)
 
-`scripts/sprt_match.sh` include `-recover` di default (riga con
-`-draw ... -resign ... -recover`). Daniele ha chiesto NO `-recover`
-per questo esperimento, stessa logica già adottata per i match di
-sicurezza (`docs/METHOD.md`, regola del 2026-11-10: un crash deve
-risultare come tale, non essere mascherato da un riavvio automatico
-del motore). **Modifica proposta, non fatta**: togliere `-recover`
-dalla riga di comando di `cutechess-cli` in `sprt_match.sh` (o
-duplicare lo script in una variante senza quel flag, per non toccare
-lo script usato dagli altri esperimenti in corso). Mi fermo su questo
-punto: nessuna modifica a `sprt_match.sh` è stata fatta in questa
-sessione, in attesa di conferma su QUALE delle due strade preferire
-(modificare lo script condiviso, o crearne una copia dedicata a questo
-esperimento).
+`scripts/sprt_match.sh` include `-recover` di default. La regola "NO
+`-recover`" vale per i match di SICUREZZA (`docs/METHOD.md`, regola
+del 2026-11-10), non per questo SPRT: per questo esperimento
+`-recover` resta, **nessuna modifica a `sprt_match.sh`**.
+
+### Controllo delle terminazioni (NUOVO, 2026-11-10)
+
+Dopo la run (o periodicamente durante, non solo alla fine), contare
+per CIASCUN lato, dal PGN/log, il numero di: crash, disconnessioni,
+sconfitte per tempo — stesso metodo già usato da `scripts/sprt_report.py`
+per il suo conteggio "GAMES LOST ON TIME" (`grep`/parsing delle
+`Termination` nel PGN che contengono "time", più le terminazioni
+anomale — illegal/stall/disconnect/crash — che lo stesso script separa
+già in una categoria dedicata). **Se questo conteggio è > 0 per il
+lato candidato (la build con C1), la run non si accetta senza
+un'indagine** — non si scarta automaticamente né si accetta
+ciecamente: si segnala e si capisce la causa prima di decidere.
+Perdite/crash sul lato di riferimento (`base_d3` o equivalente) sono
+comunque un segnale di macchina/ambiente da investigare, anche se non
+bloccano la decisione sul lato candidato allo stesso modo.
 
 ## Hash dei binari
 
