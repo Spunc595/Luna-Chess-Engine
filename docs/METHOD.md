@@ -13,11 +13,14 @@ silenziosamente nascosto. Alla fine (vedi `docs/experiments/TEMPLATE.md`)
 ogni esperimento userà questo stesso schema.
 
 **Convenzione di questo documento**: ogni cifra, soglia o regola su Luna
-riportata qui viene da `BENCHMARKS.md`, `docs/PERF_NOTES.md` o `HISTORY.md`
-(con riferimento file:riga), oppure dallo script `scripts/bench_suite.py`
-(anch'esso nel repository). Dove un punto richiesto da chi ha scritto questo
-documento non è coperto da queste fonti, è segnato esplicitamente
-**"non documentato"**: non è stato inventato né dedotto da altre fonti.
+riportata qui viene da `BENCHMARKS.md`, `docs/PERF_NOTES.md`, `HISTORY.md`
+o dallo script `scripts/bench_suite.py` (tutti nel repository, con
+riferimento file:riga), oppure — dove esplicitamente segnalato come tale —
+da **protocolli di lavoro non pubblicati nel repository**. Le sezioni 3b,
+la seconda parte della sezione 6 e la parte finale della sezione 7 vengono
+da questa seconda fonte e sono marcate "da protocolli non pubblicati". Dove
+un punto richiesto non è coperto da nessuna delle due fonti, è segnato
+esplicitamente **"non documentato"**: non è stato inventato né dedotto.
 
 ---
 
@@ -75,11 +78,14 @@ nell'altra) sarebbe indistinguibile da una vera differenza fra A e B.
 > "Builds are interleaved by round, because machine speed drifts over
 > minutes.")
 
-Per questo lo stesso principio vale anche per le partite di forza: nei
-match SPRT del progetto, l'ordine delle build è alternato per round con
-`-repeat` (coppie di partite con i colori invertiti sulla stessa apertura),
-per esempio `BENCHMARKS.md:1111` (`-rounds 4000 -games 2 -repeat`) e
-`BENCHMARKS.md:1240` (`3.000 partite fisse, 1.500 round appaiati`).
+Un meccanismo diverso, da non confondere con questo, è usato nelle partite
+di forza: `-repeat` fa giocare due volte la stessa apertura, con i colori
+invertiti (`BENCHMARKS.md:1111`: `-rounds 4000 -games 2 -repeat`;
+`BENCHMARKS.md:1240`: 3.000 partite fisse, 1.500 round appaiati). Questo
+compensa lo squilibrio di colore di una singola apertura (un'apertura può
+favorire chi muove per primo), non la deriva della macchina nel tempo:
+sono due problemi diversi, risolti da due meccanismi diversi — nessuna
+delle fonti citate presenta `-repeat` come una soluzione alla deriva.
 
 ---
 
@@ -115,7 +121,7 @@ rapporto di velocità:
 > seed `20260923`: 95% CI [-0.0015, +0.0005]"
 > — `BENCHMARKS.md:490`
 
-### 3b. Regole adottate per le misure della 4.2.0 e da qui in avanti
+### 3b. Regole adottate per le misure della 4.2.0 e da qui in avanti (da protocolli non pubblicati)
 
 Per i confronti di velocità della 4.2.0 (PGO, AVX2, `MoveList`) è stato
 effettivamente usato **"media geometrica dei rapporti con bootstrap"** —
@@ -219,6 +225,13 @@ nodi sono rimasti identici (non funzionale, es. *"Nodi identici a profondità
 18 (590.820 / 980.165): confermato"*, `docs/PERF_NOTES.md:32`) prima di
 riportare qualunque numero di velocità.
 
+**Caso misto**: un cambiamento funzionale che probabilmente guadagna anche
+velocità (per esempio una riduzione di `HIDDEN`, che riduce il lavoro per
+nodo) resta un cambiamento funzionale: **l'accettazione è l'SPRT**, non la
+velocità. La velocità si misura comunque, ma a parte, come informazione
+aggiuntiva (per esempio da riportare nelle note di rilascio) — non come
+criterio che decide se il cambiamento entra o no.
+
 ---
 
 ## 6. Condizioni di misura
@@ -263,7 +276,7 @@ registrata):
 - L'uso del flag `-recover` di `cutechess-cli` (né la sua presenza né la
   sua assenza sono discusse in queste tre fonti).
 
-### Regole adottate per le misure della 4.2.0 e da qui in avanti
+### Regole adottate per le misure della 4.2.0 e da qui in avanti (da protocolli non pubblicati)
 
 Queste regole **sono** state fissate per iscritto, ma in protocolli di
 lavoro non pubblicati nel repository (non in nessuna delle tre fonti
@@ -291,9 +304,9 @@ documentazione.
   lo inventa. Non è una conferma né una contraddizione della sezione 3a
   (che non discute affatto questo flag): è semplicemente la prima volta
   che il progetto lo dichiara, in un senso (non usarlo).
-- **Stesso book usato nelle misure di velocità 4.2.0**: non `UHO_4060_v4.epd`
-  (quello è usato per la partita di sicurezza, basata su partite reali), ma
-  un campione di 100 posizioni di test fissate (sha256 dichiarato nel
+- **Insieme di posizioni per le misure di velocità 4.2.0**: non
+  `UHO_4060_v4.epd` (quello è usato per la partita di sicurezza), ma un
+  campione di 100 posizioni di test fissate (sha256 dichiarato nel
   protocollo), separate da un campione di addestramento quando applicabile
   — per le misure di velocità a profondità fissa, non per le partite.
 
@@ -327,12 +340,12 @@ e se tratta i test come indipendenti o come una sequenza che richiede una
 soglia più severa — questo documento non prescrive quale scelta fare,
 perché il repository non ne registra una.
 
-**Regole adottate per la 4.2.0**: anche nei protocolli di lavoro non
+**Regole adottate per la 4.2.0 (da protocolli non pubblicati)**: anche nei protocolli di lavoro non
 pubblicati usati per la 4.2.0, più confronti sullo stesso riferimento sono
 stati pianificati e misurati separatamente (due, poi tre varianti di
 velocità contro lo stesso binario di riferimento), ciascuno con la propria
 soglia dichiarata in anticipo — ma senza nessuna correzione formale per il
-rischio di falso positivo cumulato. Questo **confirma**, non contraddice,
+rischio di falso positivo cumulato. Questo **conferma**, non contraddice,
 la conclusione di questa sezione: anche al livello più recente di
 documentazione (non pubblicato), il rischio di falso positivo con test
 multipli resta un punto non affrontato formalmente, da decidere e
@@ -358,16 +371,13 @@ risultati è ampiamente usata nel progetto, sempre con la parola
 
 **Nota**: il documento `piano-ricerca.md`, citato più volte come il luogo
 dove le regole di decisione vengono fissate in anticipo, **non è nel
-repository** (non tracciato in `origin/main`) — è un documento esterno.
-Cercato anche nei file locali disponibili in questa sessione: non trovato
-in nessuna delle cartelle controllate. Resta quindi non reperibile, da
-questa postazione, per verificarne il contenuto.
+repository** (non tracciato in `origin/main`) — è non reperibile. Cercato
+anche nei file locali disponibili in questa sessione: non trovato in
+nessuna delle cartelle controllate.
 Questo è precisamente il vuoto che `docs/experiments/TEMPLATE.md` (punto 3
 di questo lavoro) comincia a riempire: da qui in avanti, il protocollo di
 ogni esperimento vive nel repository stesso, committato prima del risultato,
-con l'hash del commit riportato nel report finale — esattamente come questo
-stesso documento è stato scritto prima di misurare qualunque cosa su di
-esso.
+con l'hash del commit riportato nel report finale.
 
 Gli esiti negativi vengono registrati, non nascosti: lo stile di
 `docs/PERF_NOTES.md` (es. il tentativo "C5 eager", scartato, con la propria
@@ -379,20 +389,9 @@ gli esperimenti di forza, non solo di velocità.
 
 ## 9. Confronto con le pratiche esistenti
 
-Strumenti di confronto alternato per motori Stockfish-derivati (ad esempio
-`pyshbench`, nella comunità Stockfish) **fanno già** misure di velocità con
-build interleaved per round, un'idea che questo documento non inventa.
-**Da verificare**: non è stato controllato in questa sede se `pyshbench` o
-strumenti simili usino anche loro (a) un gate sull'identità dei nodi a
-profondità fissa come condizione di validità della misura, (b) una copia
-byte-identica della build di riferimento come stima della soglia di rumore
-misurata nella stessa run, o (c) un protocollo scritto e committato prima
-del risultato. Questo documento non afferma che questi tre elementi siano
-assenti altrove — solo che non è stato verificato, e quindi non va
-presentato come una novità accertata. Ciò che **è** verificabile in questo
-repository, con riferimento file:riga, è che Luna li applica tutti e tre
-insieme (sezioni 1, 4 e 8 sopra); se questa combinazione sia insolita nella
-comunità più ampia resta, onestamente, "da verificare".
+Non è stato verificato cosa facciano gli strumenti esistenti. Elementi che
+questo repository applica insieme: gate sui nodi, copia identica come
+soglia, protocollo scritto prima.
 
 ---
 
