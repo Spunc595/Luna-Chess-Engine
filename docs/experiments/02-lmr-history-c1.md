@@ -440,6 +440,10 @@ core dalla console Oracle prima di procedere.
       partiti).
 - **Se il pilota NON passa**: concurrency 2 per tutta la run, SENZA
   un secondo pilota. **Se passa**: concurrency 3 per tutta la run.
+  La concurrency scelta resta COSTANTE per tutta la run e va
+  dichiarata nel report prima del lancio della misura vera.
+- **Dopo la prima ora della run vera** (non solo del pilota):
+  controllare load average e perdite a tempo per lato, stesso metodo.
 
 ### Esito del pilota (eseguito 2026-11-10)
 
@@ -480,11 +484,6 @@ File: `~/c1_pilot/results/{header.txt,match.pgn,cutechess.log,load_samples.csv}`
 su Oracle. sha256: `match.pgn` `788c1d3f667d2d53fe8c52a5267877ea64f23d44c514ddf562941273541aec01`,
 `load_samples.csv` `0cafb639bbbe9e0942340014be4ed532f63bd6bfbe32d4e370b4928ce786e37a`,
 `pilot_c1_concurrency.sh` `388a31a1fa471b859b1c7ee1e3650ef3125f12789d60d7409a35f771439c53b7`.
-
-La concurrency scelta resta COSTANTE per tutta la run e va
-  dichiarata nel report prima del lancio della misura vera.
-- **Dopo la prima ora della run vera** (non solo del pilota):
-  controllare load average e perdite a tempo per lato, stesso metodo.
 
 ## Seed e versioni degli script
 
