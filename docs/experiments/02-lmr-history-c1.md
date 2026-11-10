@@ -239,16 +239,15 @@ partite per la stessa separazione di Elo rispetto ai test storici
 G1-G5/D4/G2b con lo stesso elo1 — un effetto del cambio di libro,
 non solo della finestra elo1=5 più stretta.
 
-**Tetto di partite: 16.000, DA CONFERMARE DA DANIELE** (proposto:
-~1,2x la stima peggiore sopra con l'assunzione conservativa
-`d=0,453`, per dare una probabilità ragionevole di risoluzione anche
-nel caso peggiore). Questo è **il doppio** della convenzione attuale
-di progetto (8.000, Clausola 1, `BENCHMARKS.md:650`): un costo
-esplicito di Oracle che Daniele deve confermare prima del lancio, non
-una scelta presa in autonomia qui. Se il tetto resta 8.000: il caso
+**Tetto di partite: 16.000 — CONFERMATO da Daniele (2026-11-10)**
+(proposto: ~1,2x la stima peggiore sopra con l'assunzione
+conservativa `d=0,453`, per dare una probabilità ragionevole di
+risoluzione anche nel caso peggiore). Questo è **il doppio** della
+convenzione attuale di progetto (8.000, Clausola 1, `BENCHMARKS.md:650`):
+un costo esplicito di Oracle. Se il tetto fosse stato 8.000: il caso
 "effetto vicino a 0 o 5 Elo" (il più plausibile, vedi "Effetto atteso"
-sotto) molto probabilmente NON si risolve e finisce INCONCLUSIVO al
-tetto — dichiarato qui, prima dei dati.
+sotto) molto probabilmente non si sarebbe risolto, finendo
+INCONCLUSIVO al tetto — dichiarato qui per lo storico della decisione.
 
 ### Durata (CORRETTO/EMENDATO 2026-11-10): dato storico reale, due concurrency
 
@@ -263,7 +262,7 @@ controllo odierno dell'istanza mostra 2 — vedi "Macchina e carico").
 | Partite | Concurrency 2 (dato storico) | Concurrency 3 (ASSUNZIONE: scala linearmente, da verificare col pilota) |
 |---|---|---|
 | 12.800 | ≈51 ore | ≈34 ore |
-| 16.000 (tetto proposto, **da confermare da Daniele**) | ≈64 ore | ≈43 ore |
+| 16.000 (tetto **confermato** da Daniele) | ≈64 ore | ≈43 ore |
 
 La colonna concurrency 3 è un'estrapolazione lineare (3/2 = 1,5x più
 rapida), NON misurata: il pilota sopra verifica se la scala è
@@ -320,8 +319,8 @@ valida su questo criterio. Altrimenti (sopra 0,05% su un lato, o uno
 sbilanciamento >2x fra i lati): si indaga prima di decidere, non si
 accetta né si scarta automaticamente.
 
-**Questa soglia (0,05%) è PROPOSTA, da confermare da Daniele** prima
-del lancio — non è ancora definitiva. Nota di contesto (non vincolante
+**Questa soglia (0,05% per lato, bilanciata fra i lati entro 2x) è
+CONFERMATA da Daniele (2026-11-10).** Nota di contesto (non vincolante
 per questo esperimento, solo un precedente): `BENCHMARKS.md:1119-1121`
 documenta una regola simile già usata per il test IIR, con soglia
 diversa: "a single time loss does not by itself invalidate the run;
@@ -472,6 +471,10 @@ entrambi comunque. Trattati come test CORRELATI, non indipendenti
 ACCETTATO e si misura anche K=125, un K=125 ACCETTATO non si considera
 una conferma indipendente (stessa lezione G2/G2b, docs/METHOD.md §7)
 — vedi "Zona grigia" sopra.
+
+**CONFERMATO da Daniele (2026-11-10)**: K=250 come primo test, K=125
+solo se K=250 non è negativo — nessun cambiamento rispetto a quanto
+scritto sopra.
 
 ## Hash del commit del protocollo
 
