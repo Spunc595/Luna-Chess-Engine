@@ -236,14 +236,53 @@ caso.
 
 ---
 
-## Esito
-
-*(Da compilare alla fine, in un commit successivo — anche se l'esito
-della Fase 1 stessa, riportato nel report di chat, è già "premessa non
-verificata".)*
+## Esito della Fase 1 (criterio offline, 2026-11-10)
 
 ### Cosa è stato provato
 
+Misura di sola lettura/conteggio su copia scratch (non committata,
+eliminata): per ogni mossa quieta effettivamente ridotta da LMR oggi
+(senza alcuna modifica al codice di ricerca), registrati history al
+momento della riduzione, riduzione applicata, profondità, ed esito
+(re-search sì/no). 789.998 campioni validi, su: le 2 posizioni
+standard del bench (depth 18, Threads 1) e un **campione di 20
+posizioni** (non 100: un sottoinsieme) dalle 100 di test
+(`pgo_test_fens.txt`, depth 14).
+
 ### Risultati misurati
 
-### Esito (positivo / negativo / non concludente) e perché, se noto
+(a) **Criterio pre-registrato: NON SUPERATO.**
+- `bench_mediogioco`: rapporto terzile alto/basso = 5,57 (soglia
+  >=1,3 superata), ma n del terzile alto = 6.724 (< 10.000 richiesti).
+- `bench_finale_pedoni`: rapporto = 1,26 (< soglia 1,3), n del terzile
+  alto = 9.394 (< 10.000).
+- Campione (20 posizioni, 717.675 riduzioni): rapporto = 4,26 (soglia
+  >=1,2 ampiamente superata), conteggi ampi (terzile basso 241.147,
+  alto 128.167).
+
+Nessun valore soglia è stato ritoccato dopo aver visto questi numeri.
+
+(b) **Nota di deviazione, dichiarata da chi ha scritto il criterio
+(l'assistente, non Daniele)**: il criterio così come pre-registrato
+era mal progettato per le 2 sole posizioni del bench. Richiedere
+10.000 riduzioni per terzile su una SINGOLA posizione (anziché su un
+campione di molte) espone il conteggio alla forma particolare della
+distribuzione di quella posizione — qui, molti valori di history
+vicini o uguali a zero, che spostano i confini dei terzili e
+sbilanciano le dimensioni dei gruppi. La soglia sul campione (molte
+posizioni, quindi una distribuzione aggregata più stabile) ha invece
+funzionato come previsto. La **direzione del segnale è coerente in
+tutti e quattro i gruppi misurati** (il terzile alto ha sempre un
+tasso di re-search maggiore del terzile basso): il criterio non è
+stato superato per un problema di progettazione del test (conteggio
+minimo troppo esigente su un campione troppo piccolo), non per
+l'assenza del segnale che l'ipotesi prevede.
+
+(c) **Decisione di procedere**: presa da Daniele con questa
+informazione (criterio formale non superato, ma segnale coerente in
+direzione e forte su un campione più ampio) — vedi Fase 2 per
+l'implementazione con K=250.
+
+### Esito (Fase 1): criterio pre-registrato NON superato; si procede
+comunque alla Fase 2 per decisione esplicita di Daniele, con questa
+deviazione dichiarata qui prima di qualunque modifica al codice.
