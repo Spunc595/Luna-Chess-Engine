@@ -553,6 +553,70 @@ fn score_move(m: &Mossa, board: &Scacchiera, tt_move: Mossa, killers: &[Mossa; 2
     1000 + pst_score + history_score
 }
 
+/// Variant of `ordina_mosse` for quiescence's non-check branch (Punto A,
+/// `docs/experiments/01-see-una-volta.md`), where the caller has ALREADY
+/// removed, via `retain`, every non-promotion capture with SEE < 0 (the
+/// same condition the SEE-pruning check right after this sort would have
+/// applied anyway): every non-promotion capture still in `mosse` is
+/// therefore guaranteed SEE >= 0, so this skips `see()` for it instead of
+/// recomputing what the caller already knows. Promotion-captures are NOT
+/// covered by that guarantee (the caller's filter exempts all promotions,
+/// same as the pruning check it replaces) and are scored exactly as
+/// `score_move` would, including its own `see()` call -- so their
+/// relative order among themselves and against everything else is
+/// unchanged. The list passed in is always already filtered to
+/// captures/promotions only (killers/history/counter-move are therefore
+/// never read, same reasoning as the comment at this function's only
+/// call site in `search.rs`), so this signature omits them entirely.
+pub fn ordina_mosse_qsearch(
+    mosse: &mut [Mossa],
+    board: &Scacchiera,
+    tt_move: Mossa,
+    capture_history: &[[[AtomicI32; 6]; 64]; 6],
+) {
+    mosse.sort_by_cached_key(|m| -score_move_qsearch(m, board, tt_move, capture_history));
+}
+
+fn score_move_qsearch(m: &Mossa, board: &Scacchiera, tt_move: Mossa, capture_history: &[[[AtomicI32; 6]; 64]; 6]) -> i32 {
+    // 1. TT move (highest priority) -- same as score_move.
+    if m.data == tt_move.data && !m.is_null() { return 30000; }
+
+    // 2. Captures. `m` is guaranteed to be a capture or a promotion (the
+    // caller's first retain); everything below mirrors score_move's own
+    // capture branch exactly, with one difference: for a NON-promotion
+    // capture, `see_value >= 0` is already guaranteed by the caller's
+    // second retain, so there is no `see()` call and no `else` branch
+    // here at all (that branch is provably unreachable for this subset).
+    if m.is_cattura() {
+        let attacker = board.pezzo_in(m.da()).unwrap_or(0);
+        let captured = if m.move_flag() == MoveFlag::EnPassant { 0 }
+                        else { board.pezzo_in(m.a()).unwrap_or(0) };
+        let cap_hist = capture_history[attacker][m.a()][captured].load(Ordering::Relaxed);
+        if m.is_promozione() {
+            // Capture-promotion: NOT covered by the caller's SEE filter
+            // (every promotion is exempt from it, same as the pruning
+            // check this function replaces) -- score it exactly as
+            // score_move does, see() call included.
+            let see_value = see(board, m);
+            if see_value >= 0 {
+                let victim_val = if m.move_flag() == MoveFlag::EnPassant { 100 }
+                                 else { Pezzo::from_index(captured).valore() };
+                let attacker_val = Pezzo::from_index(attacker).valore();
+                return 20000 + victim_val * 10 - attacker_val + cap_hist;
+            } else {
+                return -2000 + see_value + cap_hist;
+            }
+        }
+        let victim_val = if m.move_flag() == MoveFlag::EnPassant { 100 }
+                         else { Pezzo::from_index(captured).valore() };
+        let attacker_val = Pezzo::from_index(attacker).valore();
+        return 20000 + victim_val * 10 - attacker_val + cap_hist;
+    }
+
+    // 3. Promotions (not a capture): same priority score_move gives it.
+    15000 + m.pezzo_promosso().unwrap().valore()
+}
+
 #[cfg(test)]
 mod see_tests {
     use super::*;

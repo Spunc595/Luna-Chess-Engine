@@ -1072,34 +1072,37 @@ fn quiescence(
     let mut moves = board.genera_mosse();
     moves.retain(|m| m.is_cattura() || m.is_promozione());
 
-    // The history heuristic concerns only quiet moves: here `moves` is
-    // already filtered to captures/promotions, so its contribution in
-    // `score_move` will never be reached for these elements. We still
-    // pass the real table (instead of a dummy one) so as not to introduce
-    // a second parameter type just for this call site. `tt_move`, when
-    // present, is now used to try the TT's own best move first, same as
-    // in negamax.
-    crate::movegen::ordina_mosse(moves.as_mut_slice(), board, tt_move, &[Mossa::null(); 2], &sh.history, Mossa::null(), &sh.capture_history);
+    // Punto A (docs/experiments/01-see-una-volta.md): a non-promotion
+    // capture with SEE < 0 is going to be skipped unconditionally by the
+    // SEE-pruning check that used to sit after the sort below, regardless
+    // of where it lands in the sort order -- dropping it HERE, before
+    // sorting, instead of after, is provably equivalent for every move
+    // that is actually executed (sort_by_cached_key is a stable sort, so
+    // removing elements that are always discarded afterwards does not
+    // change the relative order of the elements that remain, whether the
+    // removal happens before or after sorting). This also means
+    // `score_move_qsearch` below never has to compute the SEE of a
+    // non-promotion capture a second time: it is already guaranteed >= 0.
+    // Promotions (including capture-promotions) are exempt from this
+    // filter, same exemption the pruning check used to apply.
+    moves.retain(|m| m.is_promozione() || see(board, m) >= 0);
+
+    // The history/killer/counter-move heuristics concern only quiet
+    // moves: `moves` is already filtered to captures/promotions, so their
+    // contribution would never be reached for these elements -- unlike
+    // `ordina_mosse`, `ordina_mosse_qsearch` does not even take those
+    // tables as parameters. `tt_move`, when present, is still used to try
+    // the TT's own best move first, same as in negamax.
+    crate::movegen::ordina_mosse_qsearch(moves.as_mut_slice(), board, tt_move, &sh.capture_history);
 
     let mut best_move = Mossa::null();
 
     for m in moves {
-        // --- SEE PRUNING (objectively losing captures) ---
-        // A capture that loses material even in the best recapture
-        // sequence for whoever plays it (see movegen::see, which
-        // simulates the entire exchange, not just the first
-        // attacker/victim pair like MVV-LVA) cannot improve the position
-        // at a quiescence node: we discard it WITHOUT executing
-        // make/unmake, regardless of stand_pat/alpha — a more precise
-        // filter, and almost always more aggressive, than the delta
-        // pruning below, which in fact handles the same kind of cases
-        // only crudely (the victim's value, not the whole exchange).
-        // Promotions are excluded for the same reason as delta pruning:
-        // the gain of a new Queen can be part of a combination that is
-        // worth trying anyway.
-        if !m.is_promozione() && see(board, &m) < 0 {
-            continue;
-        }
+        // SEE PRUNING (objectively losing captures) now happens BEFORE
+        // this loop, via the `retain` above (Punto A): a non-promotion
+        // capture with SEE < 0 never reaches `moves` at all, so there is
+        // nothing left to check here. See that retain's comment for why
+        // this is equivalent to checking it here, one `see()` call later.
 
         // --- DELTA PRUNING (per single move) ---
         // If even in the best case (we capture the largest possible piece
