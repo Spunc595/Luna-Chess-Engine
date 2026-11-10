@@ -167,6 +167,15 @@ come completamente indipendenti nel rischio di falso positivo — vedi
 - Se durante l'SPRT emerge un segno fortemente contrario (es. crash,
   mosse illegali) non dovuto a un carico della macchina: stop
   immediato, non si aspetta il tetto di partite.
+- **AGGIUNTO (2026-11-10): NESSUNO stop manuale sull'LLR intermedio.**
+  Durante la run si controllano SOLO carico (load average) e
+  terminazioni (vedi "Controllo delle terminazioni"), agli intervalli
+  dichiarati (dopo la prima ora, poi periodicamente). La run si ferma
+  SOLO: ai limiti SPRT (H0/H1 accettati da `cutechess-cli` stesso), al
+  tetto di partite, o per una delle condizioni di stop elencate qui
+  sopra (nodi diversi, segno fortemente contrario). Non si guarda il
+  valore dell'LLR stampato da `cutechess-cli` per decidere di fermare
+  prima — lo strumento stesso lo fa quando una soglia è incrociata.
 
 ## Effetto atteso e numero di partite previsto
 
@@ -188,6 +197,39 @@ o nullo — dichiarato qui, prima dei dati, apposta.
 - alpha = 0.05
 - beta = 0.05
 
+### Modello SPRT realmente usato dallo strumento (AGGIUNTO 2026-11-10)
+
+`cutechess-cli` 1.5.1 (verificato leggendo `~/cutechess/projects/lib/src/sprt.cpp`
+su Oracle — nessuna opzione `model=` esposta in `--help`, è fisso nel
+codice): l'opzione `-sprt elo0=ELO0 elo1=ELO1 alpha=ALPHA beta=BETA`
+**NON** usa il modello logistico semplice del calcolo di Wald sotto.
+Usa il modello **BayesElo** (trinomiale esatto, non un'approssimazione
+normale):
+- Stima `drawElo` e un fattore `scale` DALLA RUN STESSA, man mano che
+  le partite arrivano (online, non fissato in anticipo), con un prior
+  di Jeffreys (Dirichlet 0,5/0,5/0,5) per regolarizzare i conteggi
+  iniziali.
+- `elo0`/`elo1` passati da riga di comando sono **Elo normalizzato**
+  ("nElo"), non BayesElo grezzo: internamente vengono convertiti con
+  `BayesElo = nElo / scale` prima di calcolare le probabilità
+  trinomiali.
+- L'LLR è quello ESATTO del modello trinomiale (somma pesata dei
+  log-rapporti di pWin/pLoss/pDraw sotto H1 e H0), non l'approssimazione
+  normale di Wald usata sotto.
+
+**Cosa cambia per il numero di partite attese**: usando il tasso di
+pareggi REALE misurato dal pilota (36,5%, 73/200 — finora solo
+un'ASSUNZIONE nel calcolo sotto), `drawElo≈132,9`, `scale≈0,867`.
+Quindi `elo1=5` (nElo) corrisponde a un **BayesElo≈5,77** — più vicino
+a 5 che nell'assunzione di pareggio al 50% usata prima (dove lo scarto
+sarebbe stato maggiore). Questo significa che il calcolo di Wald sotto,
+ricalcolato con il tasso di pareggi REALE del pilota (invece che con
+l'assunzione precedente), è una base più solida — ma resta
+un'APPROSSIMAZIONE (modello normale, non trinomiale esatto): il numero
+esatto di partite attese sotto il vero LLR trinomiale/BayesElo
+richiederebbe una simulazione o una derivazione più completa, che
+NON è stata fatta qui. Direzione nota, numero esatto non so.
+
 ### Calcolo del numero atteso di partite (formula standard di Wald/SPRT)
 
 Modello trinomiale (vittoria/pareggio/sconfitta), punteggio per
@@ -203,14 +245,15 @@ Varianza del punteggio per partita, a `s=0,5` e tasso di pareggi `d`:
 contribuiscono zero alla varianza perché la loro deviazione dalla
 media è esattamente zero in quel punto).
 
-**Tasso di pareggi, ASSUNZIONE dichiarata (non misurato per
-UHO_4060_v4.epd a parità di forza)**: `d=0,50`. L'unico dato reale nel
-repository per questo libro è 45,3% (`BENCHMARKS.md:1245`), ma misurato
-a +48,6 Elo di distacco (un distacco ampio riduce i pareggi
-indipendentemente dal libro), quindi probabilmente SOTTOSTIMA il tasso
-a parità di forza. 0,50 è una stima di mezzo, dichiarata come tale.
-Sensibilità mostrata sotto anche con `d=0,453` (il valore misurato,
-come limite conservativo).
+**Tasso di pareggi**: `d=0,50` era un'ASSUNZIONE dichiarata (non
+misurata). **AGGIORNAMENTO (2026-11-10): ora c'è un dato reale a
+parità di forza**: il pilota (200 partite riferimento-contro-
+riferimento, stesso libro `UHO_4060_v4.epd`, stesso TC) ha misurato
+**36,5% di pareggi (73/200)** — più basso sia dell'assunzione 0,50 sia
+del 45,3% di `BENCHMARKS.md:1245` (quel dato era a +48,6 Elo di
+distacco, non a parità). Sensibilità mostrata sotto con tutti e tre i
+valori; `d=0,365` è ora il più affidabile perché è l'unico misurato a
+parità di forza con questo libro.
 
 Confini SPRT (Wald, normale): `a = ln((1-beta)/alpha) = ln(19) ≈
 2,9444`, `b = -a ≈ -2,9444` (simmetrico perché alpha=beta).
@@ -221,11 +264,17 @@ Drift atteso del log-likelihood-ratio per partita, al vero valore
 **Numero atteso di partite** (formula di Wald per il caso normale,
 `E[N] = [(1-alpha)*b_eff + alpha*a_eff] / E[Z]` al confine pertinente):
 
-| Effetto vero | d=0,50 | d=0,453 (misurato, conservativo) |
-|---|---|---|
-| 0 Elo (= elo0, caso peggiore) | **≈12.800 partite** | ≈14.000 partite |
-| 5 Elo (= elo1, caso peggiore, simmetrico a 0 per alpha=beta) | ≈12.800 partite | ≈14.000 partite |
-| 10 Elo (oltre elo1, risoluzione più rapida) | ≈4.300 partite | ≈4.700 partite |
+| Effetto vero | d=0,50 (assunto) | d=0,453 (misurato a +48,6 Elo) | d=0,365 (**MISURATO dal pilota, a parità di forza — 73/200**) |
+|---|---|---|---|
+| 0 Elo (= elo0, caso peggiore) | ≈12.800 partite | ≈14.000 partite | **≈16.250 partite** |
+| 5 Elo (= elo1, caso peggiore) | ≈12.800 partite | ≈14.000 partite | **≈16.250 partite** |
+| 10 Elo (oltre elo1, risoluzione più rapida) | ≈4.300 partite | ≈4.700 partite | **≈5.420 partite** |
+
+La colonna `d=0,365` è la più affidabile delle tre: è l'unico dato
+reale per `UHO_4060_v4.epd` a parità di forza (non estrapolato da un
+distacco ampio). Con questa colonna, la stima del caso peggiore
+(≈16.250) è ORA VICINA al tetto di 16.000 confermato sotto, non
+comodamente sotto come sembrava con le assunzioni precedenti.
 
 **Nessuno script di calcolo per questo esiste nel repository** (cercato,
 confermato assente): il calcolo sopra è fatto ora, con la formula
@@ -248,6 +297,15 @@ un costo esplicito di Oracle. Se il tetto fosse stato 8.000: il caso
 "effetto vicino a 0 o 5 Elo" (il più plausibile, vedi "Effetto atteso"
 sotto) molto probabilmente non si sarebbe risolto, finendo
 INCONCLUSIVO al tetto — dichiarato qui per lo storico della decisione.
+
+**NOTA (2026-11-10, dopo il pilota)**: con il tasso di pareggi
+REALMENTE misurato (`d=0,365`, vedi sopra), la stima del caso peggiore
+è **≈16.250 partite**, leggermente SOPRA il tetto di 16.000 — non
+comodamente sotto come sembrava con le assunzioni usate quando il
+tetto fu scelto. Se l'effetto vero è vicino a 0 o 5 Elo, è quindi
+probabile che la run arrivi al tetto PRIMA di risolversi, anche con
+16.000 partite. Non cambio il tetto qui (già confermato da Daniele):
+segnalo solo che il margine è più sottile di quanto si pensasse.
 
 ### Durata (CORRETTO/EMENDATO 2026-11-10): dato storico reale, due concurrency
 
@@ -299,15 +357,31 @@ sezione "Macchina e carico"), non fissato a priori.
 del 2026-11-10), non per questo SPRT: per questo esperimento
 `-recover` resta, **nessuna modifica a `sprt_match.sh`**.
 
-### Controllo delle terminazioni (CORRETTO 2026-11-10)
+### Controllo delle terminazioni (CORRETTO 2026-11-10, due volte)
 
 Dopo la run (o periodicamente durante, non solo alla fine), contare
-per CIASCUN lato, dal PGN/log, il numero di: crash, disconnessioni,
-sconfitte per tempo — stesso metodo già usato da `scripts/sprt_report.py`
-per il suo conteggio "GAMES LOST ON TIME" (`grep`/parsing delle
-`Termination` nel PGN che contengono "time", più le terminazioni
-anomale — illegal/stall/disconnect/crash — che lo stesso script separa
-già in una categoria dedicata).
+per CIASCUN lato, **SOLO dal campo `[Termination "..."]` di ciascuna
+partita nel PGN** (regex `\[Termination "([^"]+)"\]`, una per
+partita) — **NON** una ricerca generica della parola "time" nel
+PGN/log per intero (che potrebbe incrociare per errore il tag
+`[TimeControl "10+0.1"]`, sempre presente, o altro testo non
+pertinente). Stesso metodo di `scripts/sprt_report.py`, che fa
+esattamente questo: estrae il valore del campo `Termination` per
+partita, poi cerca "time" SOLO dentro quel valore estratto (non nel
+PGN per intero) per il suo conteggio "GAMES LOST ON TIME"; le
+terminazioni anomale (illegal/stall/disconnect/crash) sono la stessa
+categoria, filtrata allo stesso modo sul valore del campo.
+
+**Ricontato sul pilota con questo metodo corretto**: 146/200 partite
+hanno `[Termination "adjudication"]`; le restanti 54/200 non hanno
+alcun tag `Termination` (partite finite per via normale — scacco
+matto, 3-fold, 50 mosse, materiale insufficiente, stallo — cutechess
+non tagga quelle). **Nessuna partita, su nessun lato, ha un valore di
+`Termination` contenente "time"/"illegal"/"disconnect"/"crash"**:
+conferma il criterio (a) = 0, con il metodo giusto questa volta, non
+solo con la ricerca generica di prima (che per questo pilota dava
+comunque 0 — stesso risultato, metodo diverso, nessuna contraddizione
+nei numeri già riportati).
 
 **Regola (sostituisce la precedente "> 0 = non si accetta")**:
 perdite a tempo per lato, calcolate sul totale delle partite di quel
@@ -460,17 +534,22 @@ protocollo), `-recover`. Durata: 2026-11-10T12:30:29Z →
 
 | Criterio | Soglia | Misurato | Esito |
 |---|---|---|---|
-| (a) perdite a tempo/crash/disconnessioni/anomale | 0 | **0** (nessuna occorrenza di "time"/"illegal"/"disconnect"/"stall"/"crash"/"abandon" nel PGN/log) | PASSA |
+| (a) perdite a tempo/crash/disconnessioni/anomale | 0 | **0** (ricontato con il metodo corretto — SOLO il campo `Termination`: 146/200 "adjudication", 54/200 senza tag, 0 con "time"/"illegal"/"disconnect"/"crash") | PASSA |
 | (b) load average 1 min, massimo | <= 3,0 | **3,33** (media campioni 3,09; 55/60 campioni sopra 3,0) | **NON PASSA** |
 | (c) secondi/partita | <= 12 | **9,33** | PASSA |
 | (d) altro segnale anomalo | nessuno | nessuno (tutte le 200 partite terminate normalmente: scacco matto, adjudication, 3-fold, 50 mosse, materiale insufficiente, stallo) | PASSA |
 
-**VERDETTO: il pilota NON PASSA** (fallisce solo il criterio (b): il
-carico satura e supera leggermente le 4 CPU disponibili anche a
-concurrency 3, probabilmente per l'overhead di `cutechess-cli` stesso
-oltre ai 6 processi motore). **Concurrency SCELTA PER LA RUN VERA: 2**
-(ripiego, quella di `scripts/sprt_match.sh`) — nessun secondo pilota,
-come da regola.
+**VERDETTO: il pilota NON PASSA** (fallisce solo il criterio (b), la
+soglia stessa <= 3,0, non la capacità della macchina: il massimo
+misurato è 3,33 e la MEDIA è 3,09, entrambi SOTTO le 4 CPU
+disponibili — **CORREZIONE (2026-11-10)**: la frase precedente "il
+carico satura e supera le 4 CPU" era sbagliata, 3,33 < 4. Ipotesi NON
+verificata, solo proposta: l'overhead di `cutechess-cli` stesso
+(oltre ai 6 processi motore) spiegherebbe un carico medio di 3,09 su
+4 core anche a concurrency 3, ma questo non è stato isolato né
+misurato separatamente — resta un'ipotesi, non un fatto accertato).
+**Concurrency SCELTA PER LA RUN VERA: 2** (ripiego, quella di
+`scripts/sprt_match.sh`) — nessun secondo pilota, come da regola.
 
 Punteggio riferimento-contro-riferimento (informativo, NON un
 criterio): A 75 - 52 - 73 B, punteggio 0,557 (55,7%) su 200 partite —
@@ -484,6 +563,24 @@ File: `~/c1_pilot/results/{header.txt,match.pgn,cutechess.log,load_samples.csv}`
 su Oracle. sha256: `match.pgn` `788c1d3f667d2d53fe8c52a5267877ea64f23d44c514ddf562941273541aec01`,
 `load_samples.csv` `0cafb639bbbe9e0942340014be4ed532f63bd6bfbe32d4e370b4928ce786e37a`,
 `pilot_c1_concurrency.sh` `388a31a1fa471b859b1c7ee1e3650ef3125f12789d60d7409a35f771439c53b7`.
+
+### Analisi gratuita del pilota (solo calcolo sul PGN esistente, 2026-11-10)
+
+Nessuna partita nuova. Solo numeri, nessun giudizio.
+
+- **Per colore**: A bianco (100 partite) punteggio 0,7550; A nero (100
+  partite) punteggio 0,3600 — differenza di 39,5 punti percentuali.
+- **Per slot motore**: A (slot 1) 0,5575 su 200; B (slot 2) 0,4425 su 200.
+- **Tabella pentanomiale** (100 coppie, stessa apertura/FEN, colori
+  invertiti — tutte appaiate, 0 orfane): somma punteggio di A sulla
+  coppia = 0,0 (A perde entrambe): 4 coppie; 0,5: 15; 1,0: 44; 1,5: 28;
+  2,0 (A vince entrambe): 9.
+- **Per metà cronologica** (per round, non per indice di partita):
+  round 1-50, punteggio A = 0,5950 (100 partite); round 51-100,
+  punteggio A = 0,5200 (100 partite).
+- **Termination** (solo il campo del PGN): "adjudication" 146/200,
+  nessun tag 54/200 (finali normali: matto, 3-fold, 50 mosse,
+  materiale insufficiente, stallo).
 
 ## Seed e versioni degli script
 
@@ -499,9 +596,15 @@ Non applicabile: nessun dato generato, nessuna rete esterna usata.
 ## Numero di test previsti sullo stesso tema (EMENDATO 2026-11-10)
 
 **UN SOLO K per ora: K=250** ("mite": all'estremo p95 del campione di
-20 posizioni, history≈256, l'aggiustamento è ≈1 ply; all'estremo p5,
-history≈-132, ≈-1 ply — vedi report di chat per i percentili
-completi). `K=125` ("aggressivo", ≈2 ply all'estremo positivo) è
+20 posizioni, history≈256, l'aggiustamento è ≈1 ply — `256/250` troncato
+verso zero = 1). **CORREZIONE (2026-11-10)**: la frase "al p5≈-132,
+l'aggiustamento è ≈-1 ply" (presente in una versione precedente) è
+FALSA con la divisione intera troncata verso zero: `-132/250 = -0,528`
+troncato = **0**, non -1. Per la distribuzione REALE dell'aggiustamento
+con K=250 (non dedotta dai soli percentili, ma misurata) vedi la
+tabella nella sezione "Cambiamento esatto" sopra (riga K=250): 0 per
+l'84-90% delle mosse, +1/+2 per la coda positiva, -1/-2 solo per lo
+0,2-3,9% (code negative più estreme di -132). `K=125` ("aggressivo", ≈2 ply all'estremo positivo) è
 pre-registrato come SECONDO test, ma si misura SOLO SE K=250 non
 risulta NEGATIVO (cioè se è ACCETTATO o INCONCLUSIVO) — a differenza
 della versione precedente di questo protocollo, che prevedeva
