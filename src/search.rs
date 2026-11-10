@@ -66,6 +66,12 @@ const LMP_MAX_DEPTH: i32 = 8;
 const LMR_MIN_DEPTH: i32 = 3;
 const LMR_MIN_MOVE_COUNT: i32 = 4;
 
+/// C1 (`docs/experiments/02-lmr-history-c1.md`): divisor for the
+/// quiet-move-history-based adjustment to the LMR reduction
+/// (`reduction -= (history / K).clamp(-2, 2)`). First value
+/// pre-registered for SPRT; not yet measured in a real game.
+const LMR_HISTORY_K: i32 = 250;
+
 /// Base reduction for Null Move Pruning. The actual reduction is
 /// `NULL_MOVE_BASE_REDUCTION + new_depth / 4`: the deeper we are, the more
 /// aggressively we can afford to reduce, because any resulting error is
@@ -797,6 +803,11 @@ fn negamax(
             continue;
         }
 
+        // C1 (docs/experiments/02-lmr-history-c1.md): side-to-move BEFORE
+        // executing `m`, needed to read its history cell for the LMR
+        // adjustment below (esegui_mossa flips board.turno).
+        let c1_moving_side = board.turno.indice();
+
         if board.esegui_mossa(&m, z, nnue) {
             moves_searched += 1;
             if is_quiet && quiets_tried_count < quiets_tried.len() {
@@ -825,6 +836,17 @@ fn negamax(
                     && !in_check
                 {
                     reduction = lmr_reduction(new_depth, moves_searched);
+
+                    // C1 (docs/experiments/02-lmr-history-c1.md): calibrate
+                    // the reduction on the quiet move's own history --
+                    // already computed, already used for move ordering, no
+                    // extra cost beyond this one load. A move with high
+                    // history (likely good) is reduced less; a move with
+                    // low/negative history (likely bad) is reduced more.
+                    let hist = sh.history[c1_moving_side][m.da()][m.a()].load(Ordering::Relaxed);
+                    let hist_adj = (hist / LMR_HISTORY_K).clamp(-2, 2);
+                    reduction -= hist_adj;
+
                     reduction = reduction.clamp(0, new_depth - 2);
                 }
 
