@@ -103,6 +103,40 @@ non viene cancellato.
   è un caso isolato da indagare — ma non si procede a una decisione
   finché la causa non è chiarita).
 
+## Build dei due binari (riferimento e nuova)
+
+Entrambi i binari per questa misura sono build **release NORMALI** —
+NON build PGO, stessa toolchain e stessi flag per entrambe, nessuna
+differenza di build fra le due oltre al cambiamento di codice del
+Punto A:
+
+- Toolchain: `rustc 1.92.0`, canale `stable-x86_64-pc-windows-msvc`
+  (quella attiva su questa macchina al momento di scrivere questo
+  protocollo; se diversa al momento della misura, riportare la
+  versione reale usata).
+- Target: `x86_64-pc-windows-msvc`.
+- `RUSTFLAGS` non impostato (stringa vuota esplicita, stesso schema
+  di `scripts/build_release.ps1` per l'asset Windows pubblicato: nessun
+  `target-cpu` diverso dal default del target).
+- Profilo: quello di `[profile.release]` in `Cargo.toml`
+  (`lto = true`, `codegen-units = 1`, `opt-level = 3`) — non toccato,
+  identico per i due binari.
+- Comando: `cargo build --release --target x86_64-pc-windows-msvc`,
+  da un archivio pulito (`git archive`) di ciascun commit (riferimento
+  = commit prima della modifica del Punto A; nuova = commit con la
+  modifica), non dalla cartella di lavoro.
+- **Non misurato sotto PGO.** Questo protocollo riguarda solo la
+  build release normale. Se in futuro si vuole sapere se il guadagno
+  (o la sua assenza) cambia sotto PGO, è un esperimento a parte, non
+  questo.
+
+### Hash dei binari
+
+*(Da compilare al momento della misura, non ora)*
+
+- Riferimento (`rif`): commit `___`, sha256 `___`
+- Nuova (`nuova`): commit `___`, sha256 `___`
+
 ## Misura di velocità (SOLO dopo il gate, SOLO quando Daniele scrive "libero")
 
 Metodo 3b di `docs/METHOD.md` (quello usato per le misure della
@@ -115,13 +149,26 @@ Metodo 3b di `docs/METHOD.md` (quello usato per le misure della
 - Mediana dei 3 giri per posizione; rapporto tempo_rif / tempo_nuovo.
 - Media geometrica G sulle 100 posizioni.
 - Intervallo di confidenza al 95% per bootstrap sulle posizioni
-  (10.000 ricampionamenti). **Due semi**: `20261103` (lo stesso usato
-  nelle misure della 4.2.0, per confrontabilità diretta con quelle
-  cifre) e `20261110` (nuovo, scelto e dichiarato qui, data di oggi —
-  da riportare entrambi i risultati, non solo uno).
+  (10.000 ricampionamenti). **Due semi, ruoli diversi**: `20261103`
+  (lo stesso usato nelle misure della 4.2.0) è quello che **decide**
+  (regola di decisione sopra applicata a QUESTO seme); `20261110`
+  (nuovo, data di oggi) è SOLO un controllo di stabilità del
+  Monte Carlo — serve a vedere se G e l'IC cambiano in modo
+  sostanziale cambiando seme, non a decidere. **Se le due decisioni
+  (quella risultante dal seme 20261103 e quella che risulterebbe dal
+  seme 20261110, applicando la stessa regola) divergono: riportare
+  entrambe ed entrambi i numeri, e NON decidere** — è un segnale che
+  il bootstrap non è ancora stabile su questa run, non un pareggio da
+  risolvere a favore di uno dei due.
 - **Copia byte-identica del riferimento** come partecipante
   aggiuntivo, per stimare la soglia di rumore della stessa run
-  (docs/METHOD.md §4).
+  (docs/METHOD.md §4). **Validità della run**: la copia
+  byte-identica deve dare G nell'intervallo [0,995; 1,005] E un IC95%
+  che include 1. Se anche una sola di queste due condizioni non è
+  soddisfatta, la run intera è **NON VALIDA**: si riporta (senza
+  applicare la regola di decisione a nessuno dei due numeri) e si
+  ripete da capo a macchina più tranquilla — non si decide su una run
+  che non supera il proprio controllo di rumore.
 
 ## Effetto atteso e numero di partite previsto
 
