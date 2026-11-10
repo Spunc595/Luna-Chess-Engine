@@ -83,7 +83,11 @@ per esempio `BENCHMARKS.md:1111` (`-rounds 4000 -games 2 -repeat`) e
 
 ---
 
-## 3. Lo stimatore: il minimo, con la mediana come controllo
+## 3. Lo stimatore
+
+Questo documento distingue due livelli, perché non coincidono:
+
+### 3a. Pratica storica documentata nel repository
 
 > "The estimator is the **minimum**: noise on a shared machine is
 > one-sided. The median is printed as a check."
@@ -98,26 +102,59 @@ unico: la misura più vicina alla verità, tra k ripetizioni dello stesso
 codice, è la più rapida, non la media né la mediana. La mediana resta
 utile come controllo incrociato: se minimo e mediana raccontano storie
 diverse (una build "vince" sul minimo ma "perde" sulla mediana), è un
-segnale di rumore non ancora isolato, non una conferma pulita.
+segnale di rumore non ancora isolato, non una conferma pulita. Questo è il
+metodo di `scripts/bench_suite.py`, su un numero piccolo e fisso di
+posizioni (due: mediogioco e finale pedoni, `BENCHMARKS.md:36-39`).
 
-**Nota onesta su questo documento**: alcune richieste di chi ha scritto
-questo documento menzionavano, come alternativa al minimo, "la media
-geometrica dei rapporti con bootstrap". Questo metodo **non è quello che
-`scripts/bench_suite.py`/`BENCHMARKS.md` usano per le misure di velocità**
-(che usano minimo + mediana, sezione sopra): un bootstrap a 10.000
-ricampionamenti con seme fisso è effettivamente praticato nel progetto, ma
-per una statistica diversa — il confronto di una correlazione (Spearman)
-prima/dopo una scala applicata alla rete, non un rapporto di velocità:
+Nel repository pubblico esiste anche un bootstrap a 10.000 ricampionamenti
+con seme fisso, ma per una statistica diversa — il confronto di una
+correlazione (Spearman) prima/dopo una scala applicata alla rete, non un
+rapporto di velocità:
 
 > "paired bootstrap of the difference (scaled - raw), 10,000 resamples,
 > seed `20260923`: 95% CI [-0.0015, +0.0005]"
 > — `BENCHMARKS.md:490`
 
-Non essendo questo il metodo documentato per la velocità, questo documento
-non lo presenta come tale. Un futuro esperimento che misuri un rapporto di
-velocità con media geometrica e bootstrap sarebbe una **estensione** del
-metodo esistente, da dichiarare come tale nel proprio protocollo, non una
-descrizione di una pratica già in uso per le misure di nodi/secondo.
+### 3b. Regole adottate per le misure della 4.2.0 e da qui in avanti
+
+Per i confronti di velocità della 4.2.0 (PGO, AVX2, `MoveList`) è stato
+effettivamente usato **"media geometrica dei rapporti con bootstrap"** —
+non è un'invenzione del piano, è la regola scritta e seguita per quelle
+misure specifiche, fissata in protocolli di lavoro non pubblicati nel
+repository (non in `BENCHMARKS.md`/`PERF_NOTES.md`/`HISTORY.md`). Il
+metodo, così come fissato in quei protocolli:
+
+- Non due posizioni fisse, ma un **campione di 100 posizioni di test**
+  (disgiunto da un campione di addestramento, quando applicabile), a
+  profondità fissa (14), Threads 1, Hash 64, `ucinewgame` prima di ogni
+  posizione.
+- **3 giri** per build per posizione; per ogni posizione si prende la
+  **mediana dei 3 giri**, poi il **rapporto tempo_riferimento /
+  tempo_nuovo**.
+- **Media geometrica G** di questo rapporto sulle 100 posizioni.
+- **Intervallo di confidenza al 95% per bootstrap sulle posizioni** (10.000
+  ricampionamenti, seme fisso — stesso seme dichiarato nel protocollo, per
+  esempio quello della data di scrittura del protocollo).
+- **Validità**: se i nodi di riferimento e nuovo non sono identici anche in
+  una sola posizione/giro, quella misura è nulla e va riportata come tale,
+  non scartata in silenzio.
+- **Regola di decisione fissata prima dei dati**: una soglia su G e una
+  sul limite inferiore dell'intervallo (es. G ≥ 1,05 e limite inferiore >
+  1,03 per un candidato forte; soglie più permissive per cambiamenti che
+  "devono solo pagarsi" il proprio codice aggiuntivo). Non è un SPRT
+  (niente `elo0`/`elo1`/`alpha`/`beta`): è una soglia su un rapporto di
+  velocità con intervallo di confidenza, usata appositamente per
+  cambiamenti non funzionali (nodi identici per costruzione), non per
+  giudicare la forza di gioco.
+
+**Questo non contraddice la sezione 3a, la estende**: 3a resta la pratica
+storica descritta nel repository fino alla 4.2.0 (due posizioni fisse,
+minimo come stimatore); 3b è il metodo più elaborato (100 posizioni
+campionate, media geometrica dei rapporti, bootstrap) effettivamente usato
+per decidere cosa entrasse nella 4.2.0, non scritto nelle fonti pubbliche. Un
+futuro esperimento che segue 3b deve dichiararlo esplicitamente nel proprio
+protocollo (quale seme, quante posizioni, quale soglia), non assumerlo come
+ovvio.
 
 ---
 
@@ -226,6 +263,40 @@ registrata):
 - L'uso del flag `-recover` di `cutechess-cli` (né la sua presenza né la
   sua assenza sono discusse in queste tre fonti).
 
+### Regole adottate per le misure della 4.2.0 e da qui in avanti
+
+Queste regole **sono** state fissate per iscritto, ma in protocolli di
+lavoro non pubblicati nel repository (non in nessuna delle tre fonti
+sopra) — quindi non contraddicono quanto appena scritto su "non
+documentato nel repository": sono un livello diverso, più recente, di
+documentazione.
+
+- **"Macchina libera" È una regola scritta per la 4.2.0**: le misure di
+  velocità si fanno solo a condizioni dichiarate esplicitamente — PC
+  collegato alla corrente, schermo che non va in sospensione, nessun'altra
+  applicazione in uso, processo del motore fissato su un core specifico,
+  priorità normale. Non un'annotazione a posteriori come in 3a: una
+  condizione imposta PRIMA di ogni misura.
+- **"Bot fermo" è menzionato una sola volta, per una misura non ancora
+  fatta**: compare come precondizione di un'eventuale futura estensione
+  del PGO a Linux ARM64/Android ("misura pianificata a bot fermo"), non
+  come regola generale già applicata alle misure Windows effettivamente
+  eseguite per la 4.2.0 (quelle sono girate sul PC locale, non sulla
+  macchina dove gira il bot). Resta quindi **da verificare** se "bot fermo"
+  diventerà una regola generale o resterà specifica di quella singola
+  misura futura.
+- **`-recover`**: per la partita di sicurezza della 4.2.0 è stata presa
+  una decisione esplicita di **non usarlo** ("SENZA `-recover`"). Il
+  protocollo non dichiara il motivo di questa scelta; questo documento non
+  lo inventa. Non è una conferma né una contraddizione della sezione 3a
+  (che non discute affatto questo flag): è semplicemente la prima volta
+  che il progetto lo dichiara, in un senso (non usarlo).
+- **Stesso book usato nelle misure di velocità 4.2.0**: non `UHO_4060_v4.epd`
+  (quello è usato per la partita di sicurezza, basata su partite reali), ma
+  un campione di 100 posizioni di test fissate (sha256 dichiarato nel
+  protocollo), separate da un campione di addestramento quando applicabile
+  — per le misure di velocità a profondità fissa, non per le partite.
+
 ---
 
 ## 7. Più SPRT in sequenza sullo stesso tema: rischio di falso positivo
@@ -256,6 +327,17 @@ e se tratta i test come indipendenti o come una sequenza che richiede una
 soglia più severa — questo documento non prescrive quale scelta fare,
 perché il repository non ne registra una.
 
+**Regole adottate per la 4.2.0**: anche nei protocolli di lavoro non
+pubblicati usati per la 4.2.0, più confronti sullo stesso riferimento sono
+stati pianificati e misurati separatamente (due, poi tre varianti di
+velocità contro lo stesso binario di riferimento), ciascuno con la propria
+soglia dichiarata in anticipo — ma senza nessuna correzione formale per il
+rischio di falso positivo cumulato. Questo **confirma**, non contraddice,
+la conclusione di questa sezione: anche al livello più recente di
+documentazione (non pubblicato), il rischio di falso positivo con test
+multipli resta un punto non affrontato formalmente, da decidere e
+dichiarare in ogni nuovo protocollo.
+
 ---
 
 ## 8. Pre-registrazione: il protocollo prima del risultato
@@ -277,6 +359,9 @@ risultati è ampiamente usata nel progetto, sempre con la parola
 **Nota**: il documento `piano-ricerca.md`, citato più volte come il luogo
 dove le regole di decisione vengono fissate in anticipo, **non è nel
 repository** (non tracciato in `origin/main`) — è un documento esterno.
+Cercato anche nei file locali disponibili in questa sessione: non trovato
+in nessuna delle cartelle controllate. Resta quindi non reperibile, da
+questa postazione, per verificarne il contenuto.
 Questo è precisamente il vuoto che `docs/experiments/TEMPLATE.md` (punto 3
 di questo lavoro) comincia a riempire: da qui in avanti, il protocollo di
 ogni esperimento vive nel repository stesso, committato prima del risultato,
