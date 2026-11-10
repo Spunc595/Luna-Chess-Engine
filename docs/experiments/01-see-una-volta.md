@@ -272,6 +272,8 @@ restano quelle fissate sopra, prima dei dati.
 
 ## Esito della misura (2026-11-10)
 
+### (a) Esito pre-registrato
+
 **Gate di correttezza**: nodi IDENTICI rif/nuova su tutte le 300
 posizione/giro misurate (100 posizioni x 3 giri), 0 mismatch. `cargo
 test --release` verde (vedi Fase 2). 900 righe grezze nel CSV
@@ -298,7 +300,9 @@ distinguibile dal rumore di questa run.
 
 **La regola di decisione NON è stata applicata** a rif/nuova per
 questo motivo (come previsto dal protocollo in caso di run non
-valida): i numeri sopra sono riportati, non usati per decidere.
+valida): i numeri sopra sono riportati, non usati per decidere. **La
+modifica NON entra** sulla base di questa run (nessuna decisione presa,
+né ACCETTA né NEGATIVO: manca un dato valido).
 
 **Carico macchina durante la misura** (campionamento ogni 30 s,
 `carico_fase3.csv`, sha256
@@ -320,9 +324,80 @@ fissato) durante una misura su CPU a 2 core fisici — coerente con la
 diagnosi già fatta prima del "vai" (velocità ~2,1-2,3x più lenta dello
 storico, dispersione fino al 16% tra giri sulla stessa build).
 
-**Decisione**: non si ripete senza un via libera esplicito. Il ramo
-resta con l'esperimento NON deciso (né accettato né respinto): manca
-un dato valido, non un risultato negativo.
+La regola di validità è scattata esattamente come previsto dal
+protocollo (progettata per questo). Stima grossolana (non calcolata
+formalmente, solo indicativa): su una macchina con questo livello di
+rumore di fondo, circa una run su sette risulterebbe non valida per
+solo rumore statistico, anche a parità di codice.
+
+### (b) Analisi esplorativa post-hoc (dati della stessa run NON VALIDA)
+
+**ESPLORATIVO — non utilizzabile per accettare la modifica.** Calcolata
+sui CSV già raccolti, nessuna nuova misura. Sulle stesse 100 posizioni,
+bootstrap 10.000 ricampionamenti, seme 20261103:
+
+| Confronto | G | IC95% |
+|---|---|---|
+| nuova / copia (byte-identica) | 0,9985 | [0,9904; 1,0064] |
+| copia (byte-identica) / rif | 0,9886 | [0,9744; 1,0007] |
+
+Nessuno dei tre confronti a coppie (rif/nuova, rif/copia, nuova/copia)
+è a sua volta coerente con gli altri due (se fossero tutti dovuti a
+rumore indipendente simmetrico ci aspetteremmo G vicini a 1 su tutti e
+tre, non solo su due): un altro segno che il rumore in questa run non è
+piccolo rispetto all'effetto che si vorrebbe misurare.
+
+**Tabella esplorativa per posto nell'ordine di rotazione** (1=primo,
+2=secondo, 3=terzo eseguibile eseguito in quella posizione/giro; media
+in scala log = log della media geometrica dei tempi, per vedere se il
+quadrato latino lascia un effetto di posizione non bilanciato):
+
+| build | posto | n | media log(ms) | media geometrica (ms) |
+|---|---|---|---|---|
+| rif | 1 | 100 | 6,9626 | 1056,42 |
+| rif | 2 | 100 | 6,9532 | 1046,50 |
+| rif | 3 | 100 | 6,9564 | 1049,87 |
+| nuova | 1 | 100 | 6,9407 | 1033,53 |
+| nuova | 2 | 100 | 6,9508 | 1044,01 |
+| nuova | 3 | 100 | 6,9436 | 1036,45 |
+| copia | 1 | 100 | 6,9479 | 1040,94 |
+| copia | 2 | 100 | 6,9477 | 1040,76 |
+| copia | 3 | 100 | 6,9486 | 1041,69 |
+
+**Tabella esplorativa per giro:**
+
+| build | giro | n | media log(ms) | media geometrica (ms) |
+|---|---|---|---|---|
+| rif | 1 | 100 | 6,9654 | 1059,38 |
+| rif | 2 | 100 | 6,9530 | 1046,26 |
+| rif | 3 | 100 | 6,9539 | 1047,18 |
+| nuova | 1 | 100 | 6,9466 | 1039,62 |
+| nuova | 2 | 100 | 6,9488 | 1041,86 |
+| nuova | 3 | 100 | 6,9397 | 1032,50 |
+| copia | 1 | 100 | 6,9513 | 1044,54 |
+| copia | 2 | 100 | 6,9467 | 1039,69 |
+| copia | 3 | 100 | 6,9462 | 1039,17 |
+
+Differenze fra posto/giro entro ~2% in tutti i casi, molto più piccole
+del G=1,0130/1,0115 che non si riesce a spiegare: nessun effetto grande
+e sistematico di posizione-nell'ordine o di giro che il quadrato latino
+lascerebbe passare. Il rumore osservato sembra quindi più legato a
+variazioni nel tempo (carico di fondo intermittente) che a un bias
+strutturale della rotazione.
+
+**Perché non si ripete la run ora**: il problema diagnosticato (carico
+di fondo intermittente su una CPU a 2 core fisici) non è stato
+rimosso, solo misurato; ripetere subito sulla stessa macchina nello
+stesso stato avrebbe un'alta probabilità di restare rumoroso. Serve un
+intervento esplicito (macchina più tranquilla, momento diverso, o
+accettare un intervallo di tolleranza diverso dichiarato PRIMA di una
+nuova run) prima di riprovare — da decidere con un "vai" a parte.
+
+**Archivio dei dati grezzi**: CSV e log spostati fuori dal repository
+in `lavoro\archivio_puntoA_fase3_20261110\` (non cancellati):
+`misura_fase3_reale.csv`, `misura_fase3_reale.log`,
+`dry_run_fase3.csv`, `dry_run_fase3_3giri.csv`, `carico_fase3.csv` —
+sha256 già riportati sopra e nel report di chat.
 
 ## Hash del commit del protocollo
 
