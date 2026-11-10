@@ -310,6 +310,21 @@ documentazione.
   protocollo), separate da un campione di addestramento quando applicabile
   — per le misure di velocità a profondità fissa, non per le partite.
 
+### Regole obbligatorie, adottate il 2026-11-10
+
+Queste tre regole valgono da qui in avanti per ogni esperimento, non solo
+per la 4.2.0:
+
+(a) **Macchina libera per ogni misura di velocità**: PC collegato alla
+    corrente, nessun'altra applicazione in uso, processo del motore
+    fissato su un core specifico.
+(b) **Bot fermo, se la misura gira sulla macchina del bot**: se la
+    misura avviene sulla stessa macchina dove gira il bot, il bot va
+    fermato prima di misurare.
+(c) **Partita di sicurezza senza `-recover`**: perché un crash deve
+    risultare come tale, non essere mascherato da un riavvio automatico
+    dell'engine a metà partita.
+
 ---
 
 ## 7. Più SPRT in sequenza sullo stesso tema: rischio di falso positivo
