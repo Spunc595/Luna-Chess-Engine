@@ -616,26 +616,99 @@ Nessuna partita nuova. Solo numeri, nessun giudizio.
 
 ## Comando SPRT preparato, NON eseguito (AGGIUNTO 2026-11-10)
 
-### BLOCCO trovato: `scripts/sprt_match.sh` non supporta i parametri di questo protocollo
+### RISOLTO (2026-11-10): variante dedicata `scripts/sprt_match_c1.sh`, script condiviso NON toccato
 
-Letto `scripts/sprt_match.sh` (`80b1648`, invariato): **`elo1` e il
-libro sono CABLATI nello script, non parametri**:
+Decisione di Daniele: NON modificare `scripts/sprt_match.sh`. Creata
+una copia dedicata, `scripts/sprt_match_c1.sh` (commit `7c353fad3dfcf58f38e6338d6f5e4864c1cfbe74`,
+sha256 `10ff7e2b132fe75efa24d4c884d7449e31b43af0c99528107241f2775e14f6ec`),
+con SOLO le differenze richieste da questo protocollo.
+
+**Confronto opzione per opzione** (`diff` reale fra i due script, non
+dedotto):
+
+| Opzione cutechess-cli | `sprt_match.sh` | `sprt_match_c1.sh` | Esito |
+|---|---|---|---|
+| concurrency | 2 | 2 | uguale |
+| tc | 10+0.1 | 10+0.1 | uguale |
+| Hash | 64 | 64 | uguale |
+| Threads | 1 | 1 | uguale |
+| libro (file) | `8moves_v3.pgn` | `UHO_4060_v4.epd` | **cambiato, perché (protocollo): libro diverso richiesto** |
+| libro (formato) | `format=pgn` | `format=epd` | **cambiato, perché (protocollo): conseguenza del cambio di libro (l'epd non è un pgn)** |
+| order | random | random | uguale |
+| `-repeat` | presente | presente | uguale |
+| `-games` | 2 | 2 | uguale |
+| `-rounds` | argomento (storicamente 6000 per 12.000 partite) | argomento (8000 per 16.000 partite) | **cambiato, perché (protocollo): tetto di partite diverso (16.000 vs 12.000) — il meccanismo (argomento) è identico, solo il valore passato cambia** |
+| `-srand` | argomento | argomento | uguale (meccanismo; valore 20261103 invariato, standard di progetto) |
+| adjudication draw | movenumber=40 movecount=6 score=10 | identico | uguale |
+| adjudication resign | movecount=4 score=600 | identico | uguale |
+| `-recover` | presente | presente | uguale (confermato da Daniele: resta anche per questo SPRT) |
+| ponder | non impostato (nessuna opzione per l'engine) | non impostato | uguale |
+| `-sprt` | elo0=0 **elo1=10** alpha=0.05 beta=0.05 | elo0=0 **elo1=5** alpha=0.05 beta=0.05 | **cambiato, perché (protocollo): elo1 emendato a 5** |
+| output PGN | `$OUT/match.pgn` | `$OUT/match.pgn` (stesso schema, NAME diverso) | uguale |
+| log | `$OUT/cutechess.log` | `$OUT/cutechess.log` | uguale |
+
+**Le uniche differenze sono esattamente quelle ammesse**: libro/formato,
+elo1, e il tetto di partite (che si traduce nel valore di `-rounds`
+passato, non in una modifica del meccanismo). Nessun'altra differenza
+trovata — confermato con un `diff` reale, non per ricostruzione a
+memoria.
+
+### Modello SPRT (RICONFERMATO 2026-11-10)
+
+`cutechess-cli` **1.5.1** (Qt 6.4.2, Ubuntu 24.04.4 LTS/arm64) su
+Oracle. Nessuna opzione `model=` in `--help` — il modello è fisso nel
+codice (`~/cutechess/projects/lib/src/sprt.cpp`, già letto in Fase
+3b-1): **BayesElo/trinomiale esatto**, non la scala logistica semplice
+del calcolo di Wald usato altrove in questo protocollo per la stima
+del numero di partite. `elo0`/`elo1` passati a `-sprt` sono Elo
+normalizzato, convertiti internamente in BayesElo con un fattore
+`scale` stimato DALLA RUN STESSA (online, non fissato in anticipo).
+
+**Come si traducono le 12.800 partite attese del protocollo (stima di
+Wald, assunzione `d=0,50`) in questo modello**: quel numero resta
+un'APPROSSIMAZIONE con un modello più semplice (normale, non
+trinomiale esatto) — non ricalcolato esattamente sotto il vero LLR di
+`cutechess-cli` (richiederebbe una simulazione, non fatta). Con il
+tasso di pareggi REALE misurato dal pilota (36,5%), la stessa stima di
+Wald sale a ≈16.250 (vedi "Calcolo del numero atteso di partite"
+sopra) — un numero più realistico della stima originale, ma SEMPRE
+un'approssimazione del modello di Wald, non il numero esatto sotto il
+modello BayesElo/trinomiale di `cutechess-cli`. **Limiti NON
+cambiati**: elo0=0, elo1=5, alpha=beta=0,05 restano quelli
+confermati da Daniele.
+
+### Compatibilità di `scripts/sprt_report.py` (VERIFICATA 2026-11-10)
+
+Eseguito, SENZA modifiche, su `~/c1_pilot/results/` (il PGN/log/header
+del pilota — stesso schema di cartella di `sprt_match.sh`/
+`sprt_match_c1.sh`, anche se il pilota non li ha generati con quello
+script): **funziona correttamente**, nessun campo mancante:
 ```
-SPRT="-sprt elo0=0 elo1=10 alpha=0.05 beta=0.05"   # elo1=10 fisso
-OPEN=$HOME/sprt2/openings/8moves_v3.pgn            # libro fisso, format=pgn
+games: 200   A: +75 =73 -52   score 0.5575   Elo(A-B) ~ +40.1
+draw rate: 0.3650
+GAMES LOST ON TIME: 0   (match VALID on this criterion)
+terminations: adjudication: 146, normal/unspecified: 54
+abnormal terminations (illegal move / stall / disconnect / crash): 0
+Elo difference: 40.1 +/- 38.6, LOS: 97.9 %, DrawRatio: 36.5 %
+SPRT: llr 0 (0.0%), lbound -inf, ubound inf
+Finished match
 ```
-Questo protocollo richiede `elo1=5` e il libro `UHO_4060_v4.epd`
-(formato `epd`, non `pgn`). **Lo script condiviso NON è stato
-modificato** (stessa logica già applicata a `-recover`). Per lanciare
-davvero questo SPRT serve una variante dedicata (stesso schema già
-usato per `scripts/pilot_c1_concurrency.sh`, non ancora scritta: in
-attesa di conferma, come per `-recover`, se preferisci una copia
-dedicata o una modifica allo script condiviso). Concurrency, Hash,
-Threads, tc, `-repeat`, `-recover` nello script sono già quelli
-giusti e non vanno cambiati.
+I numeri (score 0,5575, draw rate 0,3650) coincidono ESATTAMENTE con
+quelli calcolati a mano nell'analisi gratuita del pilota — conferma
+incrociata indipendente, non solo una ripetizione dello stesso calcolo.
+`SPRT: llr 0 ... -inf/-inf` perché il pilota non è stato lanciato con
+`-sprt` (partite a numero fisso, come da disegno del pilota): atteso,
+non un problema dello script.
 
-### Riga di comando `cutechess-cli` equivalente (quella che la variante dedicata dovrebbe eseguire)
+### Comando di lancio tramite `scripts/sprt_match_c1.sh` (preparato, NON eseguito)
 
+```
+scripts/sprt_match_c1.sh c1_k250_sprt \
+  /home/ubuntu/c1_pilot/sprt_candidato /home/ubuntu/c1_pilot/sprt_riferimento \
+  8000 sprt 20261103
+```
+equivalente, per intero, al comando `cutechess-cli` che lo script
+esegue internamente:
 ```
 ~/cutechess/build/cutechess-cli \
   -engine name=A cmd=./luna dir=/home/ubuntu/c1_pilot/sprt_candidato proto=uci option.Hash=64 option.Threads=1 \
@@ -644,25 +717,28 @@ giusti e non vanno cambiati.
   -games 2 -rounds 8000 -repeat -concurrency 2 \
   -draw movenumber=40 movecount=6 score=10 -resign movecount=4 score=600 -recover \
   -ratinginterval 100 -sprt elo0=0 elo1=5 alpha=0.05 beta=0.05 \
-  -pgnout ~/c1_pilot/sprt_run/match.pgn > ~/c1_pilot/sprt_run/cutechess.log 2>&1
+  -pgnout ~/sprt2/results/c1_k250_sprt/match.pgn > ~/sprt2/results/c1_k250_sprt/cutechess.log 2>&1
 ```
 - `A` = candidato (K=250, sha256 `e56bac5a...eef27`), `B` = riferimento
   (sha256 `651cf1a7...31a436`) — stessa convenzione A=candidato/
   B=riferimento usata nei match storici G1-G5/D4/G2b.
-- `-rounds 8000` = tetto di 16.000 partite / 2 (`-games 2 -repeat`).
-- Percorso output: `~/c1_pilot/sprt_run/` (nuovo, non ancora creato).
-- Avvio staccato dalla sessione: `tmux new -d -s c1_sprt '<comando sopra>'`
-  (o `nohup ... &` con `disown`, equivalente). Controllo: `tmux attach
-  -t c1_sprt` per vedere l'output live, oppure `tail -f
-  ~/c1_pilot/sprt_run/cutechess.log` e `grep -c '^\[Event'
-  ~/c1_pilot/sprt_run/match.pgn` per il conteggio partite, senza
-  bisogno di restare attaccati alla sessione SSH.
+- `8000` round = tetto di 16.000 partite / 2 (`-games 2 -repeat`).
+- Percorso output: `~/sprt2/results/c1_k250_sprt/` (schema identico a
+  `sprt_match.sh`, usato anche dalla variante).
+- Avvio staccato dalla sessione: `tmux new -d -s c1_sprt
+  'scripts/sprt_match_c1.sh c1_k250_sprt ... 8000 sprt 20261103'` (o
+  `nohup ... &` con `disown`, equivalente). Controllo: `tmux attach -t
+  c1_sprt` per l'output live, oppure `tail -f
+  ~/sprt2/results/c1_k250_sprt/cutechess.log` e `grep -c '^\[Event'
+  ~/sprt2/results/c1_k250_sprt/match.pgn` per il conteggio partite, e
+  `python3 scripts/sprt_report.py ~/sprt2/results/c1_k250_sprt`
+  (verificato compatibile sopra) per il riepilogo, senza bisogno di
+  restare attaccati alla sessione SSH.
 - Condizioni rilette ORA (2026-11-10, non prima): `nproc=4` ✓, bot
   `luna-bot` fermo (`inactive`) ✓, spazio libero 5,7 GB ✓ (sopra la
   soglia di 1 GB).
 
-**NON eseguito.** In attesa del via esplicito di Daniele, che deve
-anche decidere la questione dello script condiviso sopra.
+**NON eseguito.** In attesa del "via" esplicito di Daniele.
 
 ## Dati e licenze
 
