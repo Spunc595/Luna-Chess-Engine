@@ -404,9 +404,85 @@ gli esperimenti di forza, non solo di velocità.
 
 ## 9. Confronto con le pratiche esistenti
 
-Non è stato verificato cosa facciano gli strumenti esistenti. Elementi che
-questo repository applica insieme: gate sui nodi, copia identica come
-soglia, protocollo scritto prima.
+Ricerca limitata del 2026-11-10 (circa 15 ricerche e alcune pagine
+aperte): i riassunti delle pagine sono di seconda mano e molte evidenze
+sono solo anteprime dei risultati di ricerca. Non è esaustiva:
+l'assenza di risultati non prova che una pratica non esista (le chat dei
+motori, ad esempio Discord, non sono indicizzate). Le pagine citate sono
+state aperte e verificate dal dev (Claude) in questa stessa sessione;
+dove la verifica ha trovato una differenza rispetto al testo originale
+della ricerca, è segnalata e corretta qui sotto.
+
+### Già noto
+- Gate sui nodi: la wiki "Developers" di Stockfish
+  (github.com/official-stockfish/Stockfish/wiki/Developers, **verificato
+  dal dev**) descrive un *git hook* di `pre-push` — opzionale, solo per i
+  maintainer — che impedisce il *push* al branch `master` se il
+  messaggio di commit non contiene "Bench" o "No functional change"
+  (CORREZIONE: non è un blocco sui commit, è un hook di pre-push
+  opzionale). La frase "un bench uguale non garantisce velocità uguale"
+  NON è su questa pagina: rimossa, non supportata dalla fonte citata.
+- Confronti di velocità alternati con intervallo di confidenza:
+  pyshbench e `bench_parallel.sh`, descritti nella wiki di Stockfish
+  "Advanced Topics" (github.com/official-stockfish/Stockfish/wiki/Advanced-Topics,
+  **verificato dal dev**): la pagina raccomanda "almeno 20 bench di
+  default (profondità 13) per ogni build" (gli esempi d'uso nello script
+  stesso usano 10 ripetizioni, non 20 — la pagina lo raccomanda, lo
+  script di esempio ne usa meno); ordine di esecuzione alternato
+  ("swap the execution order to avoid bias"); avviso che "uno speedup
+  dello 0,3% potrebbe essere nel rumore di misura".
+- Test A/A: la guida "Proper Engine Testing" di Danny Hammer
+  (dannyhammer.github.io/engine-testing-guide/strength-testing.html,
+  **verificato dal dev**) raccomanda come primo test un "sanity check
+  del motore di base contro sé stesso", per verificare che l'impianto di
+  test funzioni prima di testare cambiamenti reali (la pagina non usa
+  letteralmente il termine "A/A test", ma descrive esattamente quella
+  pratica).
+- SPRT pentanomiale (GSPRT): github.com/vdbergh/pentanomial
+  (**verificato dal dev**): ogni coppia di partite a colori invertiti è
+  modellata con una distribuzione pentanomiale (cinque esiti per coppia,
+  non tre); il modello trinomiale **sovrastima l'INTERVALLO di
+  confidenza** (lo rende più largo/conservativo del necessario — NON
+  "sovrastima la confidenza": è l'opposto, il trinomiale è più
+  cauto, non più sicuro di quanto dovrebbe), e per questo richiede più
+  partite: nella simulazione d'esempio del repository, 2191 partite
+  (trinomiale) contro 1809 (pentanomiale), un +21% arrotondato a "20%"
+  dal repository stesso.
+- Libri di aperture sbilanciati: il tasso di patte scende molto. Dati
+  verificati dal dev su sp-cc.de/uho_2024.htm (Stefan Pohl): Stockfish 16
+  contro Torch 1, **a thread singolo, tc 3min+1sec** (CORREZIONE: non un
+  "controllo lungo" come riportato nella ricerca iniziale — è un
+  controllo breve), 1000 partite: 91,6% di patte con il libro bilanciato
+  `SF_8moves_v3`, 47,0% di patte con `UHO_4060_v3`. Numeri esatti,
+  condizioni corrette rispetto alla ricerca iniziale.
+
+### Non trovato nelle fonti consultate (non significa "nuovo")
+- La copia byte-identica della build di riferimento come partecipante
+  extra per stimare la soglia di rumore della stessa run. L'osservazione
+  che con pochi campioni la soglia stimata è sottostimata è una
+  considerazione statistica generale, non una pratica trovata in fonti
+  sui motori.
+- Il protocollo (ipotesi, soglie, regola di decisione, limiti SPRT)
+  committato prima dei risultati, con registrazione degli esiti negativi.
+  Un thread di TalkChess accenna a chi abbassa i limiti dopo ogni test:
+  è esattamente ciò che la pre-registrazione evita.
+- La sequenza "nodi identici, poi velocità" come procedura unica: le
+  singole parti sono note (sopra), la loro combinazione non è stata
+  trovata descritta.
+
+### Non verificato
+- Se l'LLR di `cutechess-cli -sprt` usa partite singole e non le coppie
+  a colori invertiti. Su cutechess 1.5.1 è stato letto "BayesElo/
+  trinomiale"; le fonti consultate non confermano lo stato attuale del
+  programma.
+- Il tasso di patte nel nostro pilota (riferimento contro riferimento,
+  UHO_4060_v4.epd, 10+0,1) è 36,5%: non è confrontabile con i dati di
+  Pohl (motori e controllo del tempo diversi).
+
+### Implicazione per questo progetto
+Uno strumento con SPRT pentanomiale potrebbe richiedere meno partite
+(circa il 20% in meno nella simulazione citata, da verificare nel nostro
+caso). Non si cambia strumento durante un esperimento già lanciato.
 
 ---
 
