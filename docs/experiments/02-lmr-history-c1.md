@@ -179,6 +179,19 @@ appaiata al volo). Questa regola di conferma è quindi un controllo
 ESTERNO allo strumento, non qualcosa che il `-sprt` di `cutechess-cli`
 fa già da solo.
 
+**ANNOTAZIONE (2026-11-11)**: la regola di conferma con gli slot
+invertiti è stata proposta per iscritto da Claude prima del lancio, a
+partire dai dati del pilota (z≈2,4); è stata committata alle
+16:15:55 UTC del 2026-11-10, circa 11 minuti DOPO il controllo a 1 ora
+(16:04:12 UTC, 265 partite) in cui il dev aveva già riportato colori e
+pentanomiale della run in corso. Il contenuto della regola non dipende
+dai dati della run in corso. La run si ferma comunque in modo
+automatico ai limiti SPRT o al tetto.
+
+Dal 2026-11-11 i report intermedi riportano solo carico, terminazioni
+per lato, numero di partite e LLR; nessuna decisione sulla base dei
+dati parziali.
+
 ## Zona grigia
 
 Se un K è ACCETTATO e l'altro NEGATIVO o INCONCLUSIVO: entra solo il K
