@@ -917,3 +917,60 @@ l'implementazione con K=250.
 ### Esito (Fase 1): criterio pre-registrato NON superato; si procede
 comunque alla Fase 2 per decisione esplicita di Daniele, con questa
 deviazione dichiarata qui prima di qualunque modifica al codice.
+
+---
+
+## Esito dello SPRT, K=250 (Fase 3, 2026-11-12)
+
+### Cosa è stato provato
+
+SPRT vero (non pilota) con `scripts/sprt_match_c1.sh`, candidato
+(slot A, sha256 `e56bac5ac31bce0c6a3f5d7adbae67bd5f1993096d3c5c82183cb2b6b78eef27`,
+K=250) contro riferimento (slot B, sha256
+`651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436`),
+`UHO_4060_v4.epd`, tc 10+0,1, Threads=1, Hash=64, concurrency 2
+(scelta dal pilota), seed 20261103, elo0=0 elo1=5 alpha=beta=0,05,
+tetto 16.000 partite (8.000 round). Lanciato 2026-11-10T15:02:24Z,
+bot `luna-bot` fermo per tutta la durata.
+
+### Risultati misurati
+
+- **Finito**: 2026-11-12T01:48:33Z — durata **34h46m09s**
+  (≈14,17 s/partita effettivi, coerente con la stima storica di
+  14,34 s/partita a concurrency 2).
+- **8.832 partite completate** + **1 non terminata** (round 4417, 5
+  mosse, `Result "*"`, `Termination "unterminated"` — la partita in
+  corso quando lo strumento si è fermato da sé al limite SPRT, stesso
+  schema già documentato per il test IIR in `BENCHMARKS.md:1130-1131`
+  — NON un crash/disconnessione/perdita a tempo).
+- **Punteggio**: A (candidato) +2.336 =4.114 -2.382, score **0,4974**,
+  Elo(A-B) **-1,8 ± 5,3**, LOS 25,2%, tasso di patte **46,6%**.
+- **LLR finale**: **-2,95**, `lbound -2,94`, `ubound 2,94` — **H0
+  ACCETTATO** (di un margine minimo, -2,95 contro -2,94).
+- **Terminazioni** (solo campo `Termination`, per lato): identiche su
+  A e B — 5.716 adjudication, 3.116 senza tag (finali normali), 1
+  unterminated. **0 perdite a tempo/crash/disconnessioni/illegali su
+  entrambi i lati — soglia ≤0,05% OK, bilanciate OK.**
+- Nessun errore nel log, nessuna anomalia di macchina durante la run
+  (controlli periodici: carico stabile ~2,1 su tutta la durata).
+
+### Esito: NEGATIVO per K=250
+
+Per la regola di decisione pre-registrata (LLR raggiunge il limite
+H0): **K=250 NON entra**. Per la regola su "Numero di test previsti"
+(K=125 si misura SOLO SE K=250 non è negativo): **K=125 non si
+misura**. L'esperimento C1 si chiude qui, su entrambi i K
+pre-registrati, senza bisogno della regola di conferma con gli slot
+invertiti (quella si applica solo in caso di ACCETTA).
+
+**Cosa abbiamo imparato (anche se negativo)**: l'ipotesi di Fase 1 (le
+mosse quiete ridotte da LMR con history alta subiscono re-search più
+spesso di quelle a history bassa — confermata in direzione su tutti i
+gruppi misurati) non si traduce in un guadagno di forza misurabile con
+K=250, almeno non ≥5 Elo con questo libro/TC/macchina. L'Elo puntuale
+(-1,8) è leggermente negativo ma con un intervallo (±5,3) che include
+ampiamente lo zero: non si può nemmeno concludere che il cambiamento
+faccia danno, solo che non raggiunge la soglia scelta. Il ramo
+`lmr/history-c1` resta archiviato (non cancellato), stile
+`docs/PERF_NOTES.md`. Bot `luna-bot`: lasciato fermo, decisione sul
+riavvio da chiedere a Daniele, non presa qui.
