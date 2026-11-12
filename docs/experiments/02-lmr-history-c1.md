@@ -956,6 +956,11 @@ bot `luna-bot` fermo per tutta la durata.
 
 ### Esito: NEGATIVO per K=250
 
+**H0 accettato per K=250: nessuna evidenza di un guadagno >= 5 Elo.
+Stima -1,8 +- 5,3 (IC95%), LOS 25,2%. Non dimostra un peggioramento.
+La regola pre-registrata lo chiama NEGATIVO e non fa entrare la
+modifica.**
+
 Per la regola di decisione pre-registrata (LLR raggiunge il limite
 H0): **K=250 NON entra**. Per la regola su "Numero di test previsti"
 (K=125 si misura SOLO SE K=250 non è negativo): **K=125 non si
