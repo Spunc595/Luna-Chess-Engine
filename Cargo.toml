@@ -3,6 +3,7 @@ members = [
     ".",
     "tuner",
     "book_converter",
+    "exp03",
 ]
 
 [package]

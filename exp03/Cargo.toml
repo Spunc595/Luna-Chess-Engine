@@ -1,0 +1,15 @@
+[package]
+name = "exp03"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+luna = { path = ".." }
+
+[[bin]]
+name = "exp03"
+path = "src/main.rs"
+
+[lib]
+name = "exp03"
+path = "src/lib.rs"
