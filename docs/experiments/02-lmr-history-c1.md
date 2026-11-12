@@ -979,3 +979,50 @@ faccia danno, solo che non raggiunge la soglia scelta. Il ramo
 `lmr/history-c1` resta archiviato (non cancellato), stile
 `docs/PERF_NOTES.md`. Bot `luna-bot`: lasciato fermo, decisione sul
 riavvio da chiedere a Daniele, non presa qui.
+
+### Analisi esplorativa post-hoc, pentanomiale (2026-11-12, CORRETTA) — ESPLORATIVO, non cambia l'esito pre-registrato
+
+**Non cambia l'esito**: l'esito ufficiale resta quello sopra (H0
+accettato con l'LLR trinomiale di `cutechess-cli`). Quanto segue è
+solo un calcolo esplorativo, fatto DOPO la fine della run, sugli stessi
+dati.
+
+**Correzione di un calcolo precedente (riportato solo in chat, mai
+committato)**: un primo tentativo di LLR "pentanomiale" aveva dato
+-2,9992 (quasi identico al trinomiale di cutechess, -2,95). Quel
+calcolo convolveva due distribuzioni trinomiali per-partita
+INDIPENDENTI (stimate con la stessa scala BayesElo di `sprt.cpp`) per
+ottenere le 5 categorie per coppia, poi applicava l'LLR categoriale.
+Sotto l'assunzione di indipendenza, `log(P1[mossa]/P0[mossa])` per una
+coppia si scompone esattamente nella somma dei due LLR per-partita
+indipendenti — matematicamente equivalente a ricalcolare l'LLR
+trinomiale raggruppato per coppie, non il vero LLR pentanomiale.
+L'assunzione di indipendenza **annulla esattamente il vantaggio del
+pentanomiale**, che nasce dalla correlazione reale fra le due partite
+della stessa coppia (stessa apertura, colori invertiti) — quella
+correlazione è il dato che il calcolo precedente buttava via.
+
+**Ricalcolo corretto**: approssimazione normale a livello di COPPIA,
+usando la varianza CAMPIONARIA osservata delle coppie (non quella
+derivata da un modello di indipendenza). Per ogni coppia
+`x_i` (somma dei due punteggi, in {0; 0,5; 1; 1,5; 2}):
+`mu0=0,5`, `mu1=s(5 Elo)=0,50719` (punteggi attesi per partita),
+`sigma_p² = varianza campionaria di x_i = 0,198387` (n=4.416 coppie),
+`LLR = [2*(mu1-mu0)/sigma_p²] * Σ(x_i - (mu0+mu1))`.
+
+- **LLR finale: -3,9730** (confine H0: -2,9444).
+- **Supera il confine H0 a 7.198 partite** (contro le 8.832 reali del
+  trinomiale di cutechess) — **1.634 partite in meno, ≈18,5%**, in
+  linea con il ≈20% della simulazione citata in `docs/METHOD.md` §9
+  (`vdbergh/pentanomial`).
+- Progressione ogni 500 partite: 500→-0,60; 1000→-0,55; 1500→-0,68;
+  2000→-0,99; 2500→-0,25; 3000→-0,24; 3500→-0,26; 4000→+0,12;
+  4500→-0,78; 5000→-1,74; 5500→-1,98; 6000→-2,04; 6500→-2,57;
+  7000→-2,26; 7500→-3,19; 8000→-3,32; 8500→-3,16.
+
+**Implementazione esatta di `vdbergh/pentanomial` (MLE
+multinomiale)**: NON disponibile in questa sessione (libreria non
+installata, solo il README era stato letto via web in precedenza) —
+NON eseguita. Il ricalcolo sopra è l'approssimazione normale a livello
+di coppia con varianza empirica, non l'implementazione esatta del
+repository citato.
