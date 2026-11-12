@@ -500,8 +500,9 @@ dalla soglia pre-registrata di ±0,5%: la run è stata dichiarata non
 valida, come previsto, e non è stata usata per decidere. Anche il
 confronto riferimento-nuova aveva un IC95% di circa ±1,2%
 ([1,0027; 1,0266]). Il rumore era quindi circa il doppio di quello
-stimato prima della misura (nel protocollo 01, "circa una run su sette
-non valida per solo caso", basata su un errore standard di circa 0,35%).
+stimato prima della misura (nel protocollo 01: «circa una run su sette
+non valida per solo caso»; ricostruita a ritroso, equivale a un errore
+standard di circa 0,35%, valore non scritto nel protocollo).
 Con un errore standard di circa 0,7% un criterio "copia entro ±0,5% da
 1" fallirebbe circa una volta su due (calcolo grossolano). Per
 confronto, nelle misure della 4.2.0 (protocolli di lavoro non
