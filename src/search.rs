@@ -942,7 +942,7 @@ fn negamax(
     best_val
 }
 
-fn quiescence(
+pub fn quiescence(
     board: &mut Scacchiera,
     mut alpha: i32,
     beta: i32,

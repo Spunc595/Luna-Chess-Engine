@@ -424,9 +424,18 @@ ogni processo resta a Threads=1 al suo interno.
 
 ## Verifica della modifica a `quiescence`
 
-Da riempire nel commit che rende `pub` `src/search.rs:945` (vedi 2e):
-hash del commit, output del bench a profondità 18 Threads 1 (nodi
-attesi 590.820 e 980.165).
+`fn quiescence` -> `pub fn quiescence` in `src/search.rs:945`, nessun
+altro cambiamento (hash del commit nella sezione "Hash del commit del
+protocollo" sotto, aggiornato dopo). Bench a profondità 18, Threads 1,
+Hash 256, stesse due posizioni e lo stesso protocollo UCI di
+`scripts/bench_suite.py` (`go depth 18 movetime 600000`):
+- mediogioco (90 semi-mosse dalla posizione iniziale): nodes=590820
+  nps=281476 time=2099ms — **identico all'atteso (590.820)**.
+- finale_pedoni (`8/5pk1/6p1/8/1P6/P4PKP/8/8 w - - 0 40`): nodes=980165
+  nps=430274 time=2278ms — **identico all'atteso (980.165)**.
+
+Sha256 del binario usato per questo bench:
+`619d0b85907db63d73f93c8e649d6e88e1b519dc4fe53e4a7fd0530163a77f45`.
 
 ## Book e suo sha256
 
