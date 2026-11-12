@@ -486,6 +486,83 @@ caso). Non si cambia strumento durante un esperimento già lanciato.
 
 ---
 
+## 10. Lezioni dai primi due esperimenti (2026-11-12)
+
+Valgono per gli esperimenti 01 (SEE calcolata una volta in qsearch) e 02
+(LMR calibrata sulla history, K=250); i dati stanno nei protocolli
+archiviati (`archive/exp-01-see-una-volta`,
+`archive/exp-02-lmr-history-c1`).
+
+### 10.1 La soglia di validità della copia identica va scelta sul rumore atteso
+Nell'esperimento 01 la copia byte-identica del riferimento ha dato
+G = 1,0115 (IC95% [0,9993; 1,0263]), fuori dalla soglia pre-registrata
+±0,5%: la run è stata dichiarata non valida, come previsto, e non è stata
+usata per decidere. Il rumore osservato (IC95% circa ±0,7% su G, simile
+alle misure E1 della 4.2.0) rende ±0,5% troppo stretto: una run su sette
+risulterebbe non valida per solo caso (stima grossolana). Indicazione:
+fissare la soglia in funzione dell'errore standard atteso, oppure
+aumentare i giri (ad esempio 5 invece di 3), prima della misura.
+
+### 10.2 Un'analisi esplorativa non decide
+Nell'esperimento 01 l'analisi dei dati di una run non valida (nuova contro
+copia: G = 0,9985, IC95% [0,9904; 1,0064]) è servita solo a decidere di non
+spendere altre run; è etichettata esplorativa nel protocollo. Nota: le
+medie geometriche dei rapporti per posizione sono moltiplicative
+(G(rif/nuova) x G(nuova/copia) = G(rif/copia)): tre confronti a coppie
+sullo stesso insieme di dati non possono essere "incoerenti" fra loro.
+
+### 10.3 Un pilota di 200 partite non stima il tasso di patte
+Il pilota riferimento-contro-riferimento ha dato 36,5% di patte (200
+partite, errore standard circa 3,4%); la run vera, con le stesse
+condizioni, 46,6% (8.832 partite). Il pilota serve a verificare carico,
+crash, ritmo e concurrency, non a stimare le patte. La stima delle partite
+attese era passata da 12.800 (patte 50%, assunzione) a circa 16.250
+(patte 36,5%, dal pilota); la run è finita a 8.832 con un effetto stimato
+di circa -2 Elo. Il criterio di carico del pilota (massimo 3,0 su 4 core)
+era stato scelto senza una base solida: a concurrency 3 il pilota non è
+passato (3,33) e la regola pre-registrata ha dato concurrency 2; 3,33 su 4
+core non è comunque un sovraccarico evidente. Indicazione: motivare le
+soglie dei piloti con dati, oppure dichiararle esplicitamente arbitrarie.
+
+### 10.4 L'asimmetria di slot del pilota era verosimilmente caso
+Nel pilota (due copie identiche) lo slot A ha avuto z = 2,42 sulle 100
+coppie (circa +40 Elo); nella run vera il candidato, nello stesso slot A,
+ha fatto 0,4974 (z = -0,78 sulle coppie). Nessuna asimmetria di slot
+evidente. Per prudenza il protocollo prevedeva una conferma con gli slot
+invertiti in caso di ACCETTA (non è stata necessaria). L'asimmetria di
+COLORE, invece, è presente in entrambe (libro sbilanciato).
+
+### 10.5 "H0 accettato" non significa "peggiora"
+Esperimento 02, K=250: 8.832 partite, LLR -2,95 contro il limite -2,94,
+stima -1,8 +- 5,3 Elo (IC95%), LOS 25,2%. Significa: nessuna evidenza di
+un guadagno >= 5 Elo. È compatibile con un effetto nullo. Il nome
+pre-registrato dell'esito è "NEGATIVO" (la modifica non entra); non
+dimostra un peggioramento. Indicazione: negli Esiti riportare sempre
+stima e intervallo.
+
+### 10.6 Il LLR pentanomiale richiede meno partite del trinomiale
+Il LLR di `cutechess-cli` (partita per partita, trinomiale) ha dato
+-2,95 a 8.832 partite. Con l'approssimazione normale a livello di COPPIA
+(varianza campionaria per coppia 0,1984) il LLR finale è -3,97 e il
+limite H0 sarebbe stato superato a 7.198 partite, 1.634 in meno (circa
+18,5%). Analisi esplorativa, post-hoc. Coerente con la simulazione di
+`vdbergh/pentanomial` citata nel §9 (circa 20%). Errore corretto: un
+primo calcolo (LLR -2,9992) assumeva l'indipendenza fra le due partite di
+una coppia ed era in realtà un trinomiale. Indicazione: se si usa un LLR
+pentanomiale come regola di stop, va validato su dati noti e
+pre-registrato prima della run.
+
+### 10.7 Sequenza della pre-registrazione
+Nell'esperimento 02 la regola di conferma con slot invertiti è stata
+proposta per iscritto prima del lancio ma committata nel protocollo circa
+11 minuti DOPO un controllo a 1 ora che aveva già mostrato colori e
+pentanomiale della run in corso; il protocollo ha un'annotazione
+datata. Indicazione: committare prima del lancio non solo le regole di
+decisione ma anche l'elenco di cosa si guarda nei controlli intermedi
+(carico, terminazioni, numero di partite, LLR), e non guardare altro.
+
+---
+
 ## Riferimenti rapidi
 
 | Argomento | Fonte |
@@ -502,3 +579,4 @@ caso). Non si cambia strumento durante un esperimento già lanciato.
 | Lezione sulla base mobile (G2/G2b) | `BENCHMARKS.md:844-848` |
 | Pre-registrazione | `BENCHMARKS.md:354,753,1034,1192` |
 | Esiti negativi, stile di registrazione | `docs/PERF_NOTES.md:19-47` |
+| Lezioni apprese | §10 |
