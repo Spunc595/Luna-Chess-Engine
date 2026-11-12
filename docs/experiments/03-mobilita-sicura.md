@@ -421,6 +421,27 @@ ogni processo resta a Threads=1 al suo interno.
 - Binario della GENERAZIONE (Fase 2+): da compilare e verificare con un
   nuovo sha256 al momento, DOPO che le due modifiche descritte in 2e
   (o la loro alternativa) saranno decise e, se autorizzate, fatte.
+- Binario `exp03` (nuovo membro del workspace, `exp03/`, linka `libluna`
+  direttamente, nessun sotto-processo UCI): sha256
+  `a92781b2817759c2a9b500b8ffae1ddd5f8452b6f2f4a8f62680036907d54f82`
+  (release, dal tip di questo branch dopo il commit che rende `pub`
+  `quiescence`). Fa sia l'estrazione di F1/F2/controlli SIA le
+  etichette (valutazione statica, valutazione di quiescenza, punteggio
+  a profondita fissa via `iterative_deepening`) con chiamate di
+  libreria diretta: NON e uno script Python separato via sotto-processo
+  UCI come inizialmente ipotizzato nel messaggio di Daniele — scelta
+  piu rapida e altrettanto conforme ai requisiti (Threads=1 implicito a
+  chiamata diretta, Hash=64 passato come parametro, TT/SharedHistory
+  nuove per ogni posizione equivalenti a `ucinewgame`). Segnalato qui
+  come deviazione esplicita, non deciso a nome di Daniele: se preferisce
+  una vera separazione in due strumenti, va dichiarato prima della
+  Fase 2.
+- Script `scripts/analyze_03.py` (OLS + bootstrap a cluster): sha256
+  `b33f9418d272df416a3eb2b054d8ed71ec80c1c57135617c02c78051bdd43972`.
+- Script `scripts/test_analyze_03_synthetic.py` (test su dati
+  sintetici, 3 casi: effetto presente, nullo, segno diverso per fase —
+  tutti e tre superati prima di toccare dati veri): sha256
+  `f26a74d3d3a2e9a0449ed7bfed2954306dc66b1953501f7278e5857ddcebab42`.
 
 ## Verifica della modifica a `quiescence`
 
@@ -480,6 +501,52 @@ aggiuntiva per test multipli oltre a quella già dichiarata lì (il
 repository non prescrive una correzione formale per test multipli,
 `docs/METHOD.md` §7). Nessun'altra ripetizione pianificata su questo
 tema per ora.
+
+## Prova di fumo (2026-11-12, NON il dataset di analisi)
+
+200 posizioni dal `pilot_run` (NON dallo `sprt_run` usato per l'analisi
+vera — fonte deliberatamente diversa), una ogni k=15 ply con offset
+casuale per partita, seed 20261112, estratte con uno script Python
+scratch (non archiviato) da `pilot_run\match.pgn`. Solo verifiche di
+plausibilita, NESSUN calcolo di relazione feature/residuo.
+
+- Tempo per posizione (profondita 14, Threads=1 implicito, Hash=64,
+  include valutazione statica + quiescenza + ricerca a profondita
+  fissa): mediana 561ms, 90° percentile 1.361ms, media 715,2ms, minimo
+  0ms (probabile matto/stallo immediato), massimo 5.914ms.
+  **Più alto della media del pilota di tempo originale (503,4ms, solo
+  ricerca)**: la differenza (~212ms) e il costo aggiuntivo della
+  chiamata a `quiescence` e delle allocazioni di TT/SharedHistory per
+  posizione. Da ricalcolare il budget totale con questo numero, non con
+  quello del pilota originale (vedi sotto).
+- In scacco (filtro "non in scacco"): 17/200 (8,5%) scartate.
+- <7 pezzi o ply<8: 28/200 (14,0%) scartate.
+- |valutazione statica| > 600cp: 0/200 (0,0%) scartate (coerente con il
+  95,0% misurato nel pilota su un campione diverso).
+- Mossa migliore a D_ref=14 e cattura/promozione (filtro "quiet move"):
+  34/200 (17,0%) scartate.
+- |valutazione statica - valutazione di quiescenza| > 30cp: 36/200
+  (18,0%) scartate (mediana del delta assoluto: 0cp; 90° percentile:
+  441cp — distribuzione con coda lunga, come atteso in posizioni
+  tattiche).
+- F1 (dmob): minimo -22, massimo 15, media -1,98, mediana -2,0 — range
+  plausibile (nessun valore fuori da quanto atteso per una differenza
+  di conteggi di mosse).
+- F2 (dthreat): minimo -2, massimo 4, media 0,24, mediana 0,0 —
+  plausibile.
+- **Tutti i filtri insieme** (non in scacco, >=7 pezzi, ply>=8, mossa
+  migliore non cattura/promo, |eval|<=600, |delta quiescenza|<=30):
+  117/200 (58,5%) passano.
+
+**Revisione del budget di tempo**: con la media osservata qui (715,2ms,
+non 503,4ms) e N atteso ~72.900, il tempo totale stimato sale a
+~14,5h con 1 processo / ~7,25h con 2 processi — sopra la soglia di
+~10h con 1 processo, ma ANCORA sotto con 2 processi. La condizione di
+stop del protocollo ("se la generazione supera 2x la stima") resta
+quindi da monitorare con la stima corretta (~7,25h con 2 processi), non
+con quella del pilota originale. Segnalato, non deciso: se Daniele
+preferisce ridurre N o passare a D_ref=12 per margine, va deciso prima
+della Fase 2.
 
 ## Hash del commit del protocollo
 
