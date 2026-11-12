@@ -86,8 +86,8 @@ qualunque pubblicazione (vedi `docs/METHOD.md` sulla riservatezza).
 - **Valutazione "grezza" della rete (prima del material scale)**: NON
   esposta da nessuna funzione `pub` né dal comando `eval`. La variabile
   `raw` (`src/nnue.rs:634`) è locale a `evaluate_from_accumulator` e non
-  viene restituita separatamente. **Serve una modifica per estrarla**
-  (vedi 2e) — non è stata fatta.
+  viene restituita separatamente. **Decisione (2e sotto, 2026-11-12)**:
+  non si usa in questo esperimento, nessuna modifica fatta né da fare.
 
 ### 2b — Punteggio a profondità fissa
 
@@ -158,11 +158,9 @@ qualunque pubblicazione (vedi `docs/METHOD.md` sulla riservatezza).
   1051) come `results/eval_set.epd`, ma secondo
   `scripts/measurements/2026-09-21/README.md:4-7` il file vive nel
   repository SEPARATO "Luna-CE-NNUE" (variabile d'ambiente
-  `LUNA_NNUE_REPO`), non in questo. **Non trovato clonato localmente**
-  su questo PC in una ricerca rapida sotto `Desktop\`. Formato: EPD,
-  2.000 posizioni (origine esatta — come sono state scelte — non
-  documentata nei file consultati). Da chiedere a Daniele dove si trova
-  o se va richiesto.
+  `LUNA_NNUE_REPO`), non in questo. **Decisione (2026-11-12): non si
+  usa.** La fonte delle posizioni per questo esperimento sono SOLO i PGN
+  archiviati degli SPRT C1 (sotto), sha256 già noti.
 - **PGN archiviati degli SPRT C1** (già in
   `lavoro\archivio_C1_sprt_20261112\`, verificati prima con sha256
   prima/dopo la copia da Oracle, riconfermati ora con una nuova lettura
@@ -189,44 +187,34 @@ qualunque pubblicazione (vedi `docs/METHOD.md` sulla riservatezza).
     supera (190/200). Gli altri filtri dipendenti da D_ref/quiescenza
     si calcoleranno nella generazione vera (Fase 2+).
 
-### 2e — Serve una modifica al codice del motore?
+### 2e — Serve una modifica al codice del motore? — DECISIONE (2026-11-12)
 
-**Sì, per due cose specifiche, NESSUNA delle quali è stata fatta:**
+**Decisione di Daniele**: la valutazione statica usata ovunque in questo
+esperimento è SOLO `eval` come la vede la ricerca (`src/search.rs:356`,
+già `pub`, nessuna modifica). **La valutazione "grezza" della rete (pre
+material-scale) NON si usa e NON viene esposta** — il punto 1
+dell'inventario originale (esporre `raw` in `src/nnue.rs:634`) è
+RITIRATO, nessuna modifica in quel punto.
 
-1. **Valutazione "grezza" della rete** (prima del material scale,
-   2a sopra): richiede esporre la variabile `raw` di
-   `nnue.rs::evaluate_from_accumulator` (`src/nnue.rs:634`) — una riga
-   di modifica (restituire una tupla `(scaled, raw)` o una funzione
-   gemella), non invasiva, ma è comunque una modifica al codice del
-   motore.
-2. **Valutazione di quiescenza** (per il filtro "quiet position"):
-   `fn quiescence` (`src/search.rs:945`) e `fn negamax`
-   (`src/search.rs:570`) sono entrambe PRIVATE (non `pub`), a differenza
-   di `eval` e `iterative_deepening`. Non esiste un comando UCI
-   equivalente a `eval` per la quiescenza. Per estrarla servirebbe:
-   rendere `quiescence` `pub` (o una funzione `pub` che la richiama con
-   gli argomenti giusti: `SearchInfo`, `TranspositionTable`,
-   `SharedHistory`, `ZobristKeys`, tutti da istanziare correttamente) e,
-   se si vuole anche da UCI, un nuovo comando di debug (es. `qeval`),
-   sul modello esatto del comando `eval` già esistente
-   (`src/main.rs:598-608`).
+**UNA modifica al motore è autorizzata**, solo sul branch
+`exp/03-mobilita-sicura`, in un commit separato da questo: rendere `pub`
+la funzione `quiescence` (`src/search.rs:945`), senza cambiarne la
+logica, per poterla richiamare dal nuovo binario di analisi e calcolare
+il filtro "|valutazione statica - valutazione di quiescenza| <= 30 cp".
+Dopo la modifica: bench a profondità 18, Threads 1, nodi devono restare
+590.820 e 980.165 (stessa prova di non-regressione usata nei commit
+precedenti su questo progetto) — vedi sezione "Verifica della modifica
+a `quiescence`" sotto per l'hash del commit e l'output del bench.
 
 Per il resto (SEE su catture, generazione pseudo-legale, mosse del lato
 non al tratto, valutazione statica scalata, ricerca a profondità fissa,
 parsing FEN via `Scacchiera::from_fen` — `src/board.rs:196`, `pub`):
-**nessuna modifica al motore necessaria**. Un nuovo binario Rust nello
+nessuna modifica al motore necessaria. Un nuovo binario Rust nello
 stesso workspace (come già fanno `tuner` e `book_converter`, membri
-dichiarati in `Cargo.toml:2-6`) può linkare `libluna` (tutti i moduli
-necessari sono `pub mod` in `src/lib.rs`) e chiamare direttamente queste
+dichiarati in `Cargo.toml:2-6`) linka `libluna` (tutti i moduli
+necessari sono `pub mod` in `src/lib.rs`) e chiama direttamente queste
 funzioni, senza passare per sotto-processi UCI — più rapido per decine
 di migliaia di posizioni.
-
-**Non ho fatto nessuna delle due modifiche sopra.** Chiedo a Daniele se
-autorizzarle (sono piccole e isolate) prima della Fase 2, o se vuole una
-soluzione diversa (es. rinunciare al filtro di quiescenza, o
-ricostruire una quiescenza semplificata nel nuovo binario di analisi
-SENZA toccare `search.rs`, duplicando la logica — meno pulito ma zero
-modifiche al motore).
 
 ## Pilota di tempo (2026-11-12)
 
@@ -262,24 +250,61 @@ sicura è **D_ref = 12** (stesso k=15, tempo ≈4,15h a un processo /
 ≈2,1h con 2 processi) a scapito di un'ancora di profondità più
 superficiale.
 
-## Feature
+## Feature — DEFINIZIONI FISSATE (decisione di Daniele, 2026-11-12)
 
 F1 = dmob = mobilità_sicura(lato al tratto) - mobilità_sicura(altro
-lato), dove mobilità_sicura = numero di mosse pseudo-legali del lato
-(non di re in casa attaccata) con SEE >= 0; per il lato NON al tratto
-si genera passando il turno, solo se non in scacco. **Nota di
-inventario (2c sopra)**: `see()` richiede una cattura; per le mosse
-silenziose va deciso se contarle automaticamente come sicure o definire
-un criterio diverso — decisione di Daniele, non presa qui.
+lato).
 
-F2 = dthreat = (numero di pezzi avversari attaccati da pezzi del lato
-al tratto) - (numero di pezzi del lato al tratto attaccati da pezzi
-avversari), contando pezzi attaccati con valore maggiore del pezzo
-attaccante O non difesi. F2 serve a collegare l'esperimento ai "threat
-inputs" della letteratura (Stockfish 18, Reckless) — vedi "Stato
-dell'arte".
+mobilità_sicura(lato L) = numero di mosse LEGALI (pseudo-legali più
+"il re di L non resta/non va in scacco dopo la mossa") di pezzi di L
+che NON siano il re né un pedone, tali che:
+- se la mossa è una cattura (incluse le promozioni con cattura): il
+  pezzo mosso resta sicuro se `see(board, m) >= 0` (`src/movegen.rs:63`);
+- se la mossa è quieta (nessuna cattura): il pezzo mosso resta sicuro
+  se, DOPO averla eseguita (`esegui_mossa`), il nemico non ha nessuna
+  mossa di cattura di quel pezzo sulla sua nuova casa con
+  `see(board_dopo, cattura_nemica) > 0` (si enumerano le catture nemiche
+  pseudo-legali dirette a quella casa e si valuta `see` su ciascuna; se
+  nessuna ha `see > 0`, la mossa quieta è sicura).
 
-Solo queste due; nessun'altra dopo aver visto i dati.
+Per il lato NON al tratto: si usa `fai_mossa_nulla` (`src/board.rs:781`)
+solo se `!board.re_in_scacco(lato)` (`src/board.rs:487-491`), poi si
+genera e si valuta come sopra, poi `annulla_mossa_nulla`. In qualsiasi
+posizione raggiunta per gioco legale, il lato NON al tratto non può
+essere in scacco (sarebbe stata una mossa precedente illegale); questo
+gate quindi non scarta mai nulla nella pratica, ma va comunque
+verificato in codice (e con un test unitario dedicato) perché è un
+invariante del motore, non una garanzia del nuovo strumento di analisi.
+
+F2 = dthreat = pezzi_attaccati(lato al tratto) - pezzi_attaccati(altro
+lato), dove pezzi_attaccati(lato L) = numero di pezzi di L (re
+incluso) attaccati da almeno un pezzo avversario, CONTATI SOLO SE
+(valore del pezzo attaccato > valore del minimo pezzo avversario
+attaccante) O (il pezzo attaccato non è difeso, cioè nessun pezzo di L
+lo ricattura con `see` non peggiore dopo la cattura — equivalentemente:
+la casa del pezzo attaccato non è difesa da L contro l'attaccante di
+minor valore). "Attaccato" si verifica con `square_attacked`
+(`src/attacks.rs:385`) per il colore avversario sulla casa del pezzo;
+per determinare l'attaccante di minor valore e se il pezzo è difeso si
+enumerano gli attaccanti con le funzioni di `src/attacks.rs` (stesso
+modulo) e si confrontano i valori standard dei pezzi (P=1,N=B=3,T=5,
+D=9, usati anche per le fasce di fase sotto).
+
+Valori standard dei pezzi per i confronti: P=1, N=3, B=3, T=5, D=9.
+
+TRE ESEMPI per F2 (illustrativi, non esaustivi):
+1. Torre bianca attaccata da un pedone nero, non difesa da nessun altro
+   pezzo bianco: CONTA (torre, valore 5, > valore pedone attaccante 1).
+2. Cavallo nero attaccato da un alfiere bianco, ma il cavallo è difeso
+   da un pedone nero (il pedone può ricatturare l'alfiere con `see`
+   dell'alfiere >= valore pedone, cioè la ricattura non perde materiale
+   netto secondo SEE): NON CONTA (valore cavallo 3 = valore alfiere
+   attaccante 3, e il pezzo è difeso).
+3. Pedone bianco attaccato da due pedoni neri e non difeso da nessun
+   pezzo bianco: CONTA UNA VOLTA (si conta il PEZZO attaccato, non il
+   numero di attaccanti; valore pari ma non difeso).
+
+Solo queste due feature (F1, F2); nessun'altra dopo aver visto i dati.
 
 ## Filtri (posizioni tranquille)
 
@@ -298,13 +323,20 @@ per la quiescenza, la modifica al motore descritta in 2e).
 
 Il residuo r viene winsorizzato a +-300 cp (stesso valore ovunque).
 
-## Controlli
+## Controlli — CONFINI FISSATI (decisione di Daniele, 2026-11-12)
 
-Fase = materiale non di pedoni (3 fasce con confini fissi — DA FISSARE
-da Daniele prima della generazione: non ho scelto i confini da solo,
-non essendo un dato misurabile ora); differenza di materiale; fasce di
-|valutazione statica| (4 fasce, confini da fissare allo stesso modo);
-numero di pedoni; valore della valutazione statica.
+Fase = materiale non di pedoni dei due lati (N=B=3, T=5, D=9, somma dei
+due lati):
+- apertura: >= 44
+- mediogioco: 24-43
+- finale: <= 23
+
+Fasce di |valutazione statica| (4 fasce): [0,50), [50,150), [150,300),
+[300,600].
+
+Più: differenza di materiale; numero di pedoni; valore della
+valutazione statica. Confini fissati ora, non modificabili dopo aver
+visto i dati.
 
 ## Dati
 
@@ -389,6 +421,12 @@ ogni processo resta a Threads=1 al suo interno.
 - Binario della GENERAZIONE (Fase 2+): da compilare e verificare con un
   nuovo sha256 al momento, DOPO che le due modifiche descritte in 2e
   (o la loro alternativa) saranno decise e, se autorizzate, fatte.
+
+## Verifica della modifica a `quiescence`
+
+Da riempire nel commit che rende `pub` `src/search.rs:945` (vedi 2e):
+hash del commit, output del bench a profondità 18 Threads 1 (nodi
+attesi 590.820 e 980.165).
 
 ## Book e suo sha256
 
