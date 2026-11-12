@@ -493,15 +493,24 @@ Valgono per gli esperimenti 01 (SEE calcolata una volta in qsearch) e 02
 archiviati (`archive/exp-01-see-una-volta`,
 `archive/exp-02-lmr-history-c1`).
 
-### 10.1 La soglia di validità della copia identica va scelta sul rumore atteso
+### 10.1 La soglia di validità della copia identica va scelta sul rumore reale
 Nell'esperimento 01 la copia byte-identica del riferimento ha dato
-G = 1,0115 (IC95% [0,9993; 1,0263]), fuori dalla soglia pre-registrata
-±0,5%: la run è stata dichiarata non valida, come previsto, e non è stata
-usata per decidere. Il rumore osservato (IC95% circa ±0,7% su G, simile
-alle misure E1 della 4.2.0) rende ±0,5% troppo stretto: una run su sette
-risulterebbe non valida per solo caso (stima grossolana). Indicazione:
-fissare la soglia in funzione dell'errore standard atteso, oppure
-aumentare i giri (ad esempio 5 invece di 3), prima della misura.
+G = 1,0115 (IC95% [0,9993; 1,0263], semi-larghezza circa 1,35%), fuori
+dalla soglia pre-registrata di ±0,5%: la run è stata dichiarata non
+valida, come previsto, e non è stata usata per decidere. Anche il
+confronto riferimento-nuova aveva un IC95% di circa ±1,2%
+([1,0027; 1,0266]). Il rumore era quindi circa il doppio di quello
+stimato prima della misura (nel protocollo 01, "circa una run su sette
+non valida per solo caso", basata su un errore standard di circa 0,35%).
+Con un errore standard di circa 0,7% un criterio "copia entro ±0,5% da
+1" fallirebbe circa una volta su due (calcolo grossolano). Per
+confronto, nelle misure della 4.2.0 (protocolli di lavoro non
+pubblicati) l'IC95% era circa ±0,7%. Indicazioni: (a) misurare il
+rumore atteso (dry-run con più giri) prima di fissare la soglia; (b)
+formulare la validità come requisito di precisione (semi-larghezza
+dell'IC <= metà dell'effetto minimo da rilevare) invece che come
+vicinanza a 1 della copia; (c) aumentare i giri (ad esempio 5 invece
+di 3) e ridurre il carico di fondo.
 
 ### 10.2 Un'analisi esplorativa non decide
 Nell'esperimento 01 l'analisi dei dati di una run non valida (nuova contro
