@@ -892,6 +892,45 @@ coerente con `.cargo/config.toml` di questo repository che richiede
 costruito da `git archive bb9f5ce`, è quello usato per la generazione
 (vedi sotto).
 
+## Esecuzione della generazione (avviata il 2026-11-13)
+
+Autorizzata da Daniele dopo la verifica pre-generazione (sopra). Nessun
+dato ancora analizzato, nessuna statistica calcolata.
+
+- **Campionamento**: `scripts/generate_03_sample_positions.py` (sha256
+  `15fb67602db2d7a246b14b2b26c6af87b209f5202087137e453c31e412fe0b0b`),
+  da `sprt_run/match.pgn` (8.833 partite), seed 20261112: campione
+  principale **53.607** posizioni (k=20, offset casuale per partita);
+  split per partita 60/40 -> 5.299 partite stima, 3.534 validazione;
+  campione denso S1 **4.316** posizioni da 200 partite (ply 10-80 ogni
+  3). File: `main_sample.tsv`, `games_split.tsv`, `s1_sample.tsv`
+  (fuori dal repository, nello scratchpad di questa sessione — saranno
+  copiati e verificati con sha256 al congelamento).
+- **Generazione (F1/F2/controlli/etichette)**: campione principale e
+  campione denso S1 combinati e divisi in 2 fette per parità
+  dell'indice di partita (29.089 / 28.834 posizioni), script
+  `scripts/run_gen03_slice.py` (sha256
+  `7ec3609efd7e052f2d86d9d727b1d8c42fd1be7561479c8eeefd245ac58bfbb1`),
+  ripartibile (verificato con un run di prova prima del lancio reale).
+  **Avviata alle 21:36:12**, 2 processi `exp03.exe` (binario
+  `9551c8e6...9b28b0a`, verificato), priorità `BelowNormal` confermata
+  su entrambi i processi Python driver e sui due processi `exp03.exe`.
+- **Valutazione Rete B (S2)**: tutte le 53.607 posizioni del campione
+  principale, script `scripts/run_gen03_reteB.py` (sha256
+  `398177768d2e658195b5b982342ec8ceff4e30f9f11a45d23b6791f5efae5f19`),
+  stesso schema di ripartibilità. **Avviata alle 21:38:33**, priorità
+  `BelowNormal` confermata, binario Rete B
+  `7f4154dd...163635` (verificato, dal tarball di v3.1.7, NON la
+  build pulita del motore attuale — errore corretto durante un test
+  preliminare prima del lancio reale, che per sbaglio usava il binario
+  della Rete A).
+- **Nota sulla tracciabilità**: la combinazione campione
+  principale+S1 in un'unica fetta per processo NON porta un'etichetta
+  di provenienza (main/s1) nel file di output — si ricostruisce a
+  congelamento confrontando (fen, ply) con `main_sample.tsv` e
+  `s1_sample.tsv`, che restano entrambi disponibili. Segnalato qui,
+  non un problema practico ma da ricordare al congelamento.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
