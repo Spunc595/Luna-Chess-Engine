@@ -25,10 +25,12 @@ use luna::zobrist::ZobristKeys;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() < 2 || args[1] != "batch" {
+    if args.len() < 2 || (args[1] != "batch" && args[1] != "features") {
         eprintln!("Uso: exp03 batch --depth D [--hash-mb N]  (legge FEN[\\tply] da stdin)");
+        eprintln!("     exp03 features  (solo F1/F2/controlli, nessuna ricerca -- per test rapidi, es. invarianza)");
         std::process::exit(2);
     }
+    let mode = args[1].clone();
     let mut depth: i32 = 14;
     let mut hash_mb: usize = 64;
     let mut i = 2;
@@ -44,9 +46,14 @@ fn main() {
     let nnue = LunaNNUE::load_embedded();
     let params = EvalParams::default();
 
+    if mode == "features" {
+        run_features_only(&z, nnue.as_ref());
+        return;
+    }
+
     let stdin = io::stdin();
     let mut out = io::BufWriter::new(io::stdout());
-    writeln!(out, "fen\tply\tfase\tmateriale_non_pedoni\tdiff_materiale\tn_pedoni\tn_pezzi\tin_scacco\tstatic_eval\tfascia_eval\tquiescenza_eval\tdelta_static_quiescenza\tdmob\tdthreat\tbest_move_uci\tbest_is_capture_or_promo\ttime_ms\tscarta_quiet\tscarta_pezzi\tscarta_evalband").unwrap();
+    writeln!(out, "fen\tply\tfase\tmateriale_non_pedoni\tdiff_materiale\tn_pedoni\tn_pezzi\tin_scacco\tstatic_eval\tfascia_eval\tquiescenza_eval\tdelta_static_quiescenza\tdmob\tdthreat\tsearch_score\tbest_move_uci\tbest_is_capture_or_promo\ttime_ms\tscarta_quiet\tscarta_pezzi\tscarta_evalband").unwrap();
 
     for line in stdin.lock().lines() {
         let line = line.unwrap();
@@ -88,7 +95,7 @@ fn main() {
         let sh = SharedHistory::new();
         let mut info = SearchInfo::new(600_000, depth);
         info.stop_signal = Arc::new(AtomicBool::new(false));
-        let (best_move, _score, _reached_depth) = search::iterative_deepening(
+        let (best_move, score, _reached_depth) = search::iterative_deepening(
             &mut board, &mut info, &tt, &sh, &z, nnue.as_ref(), &params, 1, false,
         );
         let best_is_cap_or_promo = best_move.is_cattura() || best_move.is_promozione();
@@ -101,8 +108,29 @@ fn main() {
 
         writeln!(
             out,
-            "{fen}\t{ply}\t{fase:?}\t{materiale_np}\t{diff_mat}\t{n_pedoni}\t{n_pezzi}\t{in_check}\t{static_eval}\t{fascia:?}\t{q_eval}\t{delta}\t{dmob}\t{dthreat}\t{best_uci}\t{best_is_cap_or_promo}\t{elapsed_ms}\t{scarta_quiet}\t{scarta_pezzi}\t{scarta_evalband}",
+            "{fen}\t{ply}\t{fase:?}\t{materiale_np}\t{diff_mat}\t{n_pedoni}\t{n_pezzi}\t{in_check}\t{static_eval}\t{fascia:?}\t{q_eval}\t{delta}\t{dmob}\t{dthreat}\t{score}\t{best_uci}\t{best_is_cap_or_promo}\t{elapsed_ms}\t{scarta_quiet}\t{scarta_pezzi}\t{scarta_evalband}",
             best_uci = best_move.to_uci(),
         ).unwrap();
+    }
+}
+
+/// Solo F1 (dmob) e F2 (dthreat), nessuna ricerca: usata per verifiche
+/// rapide (es. la prova di invarianza) dove la valutazione statica e il
+/// punteggio a profondita fissa non servono. Legge FEN (con ply
+/// opzionale) da stdin come `batch`.
+fn run_features_only(z: &ZobristKeys, nnue: Option<&LunaNNUE>) {
+    let stdin = io::stdin();
+    let mut out = io::BufWriter::new(io::stdout());
+    writeln!(out, "fen\tply\tdmob\tdthreat").unwrap();
+    for line in stdin.lock().lines() {
+        let line = line.unwrap();
+        if line.trim().is_empty() { continue; }
+        let mut parts = line.splitn(2, '\t');
+        let fen = parts.next().unwrap().trim();
+        let ply: i64 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(999_999);
+        let board = exp03::load_board(fen, z, nnue);
+        let dmob = exp03::dmob(&board, z);
+        let dthreat = exp03::dthreat(&board);
+        writeln!(out, "{fen}\t{ply}\t{dmob}\t{dthreat}").unwrap();
     }
 }

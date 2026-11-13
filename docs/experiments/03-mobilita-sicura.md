@@ -478,18 +478,22 @@ validazione e nella stima insieme (campione principale F1/F2), ci si
 ferma e si riporta; se la generazione supera di 2x la stima di tempo
 ci si ferma e si riporta (vedi tempo rivisto sotto). Per S1: se, dopo i
 filtri, il campione denso ha meno di 100 partite utilizzabili (troppe
-scartate), ci si ferma e si riporta. Per S2: ci si ferma già ora,
-prima di generare qualsiasi dato per S2, per il binario di Rete B
-mancante (sopra).
+scartate), ci si ferma e si riporta.
 
-**Tempo stimato, rivisto**: campione principale (F1/F2, N~72.900,
-media osservata nella prova di fumo 715,2ms/posizione) ~14,5h a 1
-processo / ~7,25h a 2 processi (vedi "Prova di fumo"); S1 aggiunge
+**Tempo stimato, rivisto il 2026-11-13 con i numeri corretti (vedi
+"Prova di fumo rifatta", Fase 2B) e con k=20 (non più k=15)**:
+campione principale (F1/F2, N≈54.700, media osservata 1.059,0ms/
+posizione) ~16,1h a 1 processo / **~8,05h a 2 processi**. S1 aggiunge
 circa 4.600 posizioni (200 partite x ~23 posizioni ogni 3 ply da ply
-10 a 80), circa 40 minuti in più a profondità 14 alla stessa velocità
-media, trascurabile rispetto al totale. S2 non aggiunge tempo di
-generazione su questo motore (richiede invece l'esecuzione di Rete B,
-bloccata — vedi sopra).
+10 a 80): alla stessa velocità media, circa **1h21min** in più (non i
+40 minuti stimati nella sessione precedente con la velocità
+sbagliata), ancora un'aggiunta piccola rispetto al totale. Totale
+combinato stimato: **~9,4h a 2 processi**, sotto la soglia delle ~10h
+ma con un margine più ridotto di quanto sembrasse prima — da
+monitorare durante la generazione (condizione di stop: oltre 2x questa
+stima, quindi oltre ~18,8h a 2 processi). S2 non genera dati su questo
+motore (richiede invece l'esecuzione della Rete B già verificata,
+vedi "Rete B per S2" sopra — non più bloccata).
 
 ## Effetto atteso e numero di partite previsto
 
@@ -736,6 +740,63 @@ nessuna analisi di R²/lift; nessun push; nessun merge.
 - **F1, ricattura nemica dopo mossa quieta**: deve essere LEGALE, non
   solo pseudo-legale (vedi "Feature" sopra, aggiornata, e il commit
   `b892745` con il test dell'alfiere inchiodato).
+
+## Prova di equivalenza con il motore (punto 2, 2026-11-13)
+
+200 posizioni (le stesse `pilot_run` della prova di fumo — NON quelle
+dell'analisi), confronto `exp03` (chiamate di libreria) contro il
+motore reale via UCI (`ucinewgame`, Threads 1, Hash 64): comando
+`eval` e `go depth 14`.
+
+**Risultato: 200/200 identiche** su valutazione statica, punteggio a
+profondità 14 E mossa migliore. Nessuna differenza, nessuna causa da
+spiegare. **La condizione del punto "Decisioni Fase 2B" sopra è
+soddisfatta**: lo strumento `exp03` è accettato.
+
+## Prova di invarianza (punto 3, 2026-11-13)
+
+1.000 posizioni dal `pilot_run` (NON quelle dell'analisi), una ogni
+k=7 ply con offset casuale per partita, seed 20261112. Per ciascuna,
+F1 (dmob) e F2 (dthreat) calcolati sulla posizione originale e sulla
+stessa posizione con colori invertiti e specchiata verticalmente
+(`chess.Board.mirror()` di python-chess: flip verticale + scambio
+colori + cambio del lato al tratto, esattamente la trasformazione
+richiesta), tramite la nuova modalità `exp03 features` (solo F1/F2,
+nessuna ricerca, per velocità).
+
+**Risultato: 1.000/1.000 identiche** (dmob e dthreat entrambi uguali
+in ogni singolo caso). Nessun caso diverso da mostrare.
+
+## Prova di fumo rifatta (punto 4, 2026-11-13, Fase 2B)
+
+Stesse 200 posizioni del punto 2 (quindi stessa fonte della prova di
+fumo originale), con la build corretta di `exp03` (fix `refresh_nnue`
++ F1 ricattura legale), profondità 14, Hash 64:
+
+- Tempo per posizione: mediana 797,5ms, 90° percentile 1.987ms,
+  **media 1.059,0ms** (coerente con la seconda prova di fumo del
+  2026-11-13 dopo il fix, 1.052,4ms — la piccola differenza è rumore
+  di macchina, non un cambiamento di codice).
+- In scacco: 17/200 (8,5%) scartate.
+- <7 pezzi o ply<8: 28/200 (14,0%) scartate.
+- |valutazione statica| > 600cp: 8/200 (4,0%) scartate.
+- Mossa migliore cattura/promozione: 32/200 (16,0%) scartate.
+- |delta quiescenza| > 30cp: 35/200 (17,5%) scartate (mediana 0cp, p90
+  132cp).
+- F1 (dmob): minimo -34, massimo 15, media -2,23 (il minimo è più
+  negativo che nelle prove precedenti, -22: effetto del fix della
+  ricattura legale, che può aumentare la mobilità sicura di un lato
+  più di quella dell'altro secondo la posizione — non è un errore,
+  plausibile).
+- F2 (dthreat): minimo -2, massimo 4, media 0,24 (invariato, F2 non è
+  toccato dal fix di F1).
+- **Tutti i filtri insieme**: 120/200 (60,0%) passano.
+
+**Tempo stimato con k=20 (N≈54.700)**: media 1.059,0ms/posizione ->
+**~16,1h a 1 processo / ~8,05h a 2 processi** — SOTTO la soglia delle
+~10h con 2 processi, con un margine di quasi 2 ore. La decisione di
+Daniele di passare da k=15 a k=20 (sezione "Decisioni Fase 2B") ha
+risolto il problema di budget segnalato nella sessione precedente.
 
 ## Hash del commit del protocollo
 
