@@ -7,7 +7,19 @@
 
 use luna::attacks;
 use luna::board::{Bitboard, Colore, Pezzo, Scacchiera};
+use luna::nnue::LunaNNUE;
 use luna::zobrist::ZobristKeys;
+
+/// UNICO punto che costruisce una `Scacchiera` da FEN in questo
+/// strumento: `Scacchiera::from_fen` lascia `nnue_acc` azzerato (bug
+/// trovato il 2026-11-13, vedi il commit che lo corregge), quindi ogni
+/// punto di ingresso di `exp03` deve passare da qui, non chiamare
+/// `from_fen` direttamente. Vedi il test di regressione sotto.
+pub fn load_board(fen: &str, z: &ZobristKeys, nnue: Option<&LunaNNUE>) -> Scacchiera {
+    let mut b = Scacchiera::from_fen(fen, z);
+    b.refresh_nnue(nnue);
+    b
+}
 
 /// Valori standard usati per i confronti di F1/F2 e per le fasce di fase,
 /// identici (a parte il fattore 100) a quelli di `Pezzo::valore()` gia
@@ -83,15 +95,23 @@ pub fn dthreat(board: &Scacchiera) -> i32 {
     pezzi_attaccati(board, board.turno) - pezzi_attaccati(board, board.turno.opposto())
 }
 
-/// Pseudo-legali catture avversarie dirette sulla casella `to`, con
-/// `see(board_dopo, cattura) > 0` dal punto di vista di chi cattura
-/// (board_dopo.turno). Usata per decidere se una mossa silenziosa e
-/// "sicura" (vedi `e_mossa_sicura`).
-fn esiste_ricattura_favorevole(board_dopo: &Scacchiera, to: usize) -> bool {
+/// Catture avversarie LEGALI (non solo pseudo-legali: decisione di
+/// Daniele del 2026-11-13, verificata con `esegui_mossa`/`annulla_mossa`
+/// -- un pezzo inchiodato non e un ricatturatore valido) dirette sulla
+/// casella `to`, con `see(board_dopo, cattura) > 0` dal punto di vista
+/// di chi cattura (`board_dopo.turno`). Usata per decidere se una mossa
+/// silenziosa e "sicura" (vedi `e_mossa_sicura`).
+fn esiste_ricattura_favorevole(board_dopo: &Scacchiera, to: usize, z: &ZobristKeys) -> bool {
     for m in board_dopo.genera_mosse() {
         if m.a() == to && m.is_cattura() {
             if luna::movegen::see(board_dopo, &m) > 0 {
-                return true;
+                let mut prova = board_dopo.clone();
+                let legale = prova.esegui_mossa(&m, z, None);
+                if legale {
+                    return true;
+                }
+                // mossa illegale (es. il ricatturatore e inchiodato):
+                // non conta come ricattura possibile.
             }
         }
     }
@@ -110,7 +130,7 @@ fn e_mossa_sicura(board: &Scacchiera, m: &luna::board::Mossa, z: &ZobristKeys) -
         let mut dopo = board.clone();
         let legale = dopo.esegui_mossa(m, z, None);
         debug_assert!(legale, "e_mossa_sicura chiamata su una mossa non legale");
-        !esiste_ricattura_favorevole(&dopo, m.a())
+        !esiste_ricattura_favorevole(&dopo, m.a(), z)
     }
 }
 
@@ -245,6 +265,57 @@ mod tests {
         (b, z)
     }
 
+    // --- Regressione: from_fen + refresh_nnue (bug del 2026-11-13) ---
+
+    #[test]
+    fn regressione_eval_non_costante_e_coincide_col_motore() {
+        // 5 posizioni diverse, valore atteso ottenuto dal comando UCI
+        // `eval` del motore reale (stessa build, stesso net embedded).
+        // Prima del fix (load_board -> refresh_nnue), tutte uscivano
+        // ~5cp indipendentemente dalla posizione: qui verifichiamo sia
+        // che il valore coincide ESATTAMENTE col motore, sia che i 5
+        // valori non sono tutti uguali (non costanti).
+        let casi: [(&str, i32); 5] = [
+            ("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 54),
+            ("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3", -15),
+            ("6k1/1pq2p2/p3p1p1/n1P4p/P6P/1Q2PBP1/5P2/6K1 w - - 5 28", -15),
+            ("8/5pk1/6p1/8/1P6/P4PKP/8/8 w - - 0 40", 1222),
+            ("r4r1k/p3p2P/3p1b2/1p1n4/q1pPR3/5N2/PPPQ1PP1/1K3B1R b - - 0 12", -243),
+        ];
+        let z = ZobristKeys::init_deterministic();
+        let nnue = LunaNNUE::load_embedded();
+        let params = luna::evaluation::EvalParams::default();
+        let mut valori = Vec::new();
+        for (fen, atteso) in casi {
+            let board = load_board(fen, &z, nnue.as_ref());
+            let eval = luna::search::eval(&board, nnue.as_ref(), &params);
+            assert_eq!(eval, atteso, "eval di {fen} non coincide col motore");
+            valori.push(eval);
+        }
+        assert!(
+            valori.iter().any(|v| *v != valori[0]),
+            "tutti i valori sono uguali: possibile regressione del bug refresh_nnue"
+        );
+    }
+
+    #[test]
+    fn regressione_from_fen_grezzo_e_diverso_da_load_board() {
+        // Controprova diretta: una Scacchiera costruita con from_fen
+        // SENZA refresh ha nnue_acc azzerato e produce un eval diverso
+        // (quasi sempre ~5cp) da quella passata per load_board, su una
+        // posizione dove la differenza e grande.
+        let z = ZobristKeys::init_deterministic();
+        let nnue = LunaNNUE::load_embedded();
+        let params = luna::evaluation::EvalParams::default();
+        let fen = "8/5pk1/6p1/8/1P6/P4PKP/8/8 w - - 0 40";
+        let grezzo = Scacchiera::from_fen(fen, &z);
+        let corretto = load_board(fen, &z, nnue.as_ref());
+        let eval_grezzo = luna::search::eval(&grezzo, nnue.as_ref(), &params);
+        let eval_corretto = luna::search::eval(&corretto, nnue.as_ref(), &params);
+        assert_ne!(eval_grezzo, eval_corretto, "from_fen grezzo e load_board dovrebbero differire (dimostra perche' serve il refresh)");
+        assert_eq!(eval_corretto, 1222);
+    }
+
     // --- F1: mobilita_sicura / dmob ---
 
     #[test]
@@ -309,6 +380,26 @@ mod tests {
         // minore (una mossa sicura di meno) rispetto al caso senza
         // difensore, a parita delle altre mosse della torre.
         assert!(mob_difeso < mob_non_difeso);
+    }
+
+    #[test]
+    fn f1_ricattura_nemica_pseudo_legale_ma_illegale_non_conta() {
+        // Decisione di Daniele (2026-11-13): la ricattura nemica dopo
+        // una mossa quieta conta solo se LEGALE. Qui l'alfiere nero su
+        // e5 e l'UNICO pezzo nero che attacca d4, ma e inchiodato sulla
+        // colonna e dalla torre bianca e1 contro il re nero e8: Bxd4
+        // sarebbe pseudo-legale (e con SEE>0, cattura un cavallo gratis)
+        // ma NON legale. Il cavallo bianco Nb3-d4 (mossa quieta) deve
+        // quindi risultare SICURA.
+        let (b_inchiodato, z) = pos("4k3/8/8/4b3/8/1N6/8/4R1K1 w - - 0 1");
+        let mob_inchiodato = mobilita_sicura(&b_inchiodato, Colore::Bianco, &z);
+        // Stessa posizione ma con il re nero fuori dalla colonna e:
+        // l'alfiere NON e piu inchiodato, Bxd4 diventa legale -> Nd4
+        // smette di essere sicura.
+        let (b_libero, _) = pos("k7/8/8/4b3/8/1N6/8/4R1K1 w - - 0 1");
+        let mob_libero = mobilita_sicura(&b_libero, Colore::Bianco, &z);
+        assert_eq!(mob_inchiodato, mob_libero + 1,
+            "con l'alfiere inchiodato Nd4 deve contare come sicura in piu (inchiodato={mob_inchiodato}, libero={mob_libero})");
     }
 
     #[test]

@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use luna::board::Scacchiera;
 use luna::evaluation::EvalParams;
 use luna::nnue::LunaNNUE;
 use luna::search::{self, SearchInfo, SharedHistory};
@@ -57,14 +56,11 @@ fn main() {
         let ply: i64 = parts.next().and_then(|s| s.trim().parse().ok()).unwrap_or(999_999);
 
         let t0 = Instant::now();
-        let mut board = Scacchiera::from_fen(fen, &z);
-        // from_fen lascia nnue_acc azzerato (Accumulator::zero()): senza
-        // questo refresh, eval/quiescence/iterative_deepening leggerebbero
-        // un accumulatore sempre a zero, non la posizione reale (bug
-        // trovato durante la verifica di plausibilita' di S2: la A dava
-        // ~5cp su 200 posizioni molto diverse). src/main.rs fa lo stesso
-        // refresh dopo ogni "position fen" (vedi s.refresh_nnue sopra).
-        board.refresh_nnue(nnue.as_ref());
+        // exp03::load_board e' l'UNICO modo in cui questo binario deve
+        // costruire una Scacchiera da FEN: fa il refresh dell'accumulatore
+        // NNUE che from_fen da solo lascia a zero (bug del 2026-11-13,
+        // vedi il test di regressione in exp03::lib).
+        let mut board = exp03::load_board(fen, &z, nnue.as_ref());
         let in_check = board.in_scacco();
 
         let dmob = exp03::dmob(&board, &z);
