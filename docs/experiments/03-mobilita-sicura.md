@@ -807,6 +807,39 @@ fumo originale), con la build corretta di `exp03` (fix `refresh_nnue`
 Daniele di passare da k=15 a k=20 (sezione "Decisioni Fase 2B") ha
 risolto il problema di budget segnalato nella sessione precedente.
 
+## Piano di generazione (progettato il 2026-11-13, NON eseguito)
+
+Solo progettazione, nessuna esecuzione. Da autorizzare separatamente
+con un "via" esplicito.
+
+- **Processi**: 2 processi `exp03 batch` in background, ciascuno su
+  una fetta disgiunta delle posizioni campionate (es. partite con
+  indice pari/dispari), Threads=1 implicito per processo (chiamate di
+  libreria dirette, non multi-thread).
+- **Priorità**: priorità di processo sotto la normale (`start /belownormal`
+  o equivalente — da verificare il comando esatto su Windows al
+  momento del lancio), per non competere con l'uso interattivo della
+  macchina.
+- **Output**: append su file, non sovrascrittura — un file per
+  processo/fetta, un checkpoint scritto periodicamente (es. ogni 500
+  posizioni) con l'ultimo indice completato, così da poter riprendere
+  da dove interrotto invece di ripartire da zero in caso di riavvio
+  della macchina o di interruzione manuale.
+- **Nessun controllo statistico durante la generazione**: niente
+  calcolo di R², correlazioni, o altre statistiche mentre i processi
+  girano — solo il conteggio delle posizioni completate (per
+  verificare l'avanzamento e le condizioni di stop di tempo/numero
+  minimo), esattamente come richiesto per non introdurre un
+  guardare-i-dati-mentre-si-generano che comprometterebbe la
+  pre-registrazione.
+- **Congelamento**: al termine (o allo stop), i file di output vengono
+  concatenati in un unico dataset, con sha256 calcolato e registrato
+  nel protocollo PRIMA di calcolare qualunque statistica — nessuna
+  occhiata ai valori di F1/F2/residuo prima di questo passo.
+- **Verifica preliminare dello script di analisi**: già fatta (vedi
+  sopra, 7 casi sintetici in totale fra F1/F2 e S1/S2, tutti superati)
+  prima di questo piano.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
