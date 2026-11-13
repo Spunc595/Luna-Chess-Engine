@@ -378,13 +378,111 @@ Vedi "Regola di decisione": tra 0,5% e 2% di aumento di R² sulla
 validazione, si riporta il numero e decide Daniele — non si tratta
 automaticamente come scarto né come proseguimento.
 
+## Analisi secondarie S1 e S2 (emenda, 2026-11-13)
+
+Oltre a F1 e F2 (sopra), DUE analisi secondarie, pre-registrate ORA,
+prima di generare qualsiasi dato. Con F1 e F2 sono QUATTRO analisi in
+totale: si riportano TUTTE E QUATTRO, senza scegliere la migliore a
+posteriori.
+
+### S1 — Persistenza intra-partita del residuo
+
+Campione DENSO SEPARATO (non il campione principale di F1/F2): 200
+partite scelte con seed 20261112 dai PGN archiviati; posizioni ogni 3
+ply da ply 10 a ply 80 della stessa partita; stessi filtri (vedi
+"Filtri" sopra), stesso D_ref=14.
+
+Per ciascuna partita: residuo "pulito" e_i = residuo winsorizzato meno
+la predizione del modello BASE di F1/F2 (solo controlli, stimato sulla
+parte di STIMA delle partite di F1/F2, non su questo campione).
+
+Misure:
+- ICC(1) a effetti casuali per partita (quota di varianza di e
+  spiegata dalla partita di appartenenza);
+- correlazione di e fra posizioni della STESSA partita a distanza di
+  3, 6, 15, 30 ply (solo coppie a quella distanza ESATTA), con IC95%
+  bootstrap a cluster per partita (10.000 ricampionamenti, seed
+  20261112).
+
+SOGLIE (fissate ora):
+- PROSEGUIMENTO: ICC(1) >= 0,10 E correlazione a 3 ply >= 0,10 con
+  IC95% che esclude 0;
+- SCARTO: ICC(1) < 0,03;
+- ZONA GRIGIA: tra i due valori — si riporta, decide Daniele.
+
+Il risultato di S1 NON cambia il motore: dice solo se vale la pena
+testare in futuro una correzione online basata sulla storia recente
+del residuo entro la stessa partita.
+
+### S2 — Disaccordo fra due reti come incertezza
+
+Rete B = Luna v3.1.7 (rete NNUE di akimbo, prima dell'applicazione del
+material scale introdotto DOPO quella release — vedi
+`release-backups/v3.1.7/release_notes_v3.1.7.md`). Valutazione di B
+sulle STESSE posizioni del campione PRINCIPALE di F1/F2, con il
+comando UCI `eval`, `ucinewgame` prima di ogni posizione, Hash 64.
+
+Calibrazione di B su A (A = Luna attuale) SOLO sulla parte di STIMA:
+`eval_A ~ alfa + beta * eval_B` (OLS semplice). Disaccordo:
+`d = |eval_A - (alfa + beta * eval_B)|`.
+
+Target: `|r|` (valore assoluto del residuo winsorizzato). Modello
+BASE: medie di `|r|` per cella (fase x fascia di |valutazione
+statica|, le stesse fasce di F1/F2). Modello ESTESO: base + d.
+
+Metriche sulla VALIDAZIONE:
+- aumento di R² (base -> esteso);
+- "lift": frazione di posizioni con `|r| > 100cp` nel decile più alto
+  di `d`, divisa per la frazione complessiva di posizioni con
+  `|r| > 100cp` nel campione.
+
+SOGLIE (fissate ora):
+- PROSEGUIMENTO: aumento di R² >= 3% E lift >= 2;
+- SCARTO: aumento di R² < 1% O lift < 1,3;
+- ZONA GRIGIA: tra i due — si riporta, decide Daniele.
+
+**BLOCCO: dato mancante, da risolvere prima di S2** — vedi
+"Verifica del binario di Rete B" sotto: non esiste un binario Windows
+di v3.1.7, né come release ufficiale né in archivio locale. S2 non può
+procedere finché questo non è risolto.
+
+### Verifica del binario di Rete B (2026-11-13)
+
+- Tag `v3.1.7` presente in questo repository git (commit `b93f9d8`
+  "Bump version to 3.1.7", ciclo chiuso da `67c7695`).
+- Release GitHub `v3.1.7`: un SOLO asset, `luna-v3.1.7-android-arm64`
+  (sha256 `7ca8faf4c2f596a1b1192e1974d8b6f4c5cbdcc7c315cd0184ad09c637769015`,
+  dalla API di GitHub) — **non eseguibile su questo PC Windows**.
+- Archivio locale `release-backups/v3.1.7/`: contiene
+  `luna-v3.1.7-android-arm64` (stesso binario ARM64) e
+  `luna-v3.1.7-source.tar` (codice sorgente, non un binario). **Nessun
+  binario Windows x86-64 trovato**, né localmente né come release
+  ufficiale.
+- Non ho compilato un binario Windows dal tag `v3.1.7` di mia
+  iniziativa: sarebbe un binario COSTRUITO da me, non "trovato", e la
+  richiesta era di fermarmi se manca un dato. Se Daniele autorizza,
+  posso compilarlo da `v3.1.7` (il tag esiste già nella storia di
+  questo repository) e riportarne lo sha256 prima di usarlo in S2.
+
 ## Condizione di stop
 
 Se dopo i filtri le posizioni utili sono meno di 20.000 nella
-validazione e nella stima insieme, ci si ferma e si riporta; se la
-generazione supera di 2x la stima di tempo (quindi oltre ~10,2h a un
-processo / ~5,1h con 2 processi per D_ref=14, vedi Pilota), ci si
-ferma e si riporta.
+validazione e nella stima insieme (campione principale F1/F2), ci si
+ferma e si riporta; se la generazione supera di 2x la stima di tempo
+ci si ferma e si riporta (vedi tempo rivisto sotto). Per S1: se, dopo i
+filtri, il campione denso ha meno di 100 partite utilizzabili (troppe
+scartate), ci si ferma e si riporta. Per S2: ci si ferma già ora,
+prima di generare qualsiasi dato per S2, per il binario di Rete B
+mancante (sopra).
+
+**Tempo stimato, rivisto**: campione principale (F1/F2, N~72.900,
+media osservata nella prova di fumo 715,2ms/posizione) ~14,5h a 1
+processo / ~7,25h a 2 processi (vedi "Prova di fumo"); S1 aggiunge
+circa 4.600 posizioni (200 partite x ~23 posizioni ogni 3 ply da ply
+10 a 80), circa 40 minuti in più a profondità 14 alla stessa velocità
+media, trascurabile rispetto al totale. S2 non aggiunge tempo di
+generazione su questo motore (richiede invece l'esecuzione di Rete B,
+bloccata — vedi sopra).
 
 ## Effetto atteso e numero di partite previsto
 
