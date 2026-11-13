@@ -531,11 +531,13 @@ ogni processo resta a Threads=1 al suo interno.
   nuovo sha256 al momento, DOPO che le due modifiche descritte in 2e
   (o la loro alternativa) saranno decise e, se autorizzate, fatte.
 - Binario `exp03` (nuovo membro del workspace, `exp03/`, linka `libluna`
-  direttamente, nessun sotto-processo UCI): sha256
-  `f87c5ef084cb2fc80ef7db9a92a4b8f6a4235204a1300bd9dab99c5d95c5eac1`
-  (release, DOPO il fix `refresh_nnue` del 2026-11-13 — lo sha256
-  precedente, `a92781b2...54f82`, dalla build con il bug descritto
-  sotto in "Prova di fumo", NON va usato). Fa sia l'estrazione di F1/F2/controlli SIA le
+  direttamente, nessun sotto-processo UCI): sha256 attuale e definitivo
+  per la generazione: **`9551c8e6a87d633a53c3cecc5182e1315ae0833e45dc9d975e5653c329b28b0a`**,
+  compilato da una copia pulita di `git archive bb9f5ce` (vedi "Verifica
+  pre-generazione: hash di exp03" sotto per i dettagli e per la nota
+  onesta sul perché i due sha256 precedenti — `a92781b2...54f82` e
+  `f87c5ef0...5c5eac1` — sono entrambi OBSOLETI e non vanno usati). Fa
+  sia l'estrazione di F1/F2/controlli SIA le
   etichette (valutazione statica, valutazione di quiescenza, punteggio
   a profondita fissa via `iterative_deepening`) con chiamate di
   libreria diretta: NON e uno script Python separato via sotto-processo
@@ -839,6 +841,56 @@ con un "via" esplicito.
 - **Verifica preliminare dello script di analisi**: già fatta (vedi
   sopra, 7 casi sintetici in totale fra F1/F2 e S1/S2, tutti superati)
   prima di questo piano.
+
+## Verifica pre-generazione: hash di `exp03` (2026-11-13)
+
+**Nota onesta**: lo sha256 di `exp03` registrato dopo il commit
+`68b4416` (`f87c5ef0...5c5eac1`) era diventato obsoleto subito dopo i
+due commit successivi che hanno modificato di nuovo il codice —
+`b892745` (F1: ricattura legale) e `295dcc6` (modalità `features` +
+colonna `search_score`) — senza che io ripetessi la registrazione.
+Individuato nella verifica pre-generazione richiesta da Daniele
+(confronto dello sha256 registrato con quello del binario attuale).
+
+**Punto 1 — build riproducibile**: `git archive bb9f5ce` estratto in
+una cartella pulita (`repro_build`, fuori dal worktree), poi `cargo
+build --release` (stessa toolchain, nessuna variabile `RUSTFLAGS`,
+coerente con `.cargo/config.toml` di questo repository che richiede
+`target-cpu=native` solo se esplicitamente impostato a mano — non lo
+è stato in nessuna delle due build). Risultato:
+- sha256 della build pulita: `9551c8e6a87d633a53c3cecc5182e1315ae0833e45dc9d975e5653c329b28b0a`
+- sha256 della build nel worktree (quella segnalata come mismatch):
+  `8fa3f3dbd18d8a37971c4c2b213d1c8d80102600e5f1f4b5a422e37052a969b9`
+- **Diversi anche questi due fra loro.** Causa individuata: i binari
+  Rust incorporano, nei messaggi di panic/`debug_assert!` (macro
+  `file!()`), il PERCORSO della cartella di compilazione usata da
+  cargo per quel crate — verificato con `grep -a` sui due eseguibili,
+  che mostra rispettivamente `wt_exp03\src\attacks.rs` e
+  `repro_build\src\attacks.rs` incorporati byte per byte: stesso
+  codice sorgente (stesso commit), stesso comando di build, ma nomi di
+  cartella diversi (`wt_exp03` vs `repro_build`) producono sha256
+  diversi. Non è un flag, non è una differenza di toolchain, non è
+  codice diverso.
+- **Decisione conseguente** (come indicato da Daniele per questo
+  caso): si usa come binario di generazione quello della build
+  pulita (`9551c8e6...9b28b0a`), e i punti 2-3 sono stati rifatti su
+  QUESTO binario, non su quello del worktree.
+
+**Punto 2 — prove rifatte sul binario di generazione**:
+- Equivalenza col motore (stesso procedimento di prima, 200 posizioni,
+  motore anch'esso compilato dalla stessa copia pulita): **200/200
+  identiche** su valutazione statica, punteggio a `go depth 14` e
+  mossa migliore.
+- Invarianza (1.000 posizioni, stesso procedimento): **1.000/1.000
+  identiche** su F1 (dmob) e F2 (dthreat).
+- `cargo test --release --workspace` sulla copia pulita: tutti i test
+  passati (0 falliti), incluso l'intero set di test del motore e dei
+  18 test di `exp03`.
+
+**Conclusione**: i tre controlli richiesti passano tutti. Il binario
+`9551c8e6a87d633a53c3cecc5182e1315ae0833e45dc9d975e5653c329b28b0a`,
+costruito da `git archive bb9f5ce`, è quello usato per la generazione
+(vedi sotto).
 
 ## Hash del commit del protocollo
 
