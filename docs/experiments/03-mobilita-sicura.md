@@ -546,12 +546,21 @@ ogni processo resta a Threads=1 al suo interno.
   come deviazione esplicita, non deciso a nome di Daniele: se preferisce
   una vera separazione in due strumenti, va dichiarato prima della
   Fase 2.
-- Script `scripts/analyze_03.py` (OLS + bootstrap a cluster): sha256
-  `b33f9418d272df416a3eb2b054d8ed71ec80c1c57135617c02c78051bdd43972`.
-- Script `scripts/test_analyze_03_synthetic.py` (test su dati
+- Script `scripts/analyze_03.py` (OLS + bootstrap a cluster per F1/F2;
+  ESTESO il 2026-11-13 con S1 — ICC(1), correlazione a distanza esatta
+  di ply, bootstrap a cluster — e S2 — calibrazione B su A, disaccordo
+  d, R² e lift sulla validazione): sha256
+  `3753df10e21812af9bd64b7378e1cc74e58447094929ef6775c3d0e36193af38`.
+- Script `scripts/test_analyze_03_synthetic.py` (test F1/F2 su dati
   sintetici, 3 casi: effetto presente, nullo, segno diverso per fase —
   tutti e tre superati prima di toccare dati veri): sha256
-  `f26a74d3d3a2e9a0449ed7bfed2954306dc66b1953501f7278e5857ddcebab42`.
+  `f26a74d3d3a2e9a0449ed7bfed2954306dc66b1953501f7278e5857ddcebab42`
+  (invariato).
+- Script `scripts/test_analyze_03_s1_s2_synthetic.py` (NUOVO, test S1/S2
+  su dati sintetici: persistenza recuperata, caso nullo, disaccordo
+  informativo, disaccordo non informativo — tutti e quattro superati
+  prima di toccare dati veri): sha256
+  `309e45b15cffec540d45155c63aa6bd1c137ea36a97be3fe5c30f52308c6f32e`.
 
 ## Verifica della modifica a `quiescence`
 
