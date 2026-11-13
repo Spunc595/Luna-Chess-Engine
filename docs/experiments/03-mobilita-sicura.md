@@ -262,10 +262,15 @@ che NON siano il re né un pedone, tali che:
   pezzo mosso resta sicuro se `see(board, m) >= 0` (`src/movegen.rs:63`);
 - se la mossa è quieta (nessuna cattura): il pezzo mosso resta sicuro
   se, DOPO averla eseguita (`esegui_mossa`), il nemico non ha nessuna
-  mossa di cattura di quel pezzo sulla sua nuova casa con
-  `see(board_dopo, cattura_nemica) > 0` (si enumerano le catture nemiche
-  pseudo-legali dirette a quella casa e si valuta `see` su ciascuna; se
-  nessuna ha `see > 0`, la mossa quieta è sicura).
+  mossa di cattura LEGALE di quel pezzo sulla sua nuova casa con
+  `see(board_dopo, cattura_nemica) > 0` (**decisione del 2026-11-13**:
+  si enumerano le catture nemiche pseudo-legali dirette a quella casa,
+  si valuta `see` su ciascuna, e per quelle con `see > 0` si verifica
+  ANCHE la legalità con `esegui_mossa`/`annulla_mossa` — una ricattura
+  pseudo-legale ma illegale, es. perché il ricatturatore è inchiodato,
+  NON conta; se nessuna cattura legale ha `see > 0`, la mossa quieta è
+  sicura). Verificato con un test unitario dedicato (alfiere nemico
+  inchiodato come unico possibile ricatturatore).
 
 Per il lato NON al tratto: si usa `fai_mossa_nulla` (`src/board.rs:781`)
 solo se `!board.re_in_scacco(lato)` (`src/board.rs:487-491`), poi si
@@ -341,10 +346,12 @@ visto i dati.
 ## Dati
 
 Posizioni campionate da partite Luna contro Luna (PGN archiviati), una
-posizione ogni k=15 ply con seed fisso 20261112. N atteso: circa 72.900
-posizioni grezze (D_ref=14, vedi Pilota); N finale dopo i filtri:
-sconosciuto fino alla generazione. SPLIT PER PARTITA (60% stima / 40%
-validazione, seed fisso 20261112).
+posizione ogni **k=20** ply (deciso il 2026-11-13, era k=15: più
+margine di tempo — vedi "Decisioni Fase 2B" sotto) con seed fisso
+20261112. N atteso: **circa 54.700** posizioni grezze (D_ref=14,
+rivisto dal pilota originale di 72.900 con k=15); N finale dopo i
+filtri: sconosciuto fino alla generazione. SPLIT PER PARTITA (60%
+stima / 40% validazione, seed fisso 20261112).
 
 PGN: `sprt_run\match.pgn` (sha256
 `c9acaff334aba9859fc43a6eb1c453f3aed9d6e64efdeb7d1b7e20ac57c7dbbd`),
@@ -715,6 +722,20 @@ akimbo) per S2, con queste verifiche:
 
 Nessun dato generato per S2 oltre a questa verifica di plausibilità;
 nessuna analisi di R²/lift; nessun push; nessun merge.
+
+## Decisioni Fase 2B (2026-11-13)
+
+- **Strumento**: `exp03` (binario unico, chiamate di libreria dirette)
+  accettato come strumento definitivo, A CONDIZIONE di superare la
+  prova di equivalenza col motore (sotto). Se anche una sola posizione
+  risulta diversa, questa decisione è da riconsiderare.
+- **D_ref=14, k=20** (non più k=15): meno posizioni grezze (~54.700 vs
+  ~72.900), più margine sul budget di tempo — vedi "Prova di fumo
+  rifatta (2026-11-13, Fase 2B)" sotto per il tempo stimato con questi
+  numeri. Decisione presa PRIMA di generare qualunque dato.
+- **F1, ricattura nemica dopo mossa quieta**: deve essere LEGALE, non
+  solo pseudo-legale (vedi "Feature" sopra, aggiornata, e il commit
+  `b892745` con il test dell'alfiere inchiodato).
 
 ## Hash del commit del protocollo
 
