@@ -521,9 +521,10 @@ ogni processo resta a Threads=1 al suo interno.
   (o la loro alternativa) saranno decise e, se autorizzate, fatte.
 - Binario `exp03` (nuovo membro del workspace, `exp03/`, linka `libluna`
   direttamente, nessun sotto-processo UCI): sha256
-  `a92781b2817759c2a9b500b8ffae1ddd5f8452b6f2f4a8f62680036907d54f82`
-  (release, dal tip di questo branch dopo il commit che rende `pub`
-  `quiescence`). Fa sia l'estrazione di F1/F2/controlli SIA le
+  `f87c5ef084cb2fc80ef7db9a92a4b8f6a4235204a1300bd9dab99c5d95c5eac1`
+  (release, DOPO il fix `refresh_nnue` del 2026-11-13 — lo sha256
+  precedente, `a92781b2...54f82`, dalla build con il bug descritto
+  sotto in "Prova di fumo", NON va usato). Fa sia l'estrazione di F1/F2/controlli SIA le
   etichette (valutazione statica, valutazione di quiescenza, punteggio
   a profondita fissa via `iterative_deepening`) con chiamate di
   libreria diretta: NON e uno script Python separato via sotto-processo
@@ -600,7 +601,7 @@ repository non prescrive una correzione formale per test multipli,
 `docs/METHOD.md` §7). Nessun'altra ripetizione pianificata su questo
 tema per ora.
 
-## Prova di fumo (2026-11-12, NON il dataset di analisi)
+## Prova di fumo (2026-11-12, RIFATTA il 2026-11-13, NON il dataset di analisi)
 
 200 posizioni dal `pilot_run` (NON dallo `sprt_run` usato per l'analisi
 vera — fonte deliberatamente diversa), una ogni k=15 ply con offset
@@ -608,43 +609,112 @@ casuale per partita, seed 20261112, estratte con uno script Python
 scratch (non archiviato) da `pilot_run\match.pgn`. Solo verifiche di
 plausibilita, NESSUN calcolo di relazione feature/residuo.
 
+**La prima esecuzione (2026-11-12) usava una build di `exp03` con un
+bug**: `Scacchiera::from_fen` lascia `nnue_acc` azzerato, e senza un
+`refresh_nnue` esplicito dopo, `eval`/`quiescence`/la ricerca a
+profondita fissa leggevano un accumulatore sempre a zero —
+`static_eval` usciva quasi costante (~5cp) su 200 posizioni molto
+diverse, un valore chiaramente implausibile trovato solo durante la
+verifica di plausibilita di S2 (confronto con la Rete B, sotto). Fix
+committato (`68b4416`), prova di fumo RIFATTA con la build corretta
+(sha256 `f87c5ef0...5c5eac1`): i numeri sotto sono quelli corretti, i
+precedenti vanno considerati invalidi per le colonne che dipendono da
+`eval`/quiescenza/ricerca (NON per F1/F2, che non leggono `nnue_acc` e
+sono risultati identici in entrambe le esecuzioni).
+
 - Tempo per posizione (profondita 14, Threads=1 implicito, Hash=64,
   include valutazione statica + quiescenza + ricerca a profondita
-  fissa): mediana 561ms, 90° percentile 1.361ms, media 715,2ms, minimo
-  0ms (probabile matto/stallo immediato), massimo 5.914ms.
-  **Più alto della media del pilota di tempo originale (503,4ms, solo
-  ricerca)**: la differenza (~212ms) e il costo aggiuntivo della
-  chiamata a `quiescence` e delle allocazioni di TT/SharedHistory per
-  posizione. Da ricalcolare il budget totale con questo numero, non con
-  quello del pilota originale (vedi sotto).
-- In scacco (filtro "non in scacco"): 17/200 (8,5%) scartate.
-- <7 pezzi o ply<8: 28/200 (14,0%) scartate.
-- |valutazione statica| > 600cp: 0/200 (0,0%) scartate (coerente con il
-  95,0% misurato nel pilota su un campione diverso).
-- Mossa migliore a D_ref=14 e cattura/promozione (filtro "quiet move"):
-  34/200 (17,0%) scartate.
-- |valutazione statica - valutazione di quiescenza| > 30cp: 36/200
-  (18,0%) scartate (mediana del delta assoluto: 0cp; 90° percentile:
-  441cp — distribuzione con coda lunga, come atteso in posizioni
-  tattiche).
-- F1 (dmob): minimo -22, massimo 15, media -1,98, mediana -2,0 — range
-  plausibile (nessun valore fuori da quanto atteso per una differenza
-  di conteggi di mosse).
-- F2 (dthreat): minimo -2, massimo 4, media 0,24, mediana 0,0 —
-  plausibile.
-- **Tutti i filtri insieme** (non in scacco, >=7 pezzi, ply>=8, mossa
-  migliore non cattura/promo, |eval|<=600, |delta quiescenza|<=30):
-  117/200 (58,5%) passano.
+  fissa): mediana 811ms, 90° percentile 2.062ms, **media 1.052,4ms**
+  (molto più alto sia del pilota originale, 503,4ms, sia della prima
+  prova di fumo col bug, 715,2ms: con un accumulatore corretto il
+  motore esplora posizioni vere, non quasi-pareggi fittizi, quindi
+  tempi di ricerca più realistici).
+- In scacco: 17/200 (8,5%) scartate (invariato, non dipende da eval).
+- <7 pezzi o ply<8: 28/200 (14,0%) scartate (invariato).
+- |valutazione statica| > 600cp: **8/200 (4,0%) scartate** (CAMBIATO
+  dal precedente 0,0%, che era un artefatto del bug: con eval sempre
+  ~5cp, nessuna posizione poteva superare 600cp).
+- Mossa migliore a D_ref=14 e cattura/promozione: 32/200 (16,0%)
+  scartate (leggermente diverso da prima: la ricerca ora vede
+  posizioni vere, quindi le mosse scelte cambiano).
+- |valutazione statica - valutazione di quiescenza| > 30cp: 35/200
+  (17,5%) scartate (mediana del delta assoluto: 0cp; 90° percentile:
+  132cp — molto più basso del 441cp della prova col bug, che gonfiava
+  artificialmente i delta confrontando un "quasi zero" fittizio con una
+  quiescenza comunque corretta).
+- F1 (dmob): minimo -22, massimo 15, media -1,98 — **identico** alla
+  prova precedente (confermato: non dipende da eval).
+- F2 (dthreat): minimo -2, massimo 4, media 0,24 — **identico**.
+- **Tutti i filtri insieme**: 120/200 (60,0%) passano.
 
-**Revisione del budget di tempo**: con la media osservata qui (715,2ms,
-non 503,4ms) e N atteso ~72.900, il tempo totale stimato sale a
-~14,5h con 1 processo / ~7,25h con 2 processi — sopra la soglia di
-~10h con 1 processo, ma ANCORA sotto con 2 processi. La condizione di
-stop del protocollo ("se la generazione supera 2x la stima") resta
-quindi da monitorare con la stima corretta (~7,25h con 2 processi), non
-con quella del pilota originale. Segnalato, non deciso: se Daniele
-preferisce ridurre N o passare a D_ref=12 per margine, va deciso prima
-della Fase 2.
+**Revisione del budget di tempo (con i numeri corretti)**: media
+1.052,4ms/posizione, N atteso ~72.900 -> tempo totale stimato **~21,3h
+a 1 processo / ~10,65h a 2 processi**. Questo SUPERA la soglia delle
+~10h anche con 2 processi (la stima precedente, ~7,25h con 2 processi,
+era basata sulla build col bug ed è invalida). **Segnalato, non
+deciso**: prima della Fase 2 serve una decisione di Daniele su almeno
+una di: ridurre N (k più grande o campione più piccolo), passare a
+D_ref=12 (pilota: media 204,4ms, ma da rimisurare con la build corretta
+dato quanto appena osservato per D_ref=14), usare più di 2 processi, o
+accettare un tempo totale più lungo.
+
+## Rete B per S2: verifica del binario (2026-11-13)
+
+Autorizzata da Daniele la compilazione di Luna v3.1.7 (rete B,
+akimbo) per S2, con queste verifiche:
+
+1. **Fonte**: compilato dal tarball `release-backups/v3.1.7/
+   luna-v3.1.7-source.tar` (sha256
+   `df6ff9bcd4dc62bdc23f10f1c079758bc8a16c0e8cecaee55f1d1e876c46d636`,
+   identico al file `.sha256` accanto), NON dal checkout di lavoro.
+   **Verifica contro il tag `v3.1.7`**: hash git-blob (`git hash-object`)
+   di tutti i 54 file del tarball estratto confrontati uno per uno con
+   `git archive v3.1.7` — **identici su tutti i 54 file** (le differenze
+   byte-per-byte viste con un primo confronto `diff -rq` erano solo
+   terminatori di riga CRLF/LF del checkout su Windows, non contenuto
+   diverso).
+2. **Rete**: `resources/net.bin` nel tarball, sha256
+   `b3faa88af3597666f0fdbd619178bf75bea23d3d5c7a2d85d14ae4277eb9c194`,
+   6.297.664 byte. **Coincide esattamente** con quanto documentato in
+   `BENCHMARKS.md:383` di quella stessa versione (`b3faa88a...9c194`,
+   6.297.664 byte).
+3. **Build**: `rustc 1.92.0 (ded5c06cf 2025-12-08)` / `cargo 1.92.0`
+   (stessa toolchain usata per la build di `exp03`), comando
+   `cargo build --release` dalla cartella estratta del tarball, nessun
+   flag aggiunto da me. Nota: il tarball contiene un
+   `.cargo/config.toml` proprio di quella versione con
+   `rustflags = ["-C", "target-cpu=native"]` per
+   `x86_64-pc-windows-msvc` — non l'ho aggiunto io, è configurazione
+   del progetto già presente in quel tag. Binario:
+   `target/release/luna.exe`, sha256
+   `7f4154ddc08584a6a6ce0b0ca2db5084f452fdeae379c3a8f7975b4ba5163635`.
+4. **Valutazione**: v3.1.7 ha GIÀ il comando UCI `eval`
+   (`src/main.rs:594-603` del tarball, chiama `search::eval` esattamente
+   come la versione attuale) — **nessun binario ausiliario necessario**,
+   nessuna modifica al codice.
+5. **Verifica di plausibilità** (sulle stesse 200 posizioni della prova
+   di fumo, NESSUNA analisi di effetto):
+   - correlazione tra eval_A (Luna attuale, build corretta dopo il fix
+     `refresh_nnue`) ed eval_B (v3.1.7): **0,973** — fortemente
+     correlate, come atteso per due reti derivate dalla stessa famiglia
+     (entrambe la rete di akimbo, A con una rete successiva propria,
+     ma architetturalmente comparabile).
+   - rapporto A/B: mediana 0,953, media 0,719 (quest'ultima trascinata
+     da pochi casi con B vicino a 0). **Non coincide** con il rapporto
+     atteso indicato da Daniele (scala 400/358 = 1,117): segnalato,
+     non corretto a mano. Causa plausibile, non verificata: v3.1.7 fu
+     la release che introdusse il material scale di akimbo applicato
+     DOPO la rete (vedi i suoi stessi release notes), quindi sia A che
+     B applicano oggi una post-elaborazione simile, non solo la "scala"
+     pura dei due formati di rete — il rapporto osservato può
+     riflettere questo, non necessariamente le sole costanti SCALE.
+6. **Nota per l'analisi**: *"d misura il disaccordo fra due valutazioni
+   complete (rete più eventuale post-elaborazione di versioni diverse),
+   non solo fra le due reti"* — registrata qui come richiesto, da
+   usare in S2.
+
+Nessun dato generato per S2 oltre a questa verifica di plausibilità;
+nessuna analisi di R²/lift; nessun push; nessun merge.
 
 ## Hash del commit del protocollo
 
