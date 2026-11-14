@@ -1013,6 +1013,84 @@ divisione che tenesse conto esplicitamente di questa parentela.
 
 **Da questo momento il dataset non si modifica.**
 
+## Preparazione per l'analisi (2026-11-14)
+
+**Decisioni di Daniele**: si applicano TUTTI i sei filtri del
+protocollo (non solo i tre flag `scarta_*` del generatore, che
+implementano solo 4 delle 6 condizioni -- manca "miglior mossa a
+D_ref non cattura/promozione" e "|static-quiescenza|<=30", applicate
+nel driver sulle colonne grezze `best_is_capture_or_promo` e
+`delta_static_quiescenza`). Conteggi corretti: **main 31.296 utili**
+(stima 18.600, validazione 12.696; il numero 38.775 riportato al
+congelamento era incompleto, solo 3 indicatori su 6), **S1 2.858**
+utili. Condizione di stop (>= 20.000 utili nel campione principale)
+**soddisfatta**.
+
+**Controllo di segno** (|static_eval|>300, static_eval vs
+search_score): applicato alla popolazione dell'ANALISI (posizioni
+utili): **99,12%** (6.591 posizioni) -- supera la soglia del 95%.
+Sulle righe NON filtrate (53.607 totali, 13.216 con |static_eval|>300):
+90,53% -- sotto soglia, ma il controllo è stato definito DOPO il
+congelamento e si applica correttamente solo alla popolazione
+dell'analisi. I disaccordi sulle righe non filtrate si concentrano
+quasi tutti su posizioni con `delta_static_quiescenza` enorme
+(800-1300cp) e `best_is_capture_or_promo=true` -- esattamente le
+posizioni tattiche instabili escluse dai filtri (statica sbagliata
+prima di una combinazione forzata, corretta dalla ricerca:
+comportamento normale, non un errore di prospettiva).
+
+**Asimmetria per colore** (sulle posizioni utili, |static_eval|>300):
+bianco al tratto 3.663 posizioni, 36 discordanti (0,98%); nero al
+tratto 2.928 posizioni, 22 discordanti (0,75%). Rapporto fra i tassi
+1,31 -- sotto la soglia di 2 che avrebbe richiesto di fermarsi.
+
+**Controllo diretto via UCI** (punto b): 20 posizioni scelte a caso
+(seed 20261112) fra le utili, confrontate con `eval` e `go depth 14`
+del motore reale (binario della build riproducibile `bb9f5ce`,
+Threads 1, Hash 64, `ucinewgame` prima di ogni posizione): **20/20**
+coincidono sia per `static_eval` sia per `search_score` (segno e
+valore).
+
+**Mappatura** (colonne reali -> strutture di `analyze_03.py`, nessuna
+modifica alla sua logica): `residual` = `search_score - static_eval`
+(entrambe già dal punto di vista del lato al tratto, vedi
+`src/nnue.rs:629-633`; nessun ribaltamento di segno), winsorizzato a
++-300; `f1`=`dmob`, `f2`=`dthreat`, `material_diff`=`diff_materiale`
+(NESSUN ribaltamento per lato al tratto -- punto aperto, non
+richiesto dal protocollo, segnalato qui per trasparenza),
+`n_pawns`=`n_pedoni`, `phase`=`fase`, `eval_band`=`fascia_eval`. Parte
+stima/validazione presa da `games_split.tsv` (split pre-registrato),
+NON ricalcolata con `split_by_game` di `analyze_03.py` (che userebbe
+una sequenza casuale diversa dallo stream "_split" già usato per
+generare quel file).
+
+**Lift NaN**: `run_s2_safe` (in `run_analysis_03.py`) converte
+`float('inf')` in `float('nan')` quando il denominatore (frazione
+complessiva con `|r|>100cp`) è zero, senza modificare
+`analyze_03.py`. Testato con un nuovo scenario sintetico a lift noto
+(~3,7, atteso ~4,4, con tolleranza dichiarata), uno nullo (~0,94,
+atteso ~1) e uno con denominatore zero (NaN confermato).
+
+**Protezione di secondo avvio**: `run_analysis_03.py` scrive
+`<output>.lock` con timestamp e sha256 degli input (i 4 file
+congelati); un secondo avvio sugli stessi input si rifiuta di
+procedere (uscita 3) salvo `--force` (da annotare qui se usato).
+Testato su dati sintetici.
+
+**File e sha256**:
+- `scripts/run_analysis_03.py`: sha256
+  `1910cf752e86f163d687ed9b46755c65aad61281906e883a7de326c4780b1f6b`.
+- `scripts/test_run_analysis_03_synthetic.py`: sha256
+  `f719dc00678141d2c28863df5987410843426cb388384a3171d41ede1a801fa0`.
+- `scripts/analyze_03.py`: sha256
+  `3753df10e21812af9bd64b7378e1cc74e58447094929ef6775c3d0e36193af38`
+  (INVARIATO, nessuna modifica -- stesso hash registrato al punto 3 del
+  congelamento).
+
+**NON eseguita l'analisi sui dati veri** (nessun OLS, bootstrap, ICC
+calcolato su `dataset_main.tsv`/`dataset_s1.tsv`/`dataset_reteB.tsv`
+reali): solo conteggi, controllo di segno e verifica diretta via UCI.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
