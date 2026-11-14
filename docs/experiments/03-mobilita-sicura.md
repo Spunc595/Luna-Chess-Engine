@@ -949,6 +949,70 @@ nessuna riga con (fen, ply) estranea rispetto alla fetta assegnata
 (`slice_a.tsv`/`slice_b.tsv`), ultima riga completa (21 campi). Esito:
 nessuna anomalia.
 
+## Congelamento del dataset (2026-11-14)
+
+**Generazione conclusa**: processo A `COMPLETATO` 2026-11-14 16:07:31
+(29.089 righe), processo B `COMPLETATO` 2026-11-14 15:57:10 (28.834
+righe). Totale 57.923 righe fisiche = 53.607 posizioni del campione
+principale + 4.316 del campione denso S1, con 222 posizioni (game_id,
+ply) scelte da ENTRAMBI gli schemi di campionamento (sovrapposizione
+casuale, non un errore; verificato bit-identiche fra le due occorrenze).
+
+**Decisione sui duplicati (Daniele, 2026-11-14)**: opzione 3, due file
+distinti, NON deduplicati. Le 222 posizioni comuni compaiono una volta
+in `dataset_main.tsv` e una volta in `dataset_s1.tsv`.
+
+**Controllo sui 44 duplicati (fen,ply) della Rete B**: tutti e 44 hanno
+`game_id` diversi tra loro (nessuna coincidenza accidentale sullo stesso
+game_id) -- plausibile per aperture comuni raggiunte da partite diverse.
+
+**File congelati** (ordinati per game_id numerico poi ply, intestazione
+una volta sola, game_id ricostruito per corrispondenza POSIZIONALE
+verificata byte-esatta con `slice_a.tsv`/`slice_b.tsv`/`main_sample.tsv`,
+non per chiave (fen,ply), che non è univoca):
+- `dataset_main.tsv`: 53.607 righe, sha256
+  `f63d0986e7dab472931244571b2ea85728e09c9ddc093781e98ccb891e915484`.
+- `dataset_s1.tsv`: 4.316 righe, sha256
+  `96362b241bef5ffcd2a82f6c66bdcce7c8b6e9fe826d8f87a87370119075161d`.
+- `dataset_reteB.tsv`: 53.607 righe, stesso ordine di `dataset_main.tsv`
+  (verificato identico), sha256
+  `8701127674b90b12849452877d4fb115f6a16656cc27ff420bc632d2235f44b5`.
+- Grezzi conservati come riferimento: `out_a.tsv` (sha256
+  `c536c13bc5228468281485e30983b45cd1600c3c0bca511cc7ee4e6dc28f6227`),
+  `out_b.tsv` (sha256
+  `0ca92901f67546a0a5889d68546e986f992e52953b4804cd4be67fe238d3c722`).
+
+**Archiviazione**: copia in
+`lavoro\archivio_03_dataset_20261114\` (sha256 identico prima/dopo la
+copia per tutti i file), con `MANIFEST.txt` (sha256
+`317cf54241ae38a10800181d4f7d2ba70821a64ccc2bb5232b9c4e38ff0e976a`)
+che elenca anche gli sha256 già registrati di `exp03.exe`, `luna.exe`
+v3.1.7, `analyze_03.py`, degli script di generazione e del PGN
+sorgente -- tutti riverificati e coincidenti con quelli registrati in
+precedenza in questo documento.
+
+**Esito del controllo di schema (punto 3)**: `analyze_03.py` **non**
+legge questi file senza modifiche. `load_rows()` richiede le colonne
+`game_id, phase, residual, f1, f2, material_diff, n_pawns, static_eval`;
+i file congelati hanno nomi diversi (`fase`, `dmob`, `dthreat`,
+`diff_materiale`, `n_pedoni`) e non hanno `residual` (da calcolare come
+`search_score - static_eval`, winsorizzato a +-300). `S1Row` richiede
+`e` (residuo calibrato sul modello di base) e `S2Row` richiede `phase,
+eval_band, abs_r`: nessuna presente nei file congelati. Manca uno
+script di preparazione (rinomina colonne + calcolo di
+residual/f1/f2/e/abs_r), non ancora scritto. Nessuna statistica
+calcolata per questa verifica (solo confronto fra le firme di
+`load_rows`/`S1Row`/`S2Row` e le intestazioni dei file).
+
+**Limitazione registrata**: la divisione stima/validazione è per
+partita; due partite giocate dalla stessa apertura con colori
+invertiti possono cadere in parti diverse della divisione. Effetto
+atteso trascurabile; l'intervallo di confidenza bootstrap per partita
+può risultarne leggermente più stretto di quanto sarebbe con una
+divisione che tenesse conto esplicitamente di questa parentela.
+
+**Da questo momento il dataset non si modifica.**
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
