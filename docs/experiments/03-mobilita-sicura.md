@@ -931,6 +931,24 @@ dato ancora analizzato, nessuna statistica calcolata.
   `s1_sample.tsv`, che restano entrambi disponibili. Segnalato qui,
   non un problema practico ma da ricordare al congelamento.
 
+## Incidente durante la generazione (2026-11-13/14)
+
+Durante la generazione, nella notte fra il 13 e il 14 novembre, il cavo
+di alimentazione del notebook si è staccato e il PC è andato in
+sospensione (checkpoint del processo A: ultimo avanzamento 00:24:32 a
+9.800 posizioni, ripresa 08:54:25). I processi non si sono interrotti
+(stesso PID, nessun riavvio di sistema — `LastBootUpTime` antecedente
+all'avvio dei processi). La ricerca è a profondità fissa con Threads 1:
+i risultati non dipendono dal tempo trascorso. Durata aumentata di
+circa 8,5 ore, nessun dato perso.
+
+Controllo di integrità dopo la ripresa (sola lettura, nessuna
+statistica): per entrambi i file di output, nessuna riga con numero di
+campi diverso dall'intestazione, nessuna coppia (fen, ply) duplicata,
+nessuna riga con (fen, ply) estranea rispetto alla fetta assegnata
+(`slice_a.tsv`/`slice_b.tsv`), ultima riga completa (21 campi). Esito:
+nessuna anomalia.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
