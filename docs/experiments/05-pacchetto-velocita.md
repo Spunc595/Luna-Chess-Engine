@@ -120,6 +120,31 @@ CIASCUNA delle tre modifiche singolarmente contro lo stesso riferimento
 quale contribuisce quanto — non si accetta il pacchetto e si lascia
 indiviso.
 
+**Caso: precisione valida, limite inferiore IC95% > 1,000, ma G < 1,02**
+(guadagno reale ma sotto la soglia nominale). Decisione (fissata ora):
+**ACCETTA** se il limite inferiore dell'IC95% è `> 1,000` E il codice
+aggiunto è piccolo (per questo pacchetto: ciascuna delle tre modifiche
+è isolata, poche righe, nessun meccanismo nuovo oltre a quanto già
+descritto in "Cambiamento esatto", nessun `unsafe` aggiuntivo oltre al
+prefetch stesso — già vero per come le tre modifiche sono definite in
+questo protocollo); **altrimenti NON ACCETTA**. Motivazione: con nodi
+identici il rischio di correttezza è nullo per costruzione — un
+guadagno il cui intervallo esclude la perdita (limite inferiore > 1)
+è un miglioramento gratuito, anche se piccolo, e scartarlo solo perché
+non raggiunge una soglia nominale pensata per la rilevabilità (non per
+il rischio) sprecherebbe un risultato verificato.
+
+**Caso: il pacchetto NON è accettato** (nessuna delle due condizioni
+sopra soddisfatta). Non si scarta nulla delle tre modifiche sulla base
+del solo risultato del pacchetto: si misura CIASCUNA modifica
+separatamente, con lo stesso protocollo (stesso gate a nodi identici,
+stesso campione, stesso requisito di precisione), prima di scartare
+qualunque cosa. Un pacchetto con effetti opposti (es. una modifica
+guadagna, un'altra perde, l'insieme si annulla o retrocede) è un
+risultato informativo in sé, non un giudizio sulle singole modifiche:
+nessun giudizio sul pacchetto vale come giudizio su una modifica presa
+da sola.
+
 ## Zona grigia
 
 La misura è VALIDA solo se il REQUISITO DI PRECISIONE è soddisfatto
@@ -204,6 +229,19 @@ dichiarare al momento della misura (quali processi erano residenti,
 piano di alimentazione) com'è buona pratica del progetto (vedi
 BENCHMARKS.md:106-108 per l'esempio di dichiarazione onesta di
 "macchina non silenziosa").
+
+**L'esito su x86 NON si trasferisce ad ARM.** Un'eventuale accettazione
+di questa misura (x86-64 PC) riguarda SOLO x86-64: non autorizza
+l'uso delle tre modifiche sul bot (che gira su Oracle, aarch64).
+L'accettazione per il bot richiede una misura SEPARATA su ARM, con lo
+STESSO protocollo (stesso gate a nodi identici, stessa regola di
+decisione, stesso requisito di precisione) — non un'estrapolazione del
+risultato x86. Motivo: il prefetch (modifica (i)) ha un'implementazione
+diversa per architettura (`_mm_prefetch` su x86_64, `prfm` via `asm!`
+su aarch64, no-op altrove) — un guadagno su x86 non dice nulla su
+quanto (o se) paghi lo stesso meccanismo su aarch64, nemmeno a nodi
+identici (l'identità dei nodi è garantita per costruzione su ENTRAMBE
+le architetture, ma il TEMPO non lo è).
 
 ## Seed e versioni degli script
 
