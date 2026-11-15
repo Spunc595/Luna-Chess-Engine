@@ -1250,5 +1250,3 @@ PRIMA di guardare i dati, con questo disegno sperimentale specifico.
 NON CONCLUSIVO complessivo, con esiti distinti per analisi: F1 SCARTO,
 F2 SCARTO, S1 SCARTO, S2 ZONA GRIGIA (da decidere). Nessuna modifica al
 motore proposta o applicata sulla base di questi risultati.
-
-### Cosa abbiamo imparato (anche se negativo)
