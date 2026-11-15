@@ -832,6 +832,10 @@ impl Scacchiera {
         crate::movegen::genera_mosse(self)
     }
 
+    pub fn genera_mosse_catture_promozioni(&self) -> crate::movegen::MoveList {
+        crate::movegen::genera_mosse_catture_promozioni(self)
+    }
+
     // --- FIX: legal move generation with no extra allocations ---
     // By passing &mut self instead of &self, we completely eliminate the need to use .clone()
     //
