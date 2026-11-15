@@ -431,6 +431,29 @@ Lo stesso codice del generatore mirato (`movegen::genera_mosse_catture_promozion
 (commit `0161ea3`): questa estensione del test di equivalenza si
 applica quindi anche a quella build isolata, non solo al pacchetto.
 
+## Fase 2, pre-registrazione degli hash (2026-11-16, prima di qualunque dato)
+
+Macchina: PC locale (x86-64 Windows), stessa usata per la Fase 1 --
+NON una macchina dedicata/silenziosa: al momento dell'avvio risultano
+residenti processi normali della sessione di lavoro (VS Code ×4,
+Chrome, Edge WebView, Claude, Explorer, RadeonSoftware) -- carico CPU
+misurato `LoadPercentage = 6%` subito prima dell'avvio (`Get-CimInstance
+Win32_Processor`). Nessun processo è stato chiuso per questa misura
+(non sono stati toccati programmi della sessione di lavoro di
+Daniele senza il suo via).
+
+Build ricostruite UNA VOLTA da zero (`git archive` + `cargo build
+--release`, cartelle pulite), PRIMA di qualunque dato di tempo:
+
+- **riferimento** (`origin/main`, `80b1648`): sha256
+  `0538b7c950c4171d5d0c55061c932bea4de07b4d809eca87a71ef84dc8953b90`
+- **copia** (byte-identica al riferimento): sha256
+  `0538b7c950c4171d5d0c55061c932bea4de07b4d809eca87a71ef84dc8953b90`
+  (verificato identico al riferimento PRIMA della misura)
+- **pacchetto** (`exp/05-pacchetto-velocita`, HEAD `f05dc2e`, le tre
+  modifiche insieme): sha256
+  `c456bff45d38b0ca53ef7966ac3bf7ec34d024a0bb4cfabf3efa9a7351da07c6`
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
