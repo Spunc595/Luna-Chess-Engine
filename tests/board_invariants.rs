@@ -130,7 +130,7 @@ fn single_move_rollback_restores_exact_state() {
             let before = Snapshot::take(&board);
             before.assert_nnue_engaged(&format!("{name}, before {}", m.to_uci()));
 
-            let played = board.esegui_mossa(&m, &z, Some(&net));
+            let played = board.esegui_mossa(&m, &z, Some(&net), None);
             assert!(played, "{name}: genera_mosse_legali produced a move esegui_mossa rejected: {}", m.to_uci());
             board.annulla_mossa(&m, &z, Some(&net));
 
@@ -231,7 +231,7 @@ fn run_one_sequence(name: &str, fen: &str, z: &ZobristKeys, net: &LunaNNUE, rng:
         }
         let idx = rng.gen_range(0..legal_moves.len());
         let m = legal_moves[idx];
-        board.esegui_mossa(&m, z, Some(&net));
+        board.esegui_mossa(&m, z, Some(&net), None);
         played.push(m);
         intermediate_snapshots.push(Snapshot::take(&board));
     }
@@ -270,7 +270,7 @@ fn illegal_pseudo_legal_moves_restore_exact_state_and_keep_the_stack_balanced() 
             let before = Snapshot::take(&board);
             before.assert_nnue_engaged(&format!("{name}, before {}", m.to_uci()));
             let is_king = board.pezzo_in(m.da()) == Some(5);
-            let played = board.esegui_mossa(&m, &z, Some(&net));
+            let played = board.esegui_mossa(&m, &z, Some(&net), None);
             if played {
                 board.annulla_mossa(&m, &z, Some(&net));
             } else {

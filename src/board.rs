@@ -1,6 +1,7 @@
 use std::fmt;
 use crate::zobrist::ZobristKeys;
 use crate::nnue::{Accumulator, LunaNNUE, HIDDEN};
+use crate::tt::TranspositionTable;
 
 // Basic types
 pub type Bitboard = u64;
@@ -490,7 +491,15 @@ impl Scacchiera {
         crate::attacks::square_attacked(self, king_bb.trailing_zeros() as usize, c.opposto())
     }
 
-    pub fn esegui_mossa(&mut self, m: &Mossa, z: &ZobristKeys, nnue: Option<&LunaNNUE>) -> bool {
+    /// `tt`: transposition table to prefetch the resulting position's
+    /// bucket into cache (see `TranspositionTable::prefetch`), issued
+    /// once `self.hash` is fully final but before the (comparatively
+    /// expensive) NNUE accumulator update below, so the two overlap
+    /// instead of the TT fetch stalling later at `tt.probe`/`tt.store`.
+    /// `None` (most callers: perft, book conversion, tests, NNUE-only
+    /// tools) simply skips the hint -- never changes behavior, only
+    /// (at best) its latency.
+    pub fn esegui_mossa(&mut self, m: &Mossa, z: &ZobristKeys, nnue: Option<&LunaNNUE>, tt: Option<&TranspositionTable>) -> bool {
         let from = m.da(); let to = m.a();
         let flag = m.move_flag();
         let us = self.turno.indice(); let them = 1 - us;
@@ -552,6 +561,34 @@ impl Scacchiera {
             self.hash ^= z.pezzi[us][3][rf] ^ z.pezzi[us][3][rt];
         }
 
+        // Hash-only bookkeeping (ep square, castling rights, side to
+        // move) moved HERE, ahead of the NNUE update below: none of it
+        // reads anything the NNUE block writes, and none of the NNUE
+        // block reads any of it, so the reorder changes nothing about
+        // the resulting position -- it only makes `self.hash` fully
+        // final BEFORE the prefetch hint just below, instead of after
+        // (prefetching on a still-partial hash would target the wrong
+        // bucket most of the time, defeating the hint).
+        if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
+        self.ep_square = if flag == MoveFlag::DoublePawnPush { Some(if us == 0 { to - 8 } else { to + 8 }) } else { None };
+        if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
+
+        self.hash ^= z.arrocco_completo[self.diritti_arrocco as usize];
+        self.diritti_arrocco &= CASTLING_RIGHTS_UPDATE[from] & CASTLING_RIGHTS_UPDATE[to];
+        self.hash ^= z.arrocco_completo[self.diritti_arrocco as usize];
+
+        self.hash ^= z.turno;
+        self.turno = self.turno.opposto();
+
+        if moved_p == 0 || flag.is_capture() {
+            self.mezze_mosse = 0;
+        } else {
+            self.mezze_mosse += 1;
+        }
+        self.rule_50 = self.mezze_mosse;
+
+        if let Some(table) = tt { table.prefetch(self.hash); }
+
         if let Some(net) = nnue {
             let (rook_from, rook_to) = match to { 6 => (7, 5), 2 => (0, 3), 62 => (63, 61), 58 => (56, 59), _ => (0, 0) };
             let (sub2, add2) = if flag == MoveFlag::Castle {
@@ -575,24 +612,6 @@ impl Scacchiera {
         if king_saves_half {
             if let Some(net) = nnue { self.refresh_nnue_perspective(net, us_white); }
         }
-
-        if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
-        self.ep_square = if flag == MoveFlag::DoublePawnPush { Some(if us == 0 { to - 8 } else { to + 8 }) } else { None };
-        if let Some(sq) = self.ep_square { self.hash ^= z.ep_file[sq % 8]; }
-
-        self.hash ^= z.arrocco_completo[self.diritti_arrocco as usize];
-        self.diritti_arrocco &= CASTLING_RIGHTS_UPDATE[from] & CASTLING_RIGHTS_UPDATE[to];
-        self.hash ^= z.arrocco_completo[self.diritti_arrocco as usize];
-
-        self.hash ^= z.turno;
-        self.turno = self.turno.opposto();
-
-        if moved_p == 0 || flag.is_capture() {
-            self.mezze_mosse = 0;
-        } else {
-            self.mezze_mosse += 1;
-        }
-        self.rule_50 = self.mezze_mosse;
 
         if self.re_in_scacco(Colore::from_index(us)) {
             self.annulla_mossa_veloce(m, &undo, z, us, moved_p, nnue);
@@ -829,7 +848,7 @@ impl Scacchiera {
         let mut legali = crate::movegen::MoveList::new();
 
         for m in mosse {
-            if self.esegui_mossa(&m, z, None) {
+            if self.esegui_mossa(&m, z, None, None) {
                 // If the move is valid, undo it and save it in the list
                 self.annulla_mossa(&m, z, None);
                 legali.push(m);
