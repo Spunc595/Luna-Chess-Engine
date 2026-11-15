@@ -1347,3 +1347,120 @@ Test sintetici (tutti i 12, incluso il nuovo) eseguiti PRIMA di questo
 commit: tutti passati (vedi report in chat per l'output completo).
 Nessuna esecuzione sui dati veri (campione originale o S1'-R) eseguita
 prima di questo commit.
+
+### S1' sul campione originale (2026-11-15, ESPLORATIVA)
+
+`scripts/run_s1_prime_esplorativa.py` su `dataset_s1.tsv` (campione
+originale, 2.858 posizioni utili), coefficienti del modello base letti
+da `risultati_03.json` (non rifittati). S1 originale (verifica di
+coerenza): ICC(1)=0,0000, correlazioni IDENTICHE a quanto già
+congelato in "## Esito" -- nessuna discrepanza. S1' (corretta per lato
+al tratto): **ICC(1)=0,1635**, correlazioni a 3/6/15/30 plies:
++0,454 (IC95% [0,405;0,501], esclude 0), +0,304 (IC95% [0,245;0,358]),
++0,113 (IC95% [0,053;0,173]), +0,095 (IC95% [0,024;0,164]) -- tutte
+POSITIVE (la correlazione a 3 plies è cambiata di segno rispetto a S1
+originale, -0,454 -> +0,454, esattamente come previsto dal meccanismo
+descritto nella nota di correzione; quelle a distanza pari, 6 e 30,
+sono rimaste quasi identiche, come atteso perché non toccate dal segno
+alternato). Secondo le soglie di S1', S1' sul campione originale
+sarebbe PROSEGUIMENTO (ICC(1)>=0,10 E correlazione a 3 plies>=0,10 con
+IC che esclude 0) -- ma questo risultato resta ETICHETTATO ESPLORATIVO
+e NON decide nulla: il verdetto è sulla replica S1'-R (sotto).
+
+File: `risultati_s1primo_esplorativa.json`, sha256
+`db85fddb411db86dbdccc6e36aa17e126ffab154a850b99db3b31aa089b97691`.
+
+### Generazione di S1'-R (2026-11-15)
+
+Campionamento: `scripts/generate_s1r_sample.py`, seed 20261115, 200
+partite NUOVE (verificato programmaticamente: nessuna sovrapposizione
+con le 200 partite di S1 originale, seed 20261112), stesso schema (ply
+10-80 ogni 3) -> **4.326 posizioni**. Generazione (F1/F2/controlli/
+etichette): stesso binario `exp03.exe` riproducibile già verificato
+(sha256 `9551c8e6a87d633a53c3cecc5182e1315ae0833e45dc9d975e5653c329b28b0a`,
+commit `bb9f5ce`), 2 processi per parità dell'indice di partita (1.926 /
+2.400 posizioni), script `scripts/run_gen03_slice.py` (stesso già
+registrato, invariato), ripartibile con checkpoint. **Avviata alle
+14:35:10**, priorità `BelowNormal` confermata su entrambi i processi
+driver Python e sui due processi `exp03.exe`. **Completata alle
+15:19:49** (fetta A: 15:12:09, fetta B: 15:19:49), nessuna interruzione.
+
+Controllo di integrità: 21 campi per riga su entrambe le fette (header
+identico); corrispondenza posizionale FEN/ply verificata esatta con i
+file di campionamento (`s1r_slice_a.tsv`/`s1r_slice_b.tsv`) dopo aver
+tenuto conto del CRLF introdotto da Python in scrittura testo su
+Windows (stesso comportamento, non nuovo, di
+`generate_03_sample_positions.py`/`s1_sample.tsv` nella generazione
+originale -- 0 discrepanze dopo lo strip di `\r`). 67 coppie
+(fen,ply) ripetute fra le due fette: posizioni d'apertura identiche
+raggiunte da partite diverse (transposizioni/aperture ripetute con
+colori invertiti, nota di limitazione già nel protocollo) -- non un
+errore, game_id diversi per costruzione (partite distinte per seed).
+
+Congelamento: `dataset_s1r.tsv` (4.326 righe, game_id attaccato per
+posizione, ordinato per game_id numerico poi ply, stesso schema di
+`dataset_s1.tsv`), sha256
+`97c57a5a57e6567a1e052d58c14c212d31cda62cbfde9457559ecc676105db4b`;
+file grezzi conservati come riferimento: `out_s1r_a.tsv` sha256
+`956153910f1283d0c429ef408adaaa52feeffec30d00d7f72b6fc8509b285d4f`,
+`out_s1r_b.tsv` sha256
+`08782115af7203c36afc36e1a6ce092bc3591a0c2f37209c29d3cf8a3cd22c44`,
+`s1r_sample.tsv` sha256
+`ba1e678fb396d76936d82535bcdcc2432612d5f5b8a72f20ee090d297baf38f1`.
+Tutti verificati identici prima/dopo la copia in
+`lavoro\archivio_03_dataset_20261114\`.
+
+## Esito di S1'-R (2026-11-15)
+
+Eseguita UNA sola volta (`scripts/run_s1r.py`, 15:23:15, bootstrap a
+cluster per partita, 10.000 ricampionamenti, seed 20261112), nessun
+secondo avvio, nessun `--force`, lock scritto con sha256 degli input
+(`dataset_s1r.tsv`, `risultati_03.json`) per i coefficienti del
+modello base (NON rifittato).
+
+**Risultato**: 2.891 posizioni utili su 4.326 (dopo i 6 filtri). ICC(1)
+= **0,1437**. Correlazioni a distanza esatta: 3 plies r=+0,431 (IC95%
+[0,362;0,492], esclude 0), 6 plies r=+0,314 (IC95% [0,254;0,371],
+esclude 0), 15 plies r=+0,071 (IC95% [0,008;0,131], esclude 0), 30
+plies r=+0,048 (IC95% [-0,016;0,110], include 0).
+
+**Classificazione** (soglie pre-registrate di S1': PROSEGUIMENTO se
+ICC(1)>=0,10 E correlazione a 3 plies>=0,10 con IC che esclude 0;
+SCARTO se ICC(1)<0,03; ZONA GRIGIA tra i due): ICC(1)=0,1437>=0,10 E
+correlazione a 3 plies=0,431>=0,10 con IC95% che esclude 0 ->
+**PROSEGUIMENTO**.
+
+**Cosa abbiamo imparato**: la correzione S1' non era un artefatto del
+campione originale: la persistenza intra-partita del residuo (una
+volta corretta per il segno del lato al tratto) si replica, con
+magnitudine simile (ICC 0,144 vs 0,164 sul campione originale;
+correlazione a 3 plies 0,431 vs 0,454), su 200 partite completamente
+nuove. La classificazione pre-registrata di S1 ORIGINALE (SCARTO)
+resta corretta per come S1 era definita -- il difetto era nella
+definizione del residuo "pulito", non nei dati. Con la definizione
+corretta (S1'), il risultato indica che vale la pena investigare in
+futuro una correzione online basata sulla storia recente del residuo
+entro la stessa partita (S1 originale, da solo, NON lo avrebbe
+suggerito).
+
+**Limitazioni** (le stesse già registrate in "## Esito", applicabili
+anche qui): il residuo è rispetto alla ricerca a profondità 14 di Luna
+stessa; posizioni da partite Luna contro Luna a 10+0,1; aperture
+ripetute con colori invertiti (qui rilevante anche per le 67 coppie
+(fen,ply) condivise fra le due fette di S1'-R, game_id distinti). In
+più: la correzione del segno del lato al tratto assume che la
+convenzione `ply` pari=Bianco/dispari=Nero sia corretta per TUTTI i
+file coinvolti -- verificata per costruzione (stessa funzione che
+genera `ply` in `generate_03_sample_positions.py` e
+`generate_s1r_sample.py`), non rimisurata indipendentemente.
+
+**File e sha256**: `scripts/run_s1r.py` sha256
+`39c669967f03521daae7709b4ad7f2c2de365ee22f4a5119132df3f09228a99a`
+(invariato dal commit precedente); `risultati_s1r.json` sha256
+`8e4e4aabdf1112da39d019e4ade5ede0054a65ef35bae807f4b9963ce4728bcf`;
+`risultati_s1r.lock` registra sha256 di `dataset_s1r.tsv`
+(`97c57a5a...`) e `risultati_03.json`
+(`c9a70a77b00544c00e3573d0cecba74bf05e5a0fd468870c8d1b8a3e44935d69`).
+
+Nessuna analisi aggiuntiva eseguita su S1'-R. Nessuna modifica al
+motore proposta o applicata.
