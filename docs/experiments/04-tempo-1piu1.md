@@ -410,6 +410,16 @@ l'overhead di cutechess-cli/avvio processi (atteso trascurabile su
 100 partite) né eventuali partite adjudicate rapidamente (che
 abbasserebbero la durata reale sotto questa stima, non sopra).
 
+## Archivio
+
+`lavoro\archivio_04_tempo_20261116\`: `match.pgn` (sha256
+`cd07f48210354b382e1a0d984b9449d16aecaf33ea279dd579b9a30f3690b76a`),
+`cutechess.log` (sha256
+`ab8e1e0aee1de647f3cbb9c0fd35e8799606538a15c97a307e8581544d949b65`),
+`header.txt` (sha256
+`614645ed7840e478aff352a30522816a9b3e156f35d8399fd67f46c35aee9a63`)
+-- tutti verificati identici prima/dopo la copia da Oracle.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
@@ -420,8 +430,95 @@ Da riempire dopo il commit di questo file: vedi report in chat.
 
 ### Cosa è stato provato
 
+100 partite (50 round, due copie della build di riferimento v4.2.0,
+sha256 `651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436`),
+`tc=60+1`, opzioni UCI di default, libro `UHO_4060_v4.epd`, seed
+20261116, senza `-recover`, su Oracle (4 core, bot fermato per la
+durata della run). Eseguita UNA sola volta, 2026-11-15 18:20:28Z →
+21:42:02Z (**~3h22m**, entro la soglia di stop di ~5h). Bot fermato
+18:20:05Z, riavviato 21:52:36Z (confermato online su Lichess:
+"Welcome LunaEngineChess! ... connected to lichess.org and awaiting
+challenges").
+
+**Metriche calcolate UNA sola volta** (nessuna statistica durante la
+run, come da protocollo), ricostruendo l'orologio da base+incrementi
+meno i tempi spesi (letti direttamente dai commenti PGN, formato
+`{punteggio/profondità tempo_speso}`).
+
+**Verifica arrotondamento vs troncamento** (richiesta di Daniele):
+confrontata, su un campione di 5 partite, la somma dei tempi-per-mossa
+dei commenti con il campo `[GameDuration]` dell'intestazione PGN
+(tempo reale di parete della partita, arrotondato al secondo da
+cutechess). Differenze: +0,20s, -0,87s, -0,23s, -0,85s, -0,14s --
+**segno misto, non sistematicamente negativo**: coerente con un
+ARROTONDAMENTO al decimo di secondo in ciascun commento (errori che si
+cancellano in parte, in entrambe le direzioni), NON con un
+troncamento (che darebbe una somma dei commenti sistematicamente
+INFERIORE al tempo reale, quindi una differenza sempre positiva).
+Errore di arrotondamento dichiarato sulla ricostruzione dell'orologio:
+**±0,05s per mossa** (metà della risoluzione di 0,1s mostrata).
+
 ### Risultati misurati
+
+- **83/100 partite** arrivano alla mossa 40 (ply>=80); le altre 17
+  sono terminate prima per adjudication (fast-win) o matto/patta.
+- **Metrica primaria 1** (mediana dell'orologio di Luna dopo la mossa
+  40, entrambi i lati pooled, 166 campioni): **22,10s** (min 19,70s,
+  max 26,20s -- intervallo sorprendentemente stretto, indice di un
+  comportamento molto consistente partita per partita).
+- **Metrica primaria 2** (mediana della frazione speso/(base+incrementi
+  maturati) a mossa 40): **0,779** (il 78% del budget nominale
+  cumulato viene speso in media entro la mossa 40).
+- **Metrica primaria 3** (mediana del tempo speso per mossa, mosse
+  10-40, 5.918 campioni): **1,800s**.
 
 ### Esito (positivo / negativo / non concludente) e perché, se noto
 
+**NON CONFERMATA** (soglie pre-registrate: confermata se mediana
+orologio a mossa 40 >= 45s; non confermata se < 25s; zona grigia in
+mezzo). Mediana osservata **22,10s < 25s** -- fuori dalla zona grigia,
+chiaramente sotto la soglia di non conferma.
+
+**Perché, con quanto è confermato dai dati vs dedotto dal codice**:
+l'orologio NON resta alto a 60+1: Luna spende, in mediana, circa il
+78% del budget nominale cumulato entro la mossa 40 (CONFERMATO dai
+dati), un valore vicino a quello previsto dall'ipotesi (a)
+("spende l'intera allocazione", che prevedeva ~15,7s a mossa 40) più
+che dall'ipotesi (b) ("spende il 60% sempre", ~36,2s) o (c) ("costante
+1,12s/mossa", ~55,2s) della previsione analitica di Fase 1. Il tempo
+per mossa osservato (mediana 1,800s, mosse 10-40) è comunque inferiore
+all'allocazione nominale che il codice calcolerebbe in quell'intervallo
+di orologio (DEDOTTO dal codice: `t/25+0,8*inc` con `t` fra ~circa
+40-55s in quel tratto darebbe un'allocazione nominale fra ~2,4s e
+~3,0s) -- indicando che l'arresto anticipato (soft limit/stabilità,
+Fase 1 punto 1) avviene ma non abbastanza spesso o abbastanza presto
+da mantenere l'orologio alto.
+
 ### Cosa abbiamo imparato (anche se negativo)
+
+Una misura reale di come Luna usa l'orologio a 60+1: non lo spreca in
+modo marcato come l'ipotesi temeva, ma nemmeno lo conserva. Il range
+molto stretto dell'orologio a mossa 40 (19,70-26,20s su 166 campioni)
+suggerisce un comportamento quasi deterministico nell'uso del tempo in
+questo tipo di partite (Luna contro Luna stessa), non legato in modo
+sensibile alla particolare apertura o linea di gioco. Questo NON
+giustifica, con questi dati, la progettazione di un cambiamento della
+formula di allocazione per "recuperare" tempo inutilizzato a 60+1 --
+l'ipotesi che lo motivava non è confermata. Resta un'osservazione
+aperta (non misurata qui): il tempo per mossa osservato è comunque
+inferiore all'allocazione nominale calcolabile dal codice,
+indicando che QUALCHE arresto anticipato avviene; se vale la pena
+quantificarlo meglio (es. con la misura descrittiva proposta nell'
+audit del motore, voce 5) è una decisione separata, non necessitata da
+questo esperimento.
+
+**Limitazioni**: residuo rispetto alla ricerca effettiva di Luna
+stessa (non uno standard esterno); partite Luna contro Luna a 60+1
+(nessuna informazione su un avversario diverso); libro `UHO_4060_v4.epd`
+deliberatamente sbilanciato (BENCHMARKS.md:1285-1289) -- non
+confrontabile con un Elo, ma qui irrilevante perché non si misura
+Elo; adjudication fast-win (`-resign movecount=3 score=1000`) tronca
+alcune partite prima della mossa 40 (17/100), riducendo leggermente il
+campione per le metriche 1-2 (non per la 3, che usa comunque i dati
+fino a dove disponibili); nessuna statistica calcolata DURANTE la run
+(solo conteggi), come richiesto.
