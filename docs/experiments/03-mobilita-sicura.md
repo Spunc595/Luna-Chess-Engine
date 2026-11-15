@@ -1099,10 +1099,156 @@ Da riempire dopo il commit di questo file: vedi report in chat.
 
 ## Esito
 
+Analisi sui dati veri congelati eseguita UNA sola volta il 2026-11-15,
+12:53:31-14:08:56 (~75 minuti), con `run_analysis_03.py`, impostazioni
+pre-registrate (bootstrap a cluster per partita, 10.000 ricampionamenti,
+seed 20261112). Nessun secondo avvio, nessun `--force`. Lock scritto con
+sha256 degli input, confermati identici a quelli registrati nel
+MANIFEST del congelamento (`dataset_main.tsv`, `dataset_s1.tsv`,
+`dataset_reteB.tsv`). `games_split.tsv` (split stima/validazione
+pre-registrato) NON era stato incluso nel MANIFEST del 2026-11-14 --
+lacuna di registrazione individuata ora, corretta qui: sha256
+`f935e1cabb3b1c94e2b5fea0fee7022648bd1f62f740243192c3bab34520fdaf`.
+
+Stima del tempo prima del lancio, su dataset SINTETICO della stessa
+dimensione (31.296 posizioni utili, stessa struttura a colonne, nessun
+dato reale): 77,75s a 100 ricampionamenti, 317,76s a 500 -> relazione
+lineare (~0,60s/ricampionamento + ~17,75s fissi) -> stima per 10.000
+ricampionamenti ~100 minuti (~1,7h), sotto la soglia delle 3h. Tempo
+reale osservato: ~75 minuti, coerente con la stima.
+
 ### Cosa è stato provato
+
+Le quattro analisi pre-registrate (F1, F2, S1, S2) sul dataset
+congelato (31.296 posizioni utili nel campione principale: 18.600
+stima / 12.696 validazione; 2.858 posizioni utili nel campione denso
+S1), secondo la mappatura e i filtri descritti in
+"Preparazione per l'analisi".
 
 ### Risultati misurati
 
+**Conteggi** (verifica di coerenza con quanto già riportato): main
+utili 31.296 (stima 18.600 / validazione 12.696), S1 utili 2.858 --
+IDENTICI ai conteggi già confermati da Daniele. Nessun arresto.
+
+**Controllo di segno** (popolazione di analisi, posizioni utili con
+|static_eval|>300): 99,12% (6.591 posizioni) -- IDENTICO al valore già
+riportato. Nessun arresto.
+
+**F1 (dmob), pooled**: aumento di R² sulla validazione = 0,00874
+punti percentuali (8,74e-05 in frazione); IC95% bootstrap del
+coefficiente per fase: Apertura [-0,118; 0,780], Mediogioco [-0,420;
+0,848], Finale [-0,876; 0,106] -- tutti i 3 includono lo zero.
+
+**F2 (dthreat), pooled**: aumento di R² sulla validazione = -0,0192
+punti percentuali (negativo); IC95% per fase: Apertura [-10,60; 0,94],
+Mediogioco [-8,69; 4,50] (includono zero), Finale [-10,70; -0,90]
+(esclude zero, 1 fase su 3).
+
+**S1 (persistenza intra-partita)**: ICC(1) = 0,0000. Correlazioni a
+distanza esatta: 3 ply r=-0,454 (IC95% [-0,502;-0,406], esclude zero,
+segno NEGATIVO), 6 ply r=+0,304 (IC95% [0,246;0,358], esclude zero),
+15 ply r=-0,112 (esclude zero), 30 ply r=+0,093 (esclude zero).
+
+**S2 (disaccordo Rete B)**: aumento di R² (base->esteso) = 1,42
+punti percentuali (0,01418); lift = 1,66 (frazione |r|>100cp nel
+decile più alto di disaccordo = 0,408, contro 0,246 complessivo);
+calibrazione eval_B->eval_A su stima: alfa=4,16, beta=0,971 (vicino a
+1, coerente con reti dello stesso lignaggio).
+
+### Classificazione (soglie pre-registrate in "Regola di decisione" e in "Analisi secondarie S1 e S2")
+
+| Analisi | Metrica | Soglia SCARTO | Soglia PROSEGUIMENTO | Esito | Regola applicata |
+|---|---|---|---|---|---|
+| F1 (dmob) | aumento R²=0,00874pp; CI include 0 in 3/3 fasi | R²<0,5pp E/O CI include 0 in >=2/3 fasi | R²>=2pp E segno stabile E CI esclude 0 a mediogioco | **SCARTO** | entrambe le condizioni di scarto soddisfatte |
+| F2 (dthreat) | aumento R²=-0,0192pp (negativo); CI include 0 in 2/3 fasi | idem | idem | **SCARTO** | R² negativo (<0,5pp) e CI include 0 in Apertura e Mediogioco |
+| S1 (persistenza) | ICC(1)=0,0000 | ICC(1)<0,03 | ICC(1)>=0,10 E corr. 3 ply>=0,10 con CI esclude 0 | **SCARTO** | ICC(1) sotto soglia di scarto, a prescindere dalle correlazioni |
+| S2 (disaccordo) | aumento R²=1,42pp; lift=1,66 | R²<1pp O lift<1,3 | R²>=3pp E lift>=2 | **ZONA GRIGIA** | nessuna condizione di scarto soddisfatta (R² non <1pp, lift non <1,3); nessuna condizione di proseguimento soddisfatta (R² <3pp) -- riportato, decide Daniele, NON scelto qui |
+
+Due feature (F1, F2) = due test, entrambi riportati senza scegliere la
+migliore a posteriori, come richiesto dal protocollo.
+
+### Osservazione non pre-registrata su S1 (da trattare con cautela)
+
+La correlazione a 3 ply è NEGATIVA e statisticamente diversa da zero
+(r=-0,454, IC95% esclude lo zero), mentre il protocollo associava
+implicitamente "correlazione informativa" a un segno positivo
+(persistenza = il residuo rimane simile). Questo è riportato come
+osservazione, NON come riclassificazione: la soglia pre-registrata per
+S1 si basa su ICC(1) (che è 0,0000, sotto soglia di scarto in modo
+netto) indipendentemente dal segno delle correlazioni a singola
+distanza. Nessuna interpretazione causale viene proposta qui.
+
+### Cosa abbiamo imparato (anche se negativo)
+
+- F1 (mobilità differenziale) e F2 (minaccia differenziale), misurati
+  così come definiti in questo esperimento, NON spiegano una quota
+  rilevante della varianza residua (ricerca - statico) su validazione,
+  né in modo aggregato né per fase. Il risultato è negativo per
+  l'ipotesi originale (mobilità/minacce come proxy efficaci
+  dell'errore residuo), con intervalli di confidenza compatibili con
+  zero nella maggioranza delle fasi.
+- Il residuo NON mostra persistenza intra-partita rilevabile con
+  ICC(1) (quota di varianza spiegata dalla partita ~0). Le correlazioni
+  puntuali a singola distanza sono statisticamente diverse da zero ma
+  piccole e di segno non monotono (negativa a 3 e 15 ply, positiva a 6
+  e 30 ply) -- un pattern che NON supporta una storia recente "pulita"
+  del residuo come base per una correzione online, e che non è stato
+  investigato oltre (fuori dal perimetro pre-registrato).
+- Il disaccordo fra due reti NNUE (Rete B = v3.1.7 pre-material-scale)
+  ha un segnale moderato ma non nullo sull'incertezza della valutazione
+  statica (aumento di R² 1,42pp, lift 1,66): nè scartabile nè
+  sufficiente secondo le soglie pre-registrate. Il valore conoscitivo
+  è che "il disaccordo fra reti" è un candidato plausibile per
+  ulteriori studi sull'incertezza, ma questo singolo esperimento non lo
+  conferma né lo esclude alle soglie dichiarate.
+
+### Limitazioni
+
+- Il residuo è definito rispetto alla ricerca a profondità 14 della
+  stessa Luna (non rispetto a un "ground truth" esterno): un esito
+  nullo per F1/F2 dice che questi fattori non predicono la differenza
+  Luna-profondità-14 meno Luna-statico, non che siano irrilevanti in
+  assoluto per l'errore di valutazione rispetto a uno standard esterno.
+- Le posizioni derivano da partite Luna contro Luna a 10+0,1 (stesso
+  motore su entrambi i lati): possibile dipendenza dallo stile di gioco
+  di Luna stessa, non generalizzabile automaticamente a partite contro
+  altri motori o umani.
+- Le aperture sono ripetute con i colori invertiti (per il
+  bilanciamento del campionamento): può introdurre una correlazione
+  residua fra posizioni di partite "gemelle" non modellata
+  esplicitamente nel bootstrap a cluster (il cluster è per
+  `game_id`, non per coppia di partite gemelle).
+- Punto aperto già segnalato in "Preparazione per l'analisi":
+  `diff_materiale` (controllo) è bianco-nero assoluto, non lato al
+  tratto -- non corretto in questa analisi (il protocollo non lo
+  richiedeva esplicitamente), possibile fonte di rumore nel modello
+  base ma non nelle variabili di interesse F1/F2 (che sono già lato al
+  tratto).
+- `games_split.tsv` non era stato incluso nel MANIFEST del congelamento
+  (lacuna di registrazione, corretta ora con lo sha256 riportato
+  sopra) -- non ha richiesto nessuna nuova decisione, il file non è
+  stato toccato, solo la sua registrazione era mancante.
+
+### Valore di conoscenza realizzato
+
+Un esito negativo per F1/F2 e per S1(ICC) è comunque valore di
+conoscenza: evita di investire tempo di sviluppo in euristiche di
+ordinamento o correzioni online basate su "mobilità/minaccia
+differenziale" o su una storia recente del residuo entro la stessa
+partita, con questa definizione e questo protocollo di misura. La zona
+grigia di S2 indica dove un investimento futuro (eventualmente con un
+campione più grande, o con una Rete B più distante da Rete A) potrebbe
+chiarire se il disaccordo fra reti sia un segnale utile per stimare
+l'incertezza della valutazione. Nessuna sovrainterpretazione: un esito
+nullo o di zona grigia non prova che l'informazione sottostante sia
+inutile in assoluto, prova solo che non supera le soglie dichiarate
+PRIMA di guardare i dati, con questo disegno sperimentale specifico.
+
 ### Esito (positivo / negativo / non concludente) e perché, se noto
+
+NON CONCLUSIVO complessivo, con esiti distinti per analisi: F1 SCARTO,
+F2 SCARTO, S1 SCARTO, S2 ZONA GRIGIA (da decidere). Nessuna modifica al
+motore proposta o applicata sulla base di questi risultati.
 
 ### Cosa abbiamo imparato (anche se negativo)
