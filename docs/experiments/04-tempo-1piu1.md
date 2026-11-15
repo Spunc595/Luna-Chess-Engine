@@ -377,6 +377,17 @@ comando esattamente come preparato (percorso del libro e delle due
 copie del binario corretti rispetto alla bozza). PGN in
 `~/exp04/results/match.pgn`, log in `~/exp04/results/cutechess.log`.
 
+**Controllo dei primi 10 minuti**: 3 partite completate entro 18:28:57Z
+(partenza 18:20:28Z), nessun errore nel log, carico sano (`load average
+2,11` su 4 core). **I commenti del PGN NON riportano l'orologio
+residuo**: formato osservato `{+1.94/15 2.2s}` (punteggio/profondità e
+SOLO tempo speso per quella mossa, non il tempo rimasto). Si usa quindi
+il metodo di riserva già previsto: orologio ricostruito per ogni mossa
+come base + k*incremento − somma dei tempi spesi fino a quella mossa,
+con i tempi spesi presi DIRETTAMENTE dal commento (non stimati) —
+errore di arrotondamento dichiarato: ±0,05s per mossa (cutechess
+arrotonda il tempo spesa a un decimo di secondo nel commento).
+
 ## Stima di durata (punto 4)
 
 Dati di partenza: tempo medio per mossa 1,1-1,5s (centrale 1,3s), circa
