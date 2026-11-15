@@ -349,6 +349,47 @@ eseguita** (fuori perimetro di questa Fase, richiede un nuovo via):
 i tempi osservati nel run di 1 giro sopra sono rumore non statistico,
 non riportati come risultato.
 
+## Ablazione isolata (2026-11-16): dipendenza rimossa, tre build indipendenti
+
+La regola (b) dell'emenda richiede tre build indipendenti (rif+solo
+(i), rif+solo (ii), rif+solo (iii)), ciascuna compilabile da sola sul
+riferimento. **Dipendenza individuata**: il metodo
+`Scacchiera::genera_mosse_catture_promozioni` (board.rs) era stato
+incluso nel commit (i) del branch principale, ma chiamava
+`crate::movegen::genera_mosse_catture_promozioni`, aggiunta solo dal
+commit (iii) -- (i) da solo non compilava (vedi nota di trasparenza
+nel commit (iii) del branch principale, `c7ce134`). **Rimossa**
+isolando le tre modifiche su tre branch NUOVI, ciascuno da
+`origin/main` (`80b1648`), senza quel metodo in eccesso:
+
+- `exp/05-ablazione-i` (commit `2da21d3`): solo il prefetch TT (tt.rs +
+  board.rs, SENZA il metodo in eccesso + tutti i punti di chiamata di
+  `esegui_mossa`).
+- `exp/05-ablazione-ii` (commit `a74c9dc`): solo la guardia
+  `info.stopped` in quiescence + i suoi 2 test.
+- `exp/05-ablazione-iii` (commit `0161ea3`): solo il generatore
+  mirato (movegen.rs + lo swap in search.rs + il suo test di
+  equivalenza).
+
+Tutte e tre compilano e passano `cargo test --release --workspace` da
+sole, sopra `origin/main`, senza toccarsi a vicenda.
+
+**Gate a nodi identici, tutte e tre**:
+
+| build | sha256 | bench depth 18 (590.820/980.165) | 100 posizioni depth 14 |
+|---|---|---|---|
+| riferimento (`origin/main` 80b1648, build pulita) | `2ba13ca342cd757d2fed623db0fd5e051e17b98466eb7d72b1bc0d9a20b0b848` | -- | -- |
+| ablazione (i) | `644e692004816ce4c31d856fcecc6c8394a15fa28b72a44bd037222b0505997f` | identici | nessun mismatch |
+| ablazione (ii) | `b7cb0476b498c7735136334ecae82606bd64a12773e0a1e03e4dab186d117782` | identici | nessun mismatch |
+| ablazione (iii) | `7409fc48bc802eb6855a2c8c963d75495f566a2d8720456f28509fbcfe3f0472` | identici | nessun mismatch |
+
+**Nota su (ii)**: la guardia `info.stopped` è verificata dal suo test
+dedicato (`nessun_tt_store_dopo_uno_stop_nella_catena_di_catture`),
+NON dall'identità dei nodi -- a profondità fissa, senza limite di
+tempo/nodi, `info.stopped` non si attiva mai, quindi il gate a nodi
+identici non esercita affatto quel percorso di codice. Il test
+dedicato è la verifica, non un supplemento.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
