@@ -1563,3 +1563,50 @@ Esito di S1'-R"): il residuo è rispetto alla ricerca a profondità 14
 di Luna stessa; posizioni da partite Luna contro Luna a 10+0,1; la
 riduzione dell'errore del residuo NON è un guadagno di forza (nessuna
 affermazione viene fatta qui su Elo o esiti di partita).
+
+### Nota di correzione: bug nel bootstrap a cluster di 03C (2026-11-15)
+
+La PRIMA esecuzione reale (prima di questo commit, su input identici
+a quelli registrati sopra) ha dato: `riduzione_su_S1R_verdetto =
+0,0527`, `ci95_S1R = [0,1554; 0,2102]` -- un IC95% completamente
+DISGIUNTO dalla stima puntuale. Questo è un segnale di bug, non un
+risultato "strano da riportare": investigato PRIMA di accettare o
+riportare il numero.
+
+Causa: `reduction_bootstrap_ci` ricampionava le partite con
+ripetizione (bootstrap a cluster), ma quando una partita veniva scelta
+più di una volta nello stesso ricampionamento, le sue copie
+condividevano lo stesso `game_id`. `predict_e_hat` raggruppa le righe
+per `game_id` per ricostruire la sequenza causale: con `game_id`
+duplicati, le copie si fondevano in un'unica sequenza con più
+"predecessori" di quanti ne esistano davvero (inclusi casi di `ply`
+uguali trattati come predecessori di se stessi), gonfiando
+artificialmente la riduzione nei ricampionamenti con partite ripetute
+e distorcendo l'IC95% verso l'alto.
+
+Correzione: ogni occorrenza di una partita ricampionata riceve ora un
+`game_id` univoco per occorrenza (`{game_id}__occ{n}`), cosi' che non
+venga mai fusa con altre occorrenze della stessa partita nello stesso
+ricampionamento. Aggiunto un test di regressione
+(`test_bootstrap_cluster_non_fonde_occorrenze_duplicate`) che verifica
+che duplicare le righe di una partita con `game_id` distinti non
+cambi la riduzione (0,5508 = 0,5508), mentre duplicarle con lo stesso
+`game_id` (il bug) la cambia (0,5888): tutti i 4 test sintetici
+passano dopo la correzione.
+
+NESSUNA soglia, definizione o parametro pre-registrato è stato
+cambiato: solo un difetto di implementazione del calcolo dell'IC95%,
+individuato prima di riportare il risultato. La prima esecuzione (con
+il bug) è stata spostata in
+`lavoro\archivio_03_dataset_20261114\_03c_run1_BUGGY_bootstrap\` (non
+cancellata, per traccia) e NON viene riportata come esito.
+
+File corretti e sha256: `scripts/offline_predictor_03c.py` sha256
+`a7ae05b64400ba89748032c07f686aee3c27d7029415ac08859141c940668250`;
+`scripts/test_offline_predictor_03c_synthetic.py` sha256
+`991763c704a408a7b85ee00c7f7b77b761f0561675fb6cfdfde7d6562659e560`.
+
+La riesecuzione sui dati reali richiede `--force` (il lock della prima
+esecuzione esiste già con lo stesso sha256 degli input, che non sono
+cambiati -- solo il codice è stato corretto): annotato qui come
+richiesto dal protocollo per l'uso di `--force`.

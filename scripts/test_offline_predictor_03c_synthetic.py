@@ -62,8 +62,41 @@ def test_predittore_causale_no_futuro():
     print("OK test_predittore_causale_no_futuro: e_hat=%s" % e_hat)
 
 
+def test_bootstrap_cluster_non_fonde_occorrenze_duplicate():
+    """Regressione (2026-11-15): la prima esecuzione reale ha dato un
+    IC95% completamente disgiunto dalla stima puntuale (0,053 vs
+    [0,155;0,210]). Causa: `reduction_bootstrap_ci` ricampionava le
+    partite con ripetizione ma, quando una partita veniva scelta più
+    volte, le sue copie condividevano lo stesso `game_id` --
+    `predict_e_hat` le fondeva in un'unica sequenza causale (più
+    "predecessori" di quanti ne esistano davvero), gonfiando la
+    riduzione nei ricampionamenti con partite ripetute. Verifica che
+    duplicare le righe di una partita con `game_id` DIVERSI per
+    occorrenza (la correzione) non cambi la riduzione rispetto a
+    un'unica occorrenza, mentre duplicarle con lo STESSO `game_id`
+    (il bug) la cambia."""
+    rng = random.Random(1)
+    base_rows = make_synthetic_rows(1, list(range(10, 90, 3)), rng, sd_b=8.0, sd_noise=3.0)
+    lam, alfa = 0.4, 0.5
+    red_single, _, _ = P.reduction(base_rows, lam, alfa)
+
+    merged_rows = base_rows + [P.Row03C(game_id=r.game_id, ply=r.ply, e=r.e,
+                                         phase=r.phase, fascia_eval=r.fascia_eval) for r in base_rows]
+    red_merged, _, _ = P.reduction(merged_rows, lam, alfa)
+
+    import dataclasses
+    distinct_rows = base_rows + [dataclasses.replace(r, game_id=r.game_id + "__occ1") for r in base_rows]
+    red_distinct, _, _ = P.reduction(distinct_rows, lam, alfa)
+
+    assert abs(red_distinct - red_single) < 1e-9, (red_distinct, red_single)
+    assert abs(red_merged - red_distinct) > 1e-6, (red_merged, red_distinct)
+    print("OK test_bootstrap_cluster_non_fonde_occorrenze_duplicate: "
+          "single=%.4f distinct=%.4f merged(bug)=%.4f" % (red_single, red_distinct, red_merged))
+
+
 if __name__ == "__main__":
     test_persistenza_nota()
     test_caso_nullo()
     test_predittore_causale_no_futuro()
+    test_bootstrap_cluster_non_fonde_occorrenze_duplicate()
     print("\nTUTTI I TEST SINTETICI 03C PASSATI")

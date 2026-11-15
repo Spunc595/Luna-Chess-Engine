@@ -22,6 +22,7 @@ Parametri (lambda, alfa) scelti su S1 ORIGINALE per minimizzare
 MSE(e - e_hat), poi FISSATI e applicati a S1'-R senza riadattare.
 """
 from __future__ import annotations
+import dataclasses
 import math
 import os
 import random
@@ -119,6 +120,17 @@ def grid_search_fit(rows: list) -> tuple[float, float, float]:
 
 def reduction_bootstrap_ci(rows: list, lam: float, alfa: float,
                             n_resamples: int, seed: int) -> tuple[float, tuple[float, float] | None]:
+    """Bootstrap a cluster per partita. ATTENZIONE: `predict_e_hat`
+    raggruppa le righe per `game_id` per ricostruire la sequenza
+    causale di ciascuna partita. Se una partita viene scelta più di
+    una volta nello stesso ricampionamento, le sue copie NON possono
+    condividere lo stesso `game_id`: si fonderebbero in un'unica
+    sequenza causale (più "predecessori" di quanti ne esistano
+    davvero), gonfiando artificialmente la riduzione nei ricampionamenti
+    con partite ripetute e distorcendo l'IC95% (bug individuato il
+    2026-11-15 durante la prima esecuzione reale: IC completamente
+    disgiunto dalla stima puntuale). Qui ogni occorrenza di una
+    partita ricampionata riceve un `game_id` univoco per occorrenza."""
     red_obs, _, _ = reduction(rows, lam, alfa)
     games = sorted(set(r.game_id for r in rows))
     by_game: dict[str, list] = {g: [] for g in games}
@@ -128,7 +140,10 @@ def reduction_bootstrap_ci(rows: list, lam: float, alfa: float,
     boot = []
     for _ in range(n_resamples):
         sample_games = [rng.choice(games) for _ in games]
-        sample_rows = [r for g in sample_games for r in by_game[g]]
+        sample_rows = []
+        for occ, g in enumerate(sample_games):
+            for r in by_game[g]:
+                sample_rows.append(dataclasses.replace(r, game_id=f"{r.game_id}__occ{occ}"))
         if len(sample_rows) < 3:
             continue
         red, _, _ = reduction(sample_rows, lam, alfa)
