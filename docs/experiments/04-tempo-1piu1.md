@@ -366,6 +366,17 @@ streaming (`tail -f`) per un controllo di avanzamento SENZA calcolare
 nessuna statistica durante la partita (stesso principio dell'esperimento
 03: solo conteggio di partite completate/in corso).
 
+## Esecuzione (avviata il 2026-11-16)
+
+Bot Lichess fermato (autorizzazione di Daniele) il 2026-11-15 alle
+**18:20:05Z**; verificato nessun processo residuo. Match avviato in
+sessione `tmux` staccata (`exp04`) il 2026-11-15 alle **18:20:28Z**
+tramite `~/exp04/run_exp04.sh` (sha256
+`b8b30f7dcc63533df97549395c12910b8c67f60797df756c8b4471766486b3ff`),
+comando esattamente come preparato (percorso del libro e delle due
+copie del binario corretti rispetto alla bozza). PGN in
+`~/exp04/results/match.pgn`, log in `~/exp04/results/cutechess.log`.
+
 ## Stima di durata (punto 4)
 
 Dati di partenza: tempo medio per mossa 1,1-1,5s (centrale 1,3s), circa
