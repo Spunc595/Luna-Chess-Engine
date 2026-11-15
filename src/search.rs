@@ -1066,11 +1066,13 @@ fn quiescence(
 
     if stand_pat > alpha { alpha = stand_pat; }
 
-    // OPTIMIZATION (Point 1 - Quiescence): we only generate pseudo-legal
-    // moves (no make/unmake, no re_in_scacco) and filter immediately on
-    // capture/promotion, before any legality test.
-    let mut moves = board.genera_mosse();
-    moves.retain(|m| m.is_cattura() || m.is_promozione());
+    // OPTIMIZATION (Point 1 - Quiescence): generate only pseudo-legal
+    // captures/promotions directly (no make/unmake, no re_in_scacco,
+    // and no quiet moves ever written then discarded -- see
+    // `movegen::genera_mosse_catture_promozioni`, same set/order as the
+    // previous generate-then-retain, verified by a dedicated test),
+    // before any legality test.
+    let mut moves = board.genera_mosse_catture_promozioni();
 
     // The history heuristic concerns only quiet moves: here `moves` is
     // already filtered to captures/promotions, so its contribution in
