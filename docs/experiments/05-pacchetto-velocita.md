@@ -311,6 +311,44 @@ copia sia del confronto rif/pacchetto) **<= 1%** (docs/METHOD.md
 requisito non è soddisfatto: vedi "Zona grigia" (si rimisura, non si
 decide).
 
+## Fase 1 eseguita (2026-11-15/16): codice e gate a nodi identici
+
+Macchina: PC locale (x86-64 Windows) -- NON Oracle, nessuna
+interferenza con l'Esperimento 04 (in corso in parallelo su Oracle,
+aarch64, macchina diversa).
+
+Tre modifiche committate separatamente: (i) `7d0f682` (prefetch TT),
+(ii) `16de86c` (guardia `info.stopped` in quiescence), (iii) `c7ce134`
+(generatore mirato). Script di misura riportati in `0e87c44` (sha256
+invariati rispetto a `tools/misura-velocita`).
+
+**Nota di trasparenza**: il metodo `Scacchiera::genera_mosse_catture_promozioni`
+è stato incluso per errore nel commit (i), prima che la funzione
+corrispondente esistesse in `movegen.rs` (aggiunta solo nel commit
+(iii)): il commit (i) preso isolatamente NON compila. Segnalato nel
+messaggio del commit (iii) invece di essere corretto riscrivendo la
+storia. Lo stato finale (dopo (iii)) compila e passa tutti i test.
+
+**Gate**:
+- `cargo test --release --workspace`: **verde**, tutti i test
+  esistenti più i 3 nuovi dedicati (equivalenza del generatore su 5
+  posizioni; stop forzato in catena di catture senza `tt.store`;
+  nessuna regressione sul caso senza stop).
+- Nodi identici, bench depth 18 Threads 1 (rif = `origin/main`
+  `80b1648`, build pulita da `git archive`, vs pacchetto): **590.820**
+  (mediogioco) e **980.165** (finale pedoni) -- identici su entrambe le
+  build, su entrambe le posizioni.
+- Nodi identici, 100 posizioni depth 14 (`pgo_test_fens.txt`, sha256
+  `dbf57bc9ce05d925a378013b90c4ba660e78aeae662c04bfcb9695962ddd69ea`,
+  via `measure_speed_fase3.py`, 1 giro -- solo per il controllo
+  nodi, NON una misura di velocità): **"Nodi identici rif/nuova su
+  tutte le posizioni/giri misurati."** Nessun mismatch.
+
+Tutti i gate pre-registrati passano. **Nessuna misura di velocità
+eseguita** (fuori perimetro di questa Fase, richiede un nuovo via):
+i tempi osservati nel run di 1 giro sopra sono rumore non statistico,
+non riportati come risultato.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
