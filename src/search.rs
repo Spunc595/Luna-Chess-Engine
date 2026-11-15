@@ -797,7 +797,7 @@ fn negamax(
             continue;
         }
 
-        if board.esegui_mossa(&m, z, nnue) {
+        if board.esegui_mossa(&m, z, nnue, Some(tt)) {
             moves_searched += 1;
             if is_quiet && quiets_tried_count < quiets_tried.len() {
                 quiets_tried[quiets_tried_count] = m;
@@ -1016,7 +1016,7 @@ fn quiescence(
             // here (this time WITH the real nnue, unlike the throwaway
             // legality check inside genera_mosse_legali itself) cannot
             // return false.
-            board.esegui_mossa(&m, z, nnue);
+            board.esegui_mossa(&m, z, nnue, Some(tt));
             let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
@@ -1121,7 +1121,7 @@ fn quiescence(
         // unmake internally if the move turns out to be illegal (see
         // board.rs::annulla_mossa_veloce), so in that branch
         // annulla_mossa must NEVER be called explicitly.
-        if board.esegui_mossa(&m, z, nnue) {
+        if board.esegui_mossa(&m, z, nnue, Some(tt)) {
             let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
@@ -1264,7 +1264,7 @@ mod mate_tests {
         let mating_move = board.genera_mosse_legali(&z).into_iter()
             .find(|m| m.to_uci() == "d8h4")
             .expect("Qd8-h4 must be a legal move in this position");
-        board.esegui_mossa(&mating_move, &z, None);
+        board.esegui_mossa(&mating_move, &z, None, None);
 
         let sh = SharedHistory::new();
         let mut info = SearchInfo::new(5000, 1);

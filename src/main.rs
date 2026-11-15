@@ -325,7 +325,7 @@ fn main() {
                         for &m_str in &parts[m_idx + 1..] {
                             let moves = s.genera_mosse_legali(z);
                             for m in moves {
-                                if m.to_uci() == m_str { s.esegui_mossa(&m, z, nnue_ref); break; }
+                                if m.to_uci() == m_str { s.esegui_mossa(&m, z, nnue_ref, None); break; }
                             }
                         }
                     }

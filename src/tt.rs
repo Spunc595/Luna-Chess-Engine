@@ -124,6 +124,36 @@ impl TranspositionTable {
         self.generation = if self.generation == u8::MAX { 1 } else { self.generation + 1 };
     }
 
+    /// Hardware prefetch hint for the bucket `key` would land in. Issued
+    /// right after a move's hash is fully known (see
+    /// `Scacchiera::esegui_mossa`) so the cache-line fetch overlaps with
+    /// the NNUE accumulator update that follows, instead of stalling the
+    /// later `probe`/`store` call that actually reads it. A hint only:
+    /// never changes which entry is read/written, only (at best) its
+    /// latency -- `&self`, same lock-free table every search thread
+    /// already shares. x86_64 uses `_mm_prefetch` (temporal, L1);
+    /// aarch64 uses the `prfm` instruction via inline `asm!` (stable in
+    /// Rust); any other target is a no-op (correctness never depends on
+    /// this running).
+    #[inline(always)]
+    pub fn prefetch(&self, key: u64) {
+        let idx = (key as usize) & self.mask;
+        let addr = &self.entries[idx] as *const Bucket;
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+            _mm_prefetch(addr as *const i8, _MM_HINT_T0);
+        }
+        #[cfg(target_arch = "aarch64")]
+        unsafe {
+            std::arch::asm!("prfm pldl1keep, [{0}]", in(reg) addr, options(nostack, preserves_flags, readonly));
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            let _ = addr;
+        }
+    }
+
     pub fn clear(&mut self) {
         for bucket in &self.entries {
             bucket.key_xor.store(0, Ordering::Relaxed);

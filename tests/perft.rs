@@ -22,7 +22,7 @@ fn perft(board: &mut Scacchiera, depth: u32, z: &ZobristKeys) -> u64 {
     }
     let mut nodes = 0u64;
     for m in moves {
-        board.esegui_mossa(&m, z, None);
+        board.esegui_mossa(&m, z, None, None);
         nodes += perft(board, depth - 1, z);
         board.annulla_mossa(&m, z, None);
     }

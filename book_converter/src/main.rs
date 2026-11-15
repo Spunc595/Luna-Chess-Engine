@@ -189,7 +189,7 @@ fn main() {
             out_lines.push(format!("{fen_key} {}", mv.to_uci()));
 
             let mut child = board.clone();
-            child.esegui_mossa(&mv, &z, None);
+            child.esegui_mossa(&mv, &z, None, None);
             if visited.insert(child.hash) {
                 queue.push_back((child, ply + 1));
             }
