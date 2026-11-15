@@ -454,6 +454,50 @@ Build ricostruite UNA VOLTA da zero (`git archive` + `cargo build
   modifiche insieme): sha256
   `c456bff45d38b0ca53ef7966ac3bf7ec34d024a0bb4cfabf3efa9a7351da07c6`
 
+## Fase 2, misura del pacchetto intero (2026-11-16): requisito di precisione NON soddisfatto
+
+Eseguita con `measure_speed_fase3.py` (quadrato latino
+rif/pacchetto/copia), **5 giri**, 100 posizioni di `pgo_test_fens.txt`,
+depth 14, Threads 1, Hash 64. Durata: 1.309,5s. **Nodi identici
+confermati** su tutte le posizioni/giri (rif == pacchetto, nessun
+mismatch). Carico CPU dopo la misura: `LoadPercentage = 9%` (prima:
+6%).
+
+**Risultati grezzi** (`analyze_speed_fase3.py`, seed 20261112, 10.000
+ricampionamenti bootstrap):
+
+- **Pacchetto** (rif/nuova): G = **1,0376**, IC95% = **[1,0228;
+  1,0508]**. Semi-larghezza ≈ 1,40%.
+- **Floor di rumore** (rif/copia, la copia byte-identica del
+  riferimento): G = 0,9946, IC95% = [0,9734; 1,0122]. **Semi-larghezza
+  ≈ 1,94%**.
+
+**REQUISITO DI PRECISIONE NON SODISFATTO**: la semi-larghezza dell'IC95%
+sulla copia identica (≈1,94%) supera la soglia pre-registrata del 1%
+(docs/METHOD.md §10.1b). Per la regola "Zona grigia" già scritta in
+questo stesso protocollo, PRIMA di vedere questo risultato: **il
+numero di G del pacchetto (1,0376, che soddisferebbe nominalmente
+"G>=1,02 con limite inferiore IC>1,000") NON si usa per decidere in
+nessun senso, né accettazione né scarto.** Non deciso qui.
+
+**Causa probabile (non misurata, solo osservata)**: macchina non
+dedicata durante la misura (VS Code ×4, Chrome, Edge WebView, Claude,
+Explorer, RadeonSoftware residenti -- vedi "Fase 2, pre-registrazione
+degli hash" sopra); il carico di fondo, anche se basso in media
+(6-9%), introduce probabilmente rumore a scatti (context switch,
+I/O) sufficiente a gonfiare l'IC oltre la soglia richiesta.
+
+**Prossimo passo richiesto dal protocollo**: rimisurare in condizioni
+più quiete. Non ho chiuso applicazioni della sessione di lavoro di
+Daniele senza il suo via esplicito -- da decidere con lui quali
+processi è disponibile a chiudere (o se preferisce un orario/una
+macchina diversa) prima di una nuova misura. Nessuna misura delle
+singole modifiche (ablazione) eseguita: il protocollo la richiede solo
+DOPO un esito valido del pacchetto intero, che qui non c'è.
+
+File: `misura_pacchetto.csv` (grezzo, 1.500 righe, nessuna riga
+scartata). sha256 da registrare quando archiviato.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
