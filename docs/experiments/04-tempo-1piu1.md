@@ -238,11 +238,16 @@ riga `-engine`, per restare sulle opzioni di default come richiesto.
 - Build di riferimento (`rif`) e build nuova (`nuova`): STESSA build,
   due copie identiche della build nativa di riferimento v4.2.0 già in
   uso su Oracle (nessun cambiamento candidato in questo esperimento).
-  **sha256: DA VERIFICARE su Oracle al momento del lancio (Fase 2) —
-  NON calcolato qui: questa Fase 1 non prevede alcun comando su
-  Oracle**, come richiesto. Da registrare nel protocollo (nuovo commit)
-  prima di lanciare, insieme alla verifica che le due copie siano
-  byte-identiche fra loro.
+  **sha256 (verificato su Oracle il 2026-11-16, prima del lancio):
+  `651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436`**
+  — identico al riferimento già usato per il pilota e per l'SPRT di C1
+  (`~/c1_pilot/pilot_A/luna`, `pilot_B/luna`, `sprt_riferimento/luna`,
+  `ref_build/target/release/luna`, `rif_build/target/release/luna`,
+  tutti con lo stesso hash). Copiato in due directory dedicate
+  (`~/exp04/A/luna`, `~/exp04/B/luna`), sha256 riverificato identico
+  dopo la copia, nessun `book.bin` presente in nessuna delle due
+  (confermato anche dal motore stesso: "Book: '.../book.bin' not
+  found").
 
 ## Book e suo sha256
 
@@ -259,12 +264,17 @@ descrittivo, nessuna soglia su questo).
 
 ## Macchina e carico
 
-Oracle (aarch64, la stessa macchina usata per gli SPRT del progetto).
-`nproc=4`: da VERIFICARE al momento del lancio (Fase 2 — non verificato
-ora, nessun comando su Oracle in questa fase). Bot Lichess fermo:
-richiede il via esplicito di Daniele PRIMA del lancio (non fermato in
-questa fase). Concurrency 2 (coerente con 4 core, 2 engine/lato in
-parallelo, stesso schema delle altre misure del progetto).
+Oracle (aarch64, Ampere Neoverse-N1, la stessa macchina usata per gli
+SPRT del progetto, host `luna-server`, IP aggiornato a
+`84.8.254.146` — l'indirizzo `84.8.251.46` registrato in memoria era
+obsoleto). `nproc=4`: **verificato il 2026-11-16 prima del lancio**
+(coincideva con `lscpu`, `/proc/cpuinfo`, `Cpus_allowed_list: 0-1` no:
+inizialmente la macchina aveva solo 2 core — portata a 4 da Daniele
+con un resize dell'istanza, poi riverificata = 4, nessuna discrepanza
+residua). Bot Lichess: fermato da Daniele per la durata della run (via
+esplicito, vedi "## Esito" per orari esatti). Concurrency 2 (coerente
+con 4 core, 2 engine/lato in parallelo, stesso schema delle altre
+misure del progetto).
 
 ## Seed e versioni degli script
 
@@ -334,7 +344,7 @@ Nessuna regola `-draw` di patta anticipata. Motivazione:
 # in Fase 1. Da rivedere (percorsi binari/sha256) prima del lancio.
 set -u
 CC=$HOME/cutechess/build/cutechess-cli
-BOOK=$HOME/sprt2/openings/UHO_4060_v4.epd   # DA VERIFICARE: percorso e sha256 su Oracle
+BOOK=$HOME/UHO_4060_v4.epd   # verificato: sha256 3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca
 A=$HOME/exp04/A   # copia 1 della build v4.2.0 di riferimento, nessun book.bin
 B=$HOME/exp04/B   # copia 2 della stessa build, nessun book.bin
 OUT=$HOME/exp04/results
