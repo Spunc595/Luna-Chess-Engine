@@ -390,6 +390,47 @@ tempo/nodi, `info.stopped` non si attiva mai, quindi il gate a nodi
 identici non esercita affatto quel percorso di codice. Il test
 dedicato è la verifica, non un supplemento.
 
+## Estensione del test di equivalenza del generatore mirato (2026-11-16)
+
+Richiesta di Daniele (punto 2): estendere il test di equivalenza di
+(iii) dalle 5 posizioni originarie a (a) tutte le 100 di
+`pgo_test_fens.txt` e (b) >=5.000 posizioni da partite, con copertura
+esplicita di scacco/promozioni/presa al varco.
+
+**Nota**: `examples/check_genera_mosse_catture_promozioni.rs` (sha256
+`18480b40b2b6a37e8342040776de727d252a6eda7aa3a637b04a1fecd36fbc8e`) è
+finito nello stesso commit (`f2ba44b`) della nota sull'ablazione per
+una svista mia nello stage di git (avevo già aggiunto il file prima di
+separare i due commit come intendevo) -- segnalato qui invece di
+corretto riscrivendo la storia; nessun contenuto mancante o sbagliato,
+solo un commit che raggruppa due argomenti diversi.
+
+**Fonte delle >=5.000 posizioni**: NON un PGN esterno. Auto-gioco
+interno al binario stesso: da ciascuna partita (posizione iniziale),
+mosse scelte pseudo-casualmente fra quelle legali
+(`genera_mosse_legali`, il generatore legale reale del motore, non un
+generatore ad hoc) con un RNG seedato (`StdRng`, seed **20261116**),
+fino a 300 mezze-mosse o matto/stallo. Ogni posizione (prima di
+scegliere/giocare la mossa) viene confrontata.
+
+**Risultati** (eseguito con `examples/check_genera_mosse_catture_promozioni.exe <percorso a pgo_test_fens.txt>`):
+
+- (a) `pgo_test_fens.txt`: **100 posizioni**, nessun mismatch. In
+  scacco: 0; con promozione non-cattura: 1; con promozione-cattura: 0;
+  con presa al varco: 0; senza catture/promozioni disponibili: 11.
+- (b) Auto-gioco (seed 20261116, 17 partite): **5.000 posizioni**,
+  nessun mismatch. **In scacco: 267**; **con promozione non-cattura:
+  178**; **con promozione-cattura: 21**; **con presa al varco: 9**;
+  senza catture/promozioni disponibili: 1.415.
+- **Totale: 5.100 posizioni, ZERO mismatch di insieme o di ordine.**
+  Tutte le categorie richieste (scacco, promozione con e senza
+  cattura, presa al varco) sono rappresentate con conteggi non nulli.
+
+Lo stesso codice del generatore mirato (`movegen::genera_mosse_catture_promozioni`)
+è quello già verificato a nodi identici nel branch `exp/05-ablazione-iii`
+(commit `0161ea3`): questa estensione del test di equivalenza si
+applica quindi anche a quella build isolata, non solo al pacchetto.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
