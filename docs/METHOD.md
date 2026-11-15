@@ -486,7 +486,7 @@ caso). Non si cambia strumento durante un esperimento già lanciato.
 
 ---
 
-## 10. Lezioni dai primi due esperimenti (2026-11-12)
+## 10. Lezioni dai primi tre esperimenti (aggiornato 2026-11-15)
 
 Valgono per gli esperimenti 01 (SEE calcolata una volta in qsearch) e 02
 (LMR calibrata sulla history, K=250); i dati stanno nei protocolli
