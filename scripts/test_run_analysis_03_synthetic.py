@@ -35,10 +35,19 @@ def fascia(ev):
 
 def make_dataset(n_games, plies_per_game, rng, beta_f1=0.0, beta_f2=0.0,
                   game_effect_sd=0.0, noise_sd=5.0, reteB_noise_sd=50.0,
-                  reteB_informative=False):
+                  reteB_informative=False, game_effect_alternates_with_stm=False):
     """Genera (righe_main, righe_s1, righe_reteB, split) sintetiche.
     S1 usa le STESSE partite/ply del main (semplificazione lecita per il
-    test: qui serve solo validare l'orchestrazione, non il campionamento)."""
+    test: qui serve solo validare l'orchestrazione, non il campionamento).
+
+    `game_effect_alternates_with_stm` (2026-11-15, nota di correzione
+    S1/S1'): se True, l'effetto persistente di partita è dal punto di
+    vista del Bianco e viene moltiplicato per `D.stm_sign(ply)` prima di
+    entrare nel residuo osservato (side-to-move) -- simula esattamente
+    il difetto diagnosticato su S1 reale. Se False (default, comportamento
+    pre-esistente di `test_persistenza_s1`), l'effetto entra senza
+    alternanza di segno: NON simula il difetto (e quindi non lo rileva,
+    coerente con la nota "il test sintetico non ha rilevato il difetto")."""
     main_rows = []
     s1_rows = []
     reteB_rows = []
@@ -55,7 +64,8 @@ def make_dataset(n_games, plies_per_game, rng, beta_f1=0.0, beta_f2=0.0,
             static_eval = rng.uniform(-250, 250)
             dmob = rng.uniform(-5, 5)
             dthreat = rng.uniform(-3, 3)
-            noise = rng.gauss(0, noise_sd) + game_effect
+            game_effect_term = game_effect * D.stm_sign(ply) if game_effect_alternates_with_stm else game_effect
+            noise = rng.gauss(0, noise_sd) + game_effect_term
             residual_true = 0.3 * diff_mat + 0.05 * n_pedoni - 0.02 * static_eval \
                 + beta_f1 * dmob + beta_f2 * dthreat + noise
             search_score = static_eval + residual_true
@@ -246,6 +256,39 @@ def test_protezione_secondo_avvio():
         print("OK test_protezione_secondo_avvio: blocco rilevato correttamente su input invariati")
 
 
+def test_s1_correzione_segno_alternato():
+    """Nota di correzione S1/S1' (2026-11-15): un effetto di partita
+    persistente dal punto di vista del Bianco, letto come residuo
+    side-to-move (senza correzione), deve dare S1 originale ~0; la
+    stessa persistenza, corretta per il segno del lato al tratto
+    (S1'), deve essere recuperata."""
+    with tempfile.TemporaryDirectory() as tmp:
+        rng = random.Random(20261112)
+        plies = list(range(10, 90, 3))
+        main_rows, s1_rows, reteB_rows, split = make_dataset(
+            n_games=300, plies_per_game=plies, rng=rng,
+            beta_f1=0.0, beta_f2=0.0, game_effect_sd=8.0, noise_sd=3.0,
+            game_effect_alternates_with_stm=True,
+        )
+        write_files(tmp, main_rows, s1_rows, reteB_rows, split)
+        report = D.run_full_analysis(tmp, os.path.join(tmp, "out"), n_resamples=500, seed=20261112)
+
+        icc_originale = report["S1"]["risultato"]["icc1"]
+        assert icc_originale < 0.03, icc_originale
+
+        base_coef = report["F1_F2_pooled"]["base"]["coef"]
+        s1_primo = D.run_s1_from_dataset(os.path.join(tmp, "dataset_s1.tsv"), base_coef,
+                                          n_resamples=500, seed=20261112, apply_stm_sign=True)
+        icc_primo = s1_primo["risultato"]["icc1"]
+        assert icc_primo > 0.10, icc_primo
+        r3, ci3 = s1_primo["risultato"]["correlazioni"][3]["r"], s1_primo["risultato"]["correlazioni"][3]["ci95"]
+        assert r3 > 0.10, r3
+        assert ci3 is not None and ci3[0] > 0, ci3
+        print("OK test_s1_correzione_segno_alternato: icc1_originale=%.4f (atteso ~0) "
+              "icc1_s1primo=%.3f corr3_s1primo=%.3f ci3=(%.3f,%.3f)"
+              % (icc_originale, icc_primo, r3, ci3[0], ci3[1]))
+
+
 if __name__ == "__main__":
     test_effetto_f1_presente()
     test_effetto_f2_presente()
@@ -258,4 +301,5 @@ if __name__ == "__main__":
     test_lift_nullo_s2()
     test_lift_nan_su_denominatore_zero()
     test_protezione_secondo_avvio()
+    test_s1_correzione_segno_alternato()
     print("\nTUTTI I TEST SINTETICI PASSATI")

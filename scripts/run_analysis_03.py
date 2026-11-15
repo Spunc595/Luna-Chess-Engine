@@ -137,6 +137,55 @@ def load_s1_dense_rows(dataset_s1_path: str):
     return useful, len(raw)
 
 
+def stm_sign(ply: int) -> float:
+    """Segno del lato al tratto nella convenzione delle colonne `ply` di
+    questo esperimento (ply = numero di semimosse GIA' giocate, 1-indicizzato
+    in `generate_03_sample_positions.py`): a ply PARI tocca al Bianco
+    (dopo un numero pari di semimosse, il Bianco muove), a ply DISPARI
+    tocca al Nero. +1 se tocca al Bianco, -1 se tocca al Nero. Usata per
+    S1' (2026-11-15): nota di correzione nel protocollo."""
+    return 1.0 if ply % 2 == 0 else -1.0
+
+
+def build_s1_rows(raw_useful: list[dict], base_coef: list[float], apply_stm_sign: bool = False):
+    """Costruisce le righe S1Row per `analyze_03.run_s1`. Se
+    `apply_stm_sign` è False, riproduce esattamente la S1 pre-registrata
+    (originale). Se True, applica la correzione S1' (2026-11-15): il
+    residuo pulito è moltiplicato per +1/-1 secondo il lato al tratto,
+    cosi' un errore persistente dal punto di vista del Bianco non si
+    presenta con segno alternato a ritardo dispari."""
+    rows = []
+    for d in raw_useful:
+        resid = residual_of(d)
+        pred = predict_base_for_controls(base_coef, controls_of(d))
+        e = resid - pred
+        ply = int(d["ply"])
+        if apply_stm_sign:
+            e = e * stm_sign(ply)
+        rows.append(A.S1Row(game_id=d["game_id"], ply=ply, e=e))
+    return rows
+
+
+def run_s1_from_dataset(dataset_s1_path: str, base_coef: list[float],
+                         n_resamples: int = 10000, seed: int = 20261112,
+                         apply_stm_sign: bool = False) -> dict:
+    raw, n_total = load_s1_dense_rows(dataset_s1_path)
+    rows = build_s1_rows(raw, base_coef, apply_stm_sign=apply_stm_sign)
+    result = A.run_s1(rows, n_resamples=n_resamples, seed=seed) if rows else None
+    return {"n_righe_totali": n_total, "n_righe_utili": len(rows), "risultato": result}
+
+
+def load_base_coef_from_results(results_json_path: str) -> list[float]:
+    """Legge i coefficienti del modello BASE (solo controlli, fittato
+    sulla parte di stima del campione principale) da un file
+    `risultati_03.json` già prodotto da `run_full_analysis` -- NON
+    rifitta nulla, per rispettare 'stessi parametri del modello base di
+    03, non rifittato' (nota S1', 2026-11-15)."""
+    with open(results_json_path, encoding="utf-8") as f:
+        report = json.load(f)
+    return report["F1_F2_pooled"]["base"]["coef"]
+
+
 def fit_base_model(train_rows: list[A.Row]):
     """Modello base (solo controlli) fittato sulla parte di STIMA.
     Ritorna i coefficienti nello stesso ordine di design_matrix(use_f1=False,use_f2=False)."""
@@ -240,18 +289,8 @@ def run_full_analysis(scr_dir: str, out_prefix: str, n_resamples: int = 10000, s
 
     # --- S1 ---
     base_coef = fit_base_model(train)
-    s1_raw, n_s1_total = load_s1_dense_rows(dataset_s1)
-    s1_rows = []
-    for d in s1_raw:
-        resid = residual_of(d)
-        pred = predict_base_for_controls(base_coef, controls_of(d))
-        e = resid - pred
-        s1_rows.append(A.S1Row(game_id=d["game_id"], ply=int(d["ply"]), e=e))
-    s1_result = A.run_s1(s1_rows, n_resamples=n_resamples, seed=seed) if s1_rows else None
-    report["S1"] = {
-        "n_righe_totali": n_s1_total, "n_righe_utili": len(s1_rows),
-        "risultato": s1_result,
-    }
+    report["S1"] = run_s1_from_dataset(dataset_s1, base_coef, n_resamples=n_resamples,
+                                        seed=seed, apply_stm_sign=False)
 
     # --- S2 ---
     reteB_raw = read_tsv_dict(dataset_reteB)

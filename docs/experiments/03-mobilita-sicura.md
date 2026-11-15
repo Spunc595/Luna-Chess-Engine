@@ -1250,3 +1250,100 @@ PRIMA di guardare i dati, con questo disegno sperimentale specifico.
 NON CONCLUSIVO complessivo, con esiti distinti per analisi: F1 SCARTO,
 F2 SCARTO, S1 SCARTO, S2 ZONA GRIGIA (da decidere). Nessuna modifica al
 motore proposta o applicata sulla base di questi risultati.
+
+---
+
+## Correzione S1, S1' e replica confermativa S1'-R (2026-11-15)
+
+### Nota di correzione (assistente)
+
+La S1 pre-registrata usava il residuo dal punto di vista del lato al
+tratto. A distanza dispari di mezze-mosse il lato al tratto è opposto:
+un errore persistente dal punto di vista del Bianco compare con segno
+alternato, quindi ICC(1) e correlazioni a ritardo dispari risultano
+distorti. Il pattern osservato (-0,45 / +0,30 / -0,11 / +0,09 a
+3/6/15/30 plies: negativo a ritardo dispari, positivo a ritardo pari,
+ampiezza decrescente) è quello atteso da quel segno alternato. La
+classificazione pre-registrata di S1 (SCARTO, su ICC(1)=0,0000) RESTA:
+non viene riclassificata. Il test sintetico originale
+(`test_persistenza_s1`) non ha rilevato il difetto perché il
+generatore non simulava il cambio di lato al tratto (l'effetto di
+partita entrava nel residuo senza alternanza di segno).
+
+### Definizione di S1' (ESPLORATIVA, post-hoc)
+
+Definita DOPO aver visto il pattern di S1 (quindi esplorativa, non
+pre-registrata). Stessi dati (`dataset_s1.tsv`, campione originale),
+stessi filtri, stesso modello base (coefficienti dello stesso modello
+base di 03, fittato sulla parte di stima del campione principale, NON
+rifittato). Residuo pulito corretto per il lato al tratto:
+`e_w = e * (+1 se tocca al Bianco, -1 se tocca al Nero)`, con la
+convenzione `ply` pari = tocca al Bianco (dopo un numero pari di
+semimosse giocate), `ply` dispari = tocca al Nero (vedi
+`run_analysis_03.stm_sign`). Stesse metriche (ICC(1) a effetti casuali
+per partita; correlazione per distanza esatta 3/6/15/30 plies con
+bootstrap a cluster, 10.000 ricampionamenti, seed 20261112) e stesse
+soglie di S1 (PROSEGUIMENTO: ICC(1)>=0,10 E correlazione a 3
+plies>=0,10 con IC che esclude 0; SCARTO: ICC(1)<0,03; ZONA GRIGIA tra
+i due). Il risultato di S1' sul campione originale è SOLO esplorativo:
+non decide nulla da solo.
+
+### Definizione della replica confermativa S1'-R (PRE-REGISTRATA ora)
+
+200 partite NUOVE (diverse dalle 200 di S1 originale, verificato per
+assenza di sovrapposizione), scelte con seed 20261115 dallo stesso
+archivio `sprt_run/match.pgn`; posizioni ogni 3 plies da ply 10 a 80
+(stesso schema di S1); stessi filtri (vedi "Filtri") e D_ref=14;
+residuo pulito corretto per il lato al tratto come S1' (`e_w`), con i
+coefficienti del modello base letti da `risultati_03.json` (lo stesso
+modello già fittato sulla parte di stima del campione principale, NON
+rifittato). Stesse metriche e STESSE soglie di S1' (PROSEGUIMENTO se
+ICC(1) >= 0,10 E correlazione a 3 plies >= 0,10 con IC che esclude 0;
+SCARTO se ICC(1) < 0,03; ZONA GRIGIA tra i due). Il verdetto della
+correzione è su S1'-R; S1' sul campione originale resta etichettata
+ESPLORATIVA e non viene usata per decidere.
+
+### Test sintetico aggiunto (punto 4)
+
+Nuovo scenario in `test_run_analysis_03_synthetic.py`
+(`test_s1_correzione_segno_alternato`): effetto di partita persistente
+dal punto di vista del Bianco, moltiplicato per `stm_sign(ply)` prima
+di entrare nel residuo osservato (side-to-move) -- simula esattamente
+il difetto diagnosticato. Verifica che la S1 ORIGINALE (non corretta)
+resti ~0 (ICC(1)<0,03) e che la S1' (corretta) recuperi la persistenza
+nota (ICC(1)>=0,10, correlazione a 3 plies>=0,10 con IC che esclude
+0). Il generatore sintetico (`make_dataset`) ha un nuovo parametro
+opzionale `game_effect_alternates_with_stm` (default `False`, nessun
+cambiamento di comportamento per i test esistenti, che restano quindi
+validi senza modifiche).
+
+### File nuovi/modificati e sha256 (prima di qualunque esecuzione)
+
+- `scripts/run_analysis_03.py` (MODIFICATO: aggiunte `stm_sign`,
+  `build_s1_rows`, `run_s1_from_dataset`,
+  `load_base_coef_from_results`; il blocco S1 di `run_full_analysis`
+  ora chiama `run_s1_from_dataset(..., apply_stm_sign=False)`, stesso
+  calcolo di prima, verificato per equivalenza a livello di codice, non
+  rieseguito sui dati veri): sha256
+  `765f71b7dfbad3462d395cf2616ebdca351eca71ef292ee9b1a81501c7ebed7f`.
+- `scripts/test_run_analysis_03_synthetic.py` (MODIFICATO: nuovo
+  parametro opzionale in `make_dataset`, nuovo test): sha256
+  `cb74570a76932b18389388922a503a6fb21326b398e622923aa71f5c7808e7aa`.
+- `scripts/run_s1_prime_esplorativa.py` (NUOVO, S1' sul campione
+  originale, esplorativa): sha256
+  `9a19f593942dbedae71bfce03ed29bd319fb784eac25863555b6146d247f7554`.
+- `scripts/run_s1r.py` (NUOVO, S1'-R, con protezione di secondo
+  avvio): sha256
+  `39c669967f03521daae7709b4ad7f2c2de365ee22f4a5119132df3f09228a99a`.
+- `scripts/generate_s1r_sample.py` (NUOVO, campionamento delle 200
+  partite nuove per S1'-R, con verifica di non sovrapposizione con S1
+  originale): sha256
+  `30a68bb4ba3a118c5e216c3bd92196f5747f9907d0219dffccd4c183e91836b8`.
+- `scripts/analyze_03.py`: sha256
+  `3753df10e21812af9bd64b7378e1cc74e58447094929ef6775c3d0e36193af38`
+  (INVARIATO, confermato di nuovo).
+
+Test sintetici (tutti i 12, incluso il nuovo) eseguiti PRIMA di questo
+commit: tutti passati (vedi report in chat per l'output completo).
+Nessuna esecuzione sui dati veri (campione originale o S1'-R) eseguita
+prima di questo commit.
