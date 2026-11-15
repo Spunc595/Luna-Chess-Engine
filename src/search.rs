@@ -1125,6 +1125,17 @@ fn quiescence(
             let score = -quiescence(board, -beta, -alpha, ply + 1, info, tt, sh, z, nnue, params);
             board.annulla_mossa(&m, z, nnue);
 
+            // Same guard as negamax (search.rs, after its own recursive
+            // calls): if the recursive quiescence call above stopped
+            // mid-search (hard time/node limit hit deep in a capture
+            // chain -- see quiescence's own `check_time()` at the top),
+            // `score` is not a real evaluation, just the bail-out value.
+            // Without this, the `tt.store` calls below could persist a
+            // bound derived from an interrupted search into the shared
+            // TT (found during the 2026-11-15 audit: no equivalent
+            // guard existed here, unlike negamax).
+            if info.stopped { return 0; }
+
             if score >= beta {
                 tt.store(board.hash, 0, ply, beta, Bound::Beta, m);
                 return beta;
@@ -1355,6 +1366,75 @@ mod coldstart_gate {
             used <= hard_limit * 11 / 10,
             "first search took {used}ms, more than 1.1x its own hard_limit ({hard_limit}ms) -- \
              likely a cold-start regression (see attacks.rs's magic-bitboard fix)"
+        );
+    }
+}
+
+#[cfg(test)]
+mod quiescence_stop_guard_tests {
+    use super::*;
+    use crate::zobrist::ZobristKeys;
+    use crate::evaluation::EvalParams;
+
+    // Esperimento 05, modifica (ii): regressione sul difetto trovato il
+    // 2026-11-15 (nessuna guardia su `info.stopped` in `quiescence` dopo
+    // la chiamata ricorsiva, a differenza di `negamax`). Stesso FEN di
+    // `ply_cap_tests` (una cattura sola, chiaramente profittevole: Alfiere
+    // bianco in e4 prende il pedone indifeso in d5): garantisce che la
+    // chiamata radice entri nel ciclo delle mosse e ricorsi ALMENO una
+    // volta.
+    const CAPTURE_AVAILABLE_FEN: &str = "4k3/8/8/3p4/4B3/8/8/4K3 w - - 0 1";
+
+    /// Con `max_nodes = 1`, il nodo FIGLIO (la ricorsione dentro la
+    /// cattura) supera il tetto e ritorna 0 come "stop", non come
+    /// valutazione vera. La guardia deve far tornare 0 anche al nodo
+    /// RADICE SENZA mai chiamare `tt.store` per la sua posizione: la
+    /// TT (nuova, vuota) deve restare senza voce per `board.hash` dopo
+    /// la chiamata.
+    #[test]
+    fn nessun_tt_store_dopo_uno_stop_nella_catena_di_catture() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(CAPTURE_AVAILABLE_FEN, &z);
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        info.max_nodes = Some(1);
+        let tt = crate::tt::TranspositionTable::new(1);
+
+        assert!(tt.get_move(board.hash).data == Mossa::null().data, "precondizione: tabella vuota prima della chiamata");
+
+        let score = quiescence(&mut board, -INFINITY, INFINITY, 0, &mut info, &tt, &sh, &z, None, &params);
+
+        assert_eq!(score, 0, "il nodo radice deve propagare lo stop (0), non una valutazione");
+        assert!(info.stopped, "info.stopped deve essere vero dopo la chiamata");
+        assert!(
+            tt.get_move(board.hash).data == Mossa::null().data,
+            "tt.store NON deve essere stato raggiunto per la posizione radice dopo uno stop"
+        );
+    }
+
+    /// Controllo di non-regressione: SENZA alcun cap sui nodi (stesso
+    /// FEN, stesso budget di tempo generoso della famiglia `ply_cap_tests`),
+    /// la cattura viene trovata e completata normalmente: la guardia non
+    /// deve impedire un `tt.store` legittimo quando non c'è stato nessuno
+    /// stop.
+    #[test]
+    fn tt_store_normale_senza_stop() {
+        let z = ZobristKeys::default();
+        let params = EvalParams::default();
+        let mut board = Scacchiera::from_fen(CAPTURE_AVAILABLE_FEN, &z);
+        let sh = SharedHistory::new();
+        let mut info = SearchInfo::new(5000, 1);
+        let tt = crate::tt::TranspositionTable::new(1);
+
+        let score = quiescence(&mut board, -INFINITY, INFINITY, 0, &mut info, &tt, &sh, &z, None, &params);
+        let static_eval = eval(&board, None, &params);
+
+        assert!(!info.stopped, "non deve esserci stato nessuno stop in questo scenario");
+        assert!(score > static_eval + 50, "la cattura doveva essere trovata normalmente");
+        assert!(
+            tt.get_move(board.hash).data != Mossa::null().data,
+            "senza stop, la posizione radice deve avere una voce in TT (store legittimo)"
         );
     }
 }
