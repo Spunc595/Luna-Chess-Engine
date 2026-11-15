@@ -1464,3 +1464,102 @@ genera `ply` in `generate_03_sample_positions.py` e
 
 Nessuna analisi aggiuntiva eseguita su S1'-R. Nessuna modifica al
 motore proposta o applicata.
+
+---
+
+## Esperimento 03C: simulazione offline di un predittore causale per partita (pre-registrazione, 2026-11-15)
+
+Analisi OFFLINE su dati già congelati. Nessuna modifica al motore,
+nessun push/merge/comando su Oracle.
+
+### 1. Dati
+
+S1 originale (`dataset_s1.tsv`, 2.858 posizioni utili -- per la scelta
+dei parametri) e S1'-R (`dataset_s1r.tsv`, 2.891 posizioni utili -- per
+il verdetto). Residuo pulito `e` DAL PUNTO DI VISTA DEL LATO AL TRATTO
+come in S1 originale (NON la correzione S1': qui non necessaria,
+perché il predittore (sotto) usa solo predecessori con lo STESSO lato
+al tratto -- entro ciascun sottoinsieme il segno è già coerente).
+Coefficienti del modello base letti da `risultati_03.json`, NON
+rifittati (stessa convenzione di S1/S1'/S1'-R).
+
+### 2. Predittore (causale, realizzabile in tempo reale)
+
+Per ogni posizione `i` di una partita, usa SOLO posizioni precedenti
+`j` della STESSA partita con lo STESSO lato al tratto (`ply_j < ply_i`,
+`ply_j % 2 == ply_i % 2`):
+
+```
+e_hat_i = lambda * sum_j(w_j * e_j) / sum_j(w_j)
+w_j = alfa ** ((ply_i - ply_j)/6 - 1)
+e_hat_i = 0 se non ci sono predecessori
+```
+
+Nessuna informazione dal futuro, nessuna posizione con lato al tratto
+opposto.
+
+### 3. Parametri
+
+`lambda` in {0,1; 0,2; 0,3; 0,4; 0,5; 0,6; 0,8; 1,0}, `alfa` in {0,5;
+0,7; 0,85; 1,0}: 32 combinazioni, scelte su S1 ORIGINALE per
+minimizzare l'errore quadratico medio di `e - e_hat` (ricerca a
+griglia esaustiva); poi FISSATI e applicati a S1'-R senza riadattare.
+
+### 4. Metrica
+
+Riduzione relativa dell'errore quadratico medio su S1'-R:
+`1 - MSE(e - e_hat) / MSE(e)`, con IC95% bootstrap a cluster per
+partita (10.000 ricampionamenti, seed 20261115). Anche per fascia di
+|valutazione statica| e per fase, SOLO descrittivo (nessuna soglia su
+questi sottogruppi).
+
+### 5. Soglie (fissate ora)
+
+PROSEGUIMENTO se la riduzione su S1'-R >= 5% E il limite inferiore
+dell'IC95% > 0; SCARTO se < 2%; ZONA GRIGIA tra i due.
+
+### 6. Confronto stima/verdetto
+
+Si riporta anche la riduzione sul campione di adattamento (S1
+originale) per valutare se è molto diversa da quella su S1'-R
+(sovradattamento).
+
+### 7. Test sintetico
+
+`scripts/test_offline_predictor_03c_synthetic.py`: scenario con
+persistenza nota (effetto di partita dal punto di vista del Bianco,
+con segno alternato per lato al tratto, come il meccanismo diagnosticato
+in S1 -- vedi "Correzione S1, S1' e replica confermativa S1'-R") e
+caso nullo. Il predittore, con (lambda,alfa) scelti sullo stesso
+campione, deve recuperare CIRCA il rho² teorico =
+`sd_b²/(sd_b²+sd_noise²)` nel caso con persistenza (osservato: 0,785
+contro un rho² teorico di 0,877, con 12 campioni medi per lato per
+partita -- scostamento atteso per campione finito) e una riduzione
+vicina a zero nel caso nullo (osservato: -0,0026). Verificato anche
+che la prima posizione di ciascun lato al tratto in ciascuna partita
+(nessun predecessore) dia `e_hat=0`.
+
+### File e sha256 (prima di qualunque esecuzione)
+
+- `scripts/offline_predictor_03c.py` (NUOVO): sha256
+  `789e8157c9c48222fbfde76e80e222b66b48c858285f6bebf5487bc476be0d0a`.
+- `scripts/test_offline_predictor_03c_synthetic.py` (NUOVO): sha256
+  `bfe2f3c6b77f36afd6a580910159f2123268815a7a85b6e6f6437e1a795a1512`.
+- `scripts/run_analysis_03.py` (letto, riusato, NON modificato in
+  questo commit): sha256
+  `765f71b7dfbad3462d395cf2616ebdca351eca71ef292ee9b1a81501c7ebed7f`
+  (invariato dal commit del 2026-11-15 precedente).
+- `scripts/analyze_03.py`: sha256
+  `3753df10e21812af9bd64b7378e1cc74e58447094929ef6775c3d0e36193af38`
+  (INVARIATO, confermato di nuovo).
+
+Tutti e 3 i test sintetici (persistenza nota, caso nullo,
+predittore-senza-futuro) eseguiti PRIMA di questo commit: tutti
+passati. Nessuna esecuzione su S1 originale o S1'-R eseguita prima di
+questo commit.
+
+Limitazioni già note, applicabili anche qui (vedi "## Esito" e "##
+Esito di S1'-R"): il residuo è rispetto alla ricerca a profondità 14
+di Luna stessa; posizioni da partite Luna contro Luna a 10+0,1; la
+riduzione dell'errore del residuo NON è un guadagno di forza (nessuna
+affermazione viene fatta qui su Elo o esiti di partita).
