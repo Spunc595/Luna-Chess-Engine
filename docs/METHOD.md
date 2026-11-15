@@ -571,6 +571,57 @@ datata. Indicazione: committare prima del lancio non solo le regole di
 decisione ma anche l'elenco di cosa si guarda nei controlli intermedi
 (carico, terminazioni, numero di partite, LLR), e non guardare altro.
 
+### 10.8 Le definizioni dei residui vanno testate con generatori sintetici che imitano la struttura reale
+Nell'esperimento 03 la persistenza intra-partita (S1) era definita sul
+residuo dal punto di vista del lato al tratto. A distanza dispari di
+mezze-mosse il lato al tratto è opposto: un errore persistente dal punto
+di vista del Bianco compare con segno alternato, e l'ICC(1) risulta circa
+zero (0,0000) anche con persistenza forte. Il pattern delle correlazioni a
+3/6/15/30 mezze-mosse (-0,45 / +0,30 / -0,11 / +0,09) era quello atteso.
+La classificazione pre-registrata (SCARTO) è rimasta. La definizione
+corretta (S1', dal punto di vista del Bianco, definita dopo aver visto il
+pattern e quindi esplorativa) ha dato ICC(1) = 0,1635 e correlazione a 3
+mezze-mosse +0,454; una replica confermativa su 200 partite nuove (S1'-R)
+ha dato ICC(1) = 0,1437 e correlazione a 3 mezze-mosse +0,431 (IC95%
+[0,362; 0,492]). Il test sintetico originale non simulava il cambio di
+lato al tratto. Indicazioni: generatori sintetici che replicano la
+struttura reale (lato al tratto, ordine, ripetizioni); se una definizione
+viene corretta dopo aver visto i dati, confermarla su un campione nuovo.
+
+### 10.9 Bootstrap a cluster e partite ricampionate
+Nel bootstrap per partita, una partita ricampionata più volte va trattata
+come cluster distinti (identificatore univoco per occorrenza). Nel primo
+calcolo di 03C il bootstrap fondeva le occorrenze: IC95% [0,155; 0,210]
+contro una stima puntuale di 0,0527. Un intervallo disgiunto dalla stima
+puntuale è un segnale di bug e non si riporta come risultato: si cerca la
+causa, si aggiunge un test di regressione e si conserva l'esecuzione
+sbagliata per traccia.
+
+### 10.10 Un PROSEGUIMENTO marginale si legge con l'intervallo
+03C: riduzione dell'errore quadratico medio 5,27%, IC95% [2,68%; 7,91%],
+contro una soglia del 5%: PROSEGUIMENTO per la regola, ma l'intervallo
+include valori sotto soglia. Indicazioni: riportare sempre l'intervallo e
+commisurare la decisione successiva (il costo di un SPRT) al tetto stimato
+dell'effetto, non solo alla classificazione.
+
+### 10.11 Conteggi derivati da flag con nomi fuorvianti
+Al congelamento il conteggio delle posizioni utili (38.775) usava tre
+indicatori `scarta_*` e non i sei filtri del protocollo (31.296). Il
+nome `scarta_quiet` controllava solo lo scacco. Indicazione: derivare i
+conteggi dalle definizioni del protocollo, non dai nomi delle colonne, e
+riverificarli prima di congelare.
+
+### 10.12 Verifica degli hash e prove di equivalenza prima di generare
+`Scacchiera::from_fen` lasciava l'accumulatore della rete azzerato:
+`eval` risultava costante (circa 5 cp) su posizioni diverse. Il bug è
+stato trovato da un controllo di plausibilità, corretto prima di generare
+dati, e ha portato alle prove di equivalenza con il motore (200/200) e di
+invarianza per inversione dei colori (1.000/1.000). Una verifica
+pre-generazione ha inoltre mostrato che l'hash registrato del binario era
+diventato obsoleto dopo due commit di codice: build pulita, prove rifatte
+sul binario che genera i dati. Indicazione: registrare l'hash dopo ogni
+modifica del codice e rifare le prove di equivalenza prima di generare.
+
 ---
 
 ## Riferimenti rapidi
