@@ -1610,3 +1610,53 @@ La riesecuzione sui dati reali richiede `--force` (il lock della prima
 esecuzione esiste già con lo stesso sha256 degli input, che non sono
 cambiati -- solo il codice è stato corretto): annotato qui come
 richiesto dal protocollo per l'uso di `--force`.
+
+## Esito di 03C (2026-11-15)
+
+Eseguita (con `--force`, vedi nota di correzione sopra) il 2026-11-15
+alle 15:41:24, bootstrap a cluster per partita, 10.000 ricampionamenti,
+seed 20261115, lock scritto con sha256 degli input
+(`dataset_s1.tsv`, `dataset_s1r.tsv`, `risultati_03.json` --
+tutti identici a quelli già registrati).
+
+**Parametri scelti su S1 originale**: lambda\*=0,4, alfa\*=0,5
+(riduzione sul campione di adattamento: 5,99%).
+
+**Verdetto su S1'-R**: riduzione relativa dell'MSE = **5,27%**, IC95%
+bootstrap [2,68%; 7,91%] (limite inferiore > 0). La riduzione sul
+campione di adattamento (5,99%) è vicina a quella sulla replica
+(5,27%): nessun segnale marcato di sovradattamento.
+
+**Classificazione** (soglie pre-registrate: PROSEGUIMENTO se
+riduzione>=5% E limite inferiore dell'IC95%>0; SCARTO se <2%; ZONA
+GRIGIA tra i due): 5,27%>=5% E IC95% limite inferiore
+2,68%>0 -> **PROSEGUIMENTO**. Nota di cautela: la riduzione osservata
+(5,27%) è solo marginalmente sopra la soglia del 5% -- un risultato
+al limite, non un segnale forte; lo si riporta come tale, non come
+"ampiamente superata".
+
+**Descrittivo per fascia di |valutazione statica|** (S1'-R): 0-50:
+7,15% (n=298); 50-150: 5,49% (n=821); 150-300: 6,00% (n=1.190);
+300-600: 7,24% (n=582) -- riduzione relativamente stabile fra fasce,
+leggermente più alta agli estremi.
+
+**Descrittivo per fase** (S1'-R): Apertura 4,80% (n=1.246); Mediogioco
+2,22% (n=896); Finale 8,67% (n=749) -- riduzione più bassa a
+mediogioco, più alta a finale; solo descrittivo, nessuna soglia
+applicata per fase.
+
+**Limitazioni**: il residuo è rispetto alla ricerca a profondità 14 di
+Luna stessa; posizioni da partite Luna contro Luna a 10+0,1; la
+riduzione dell'errore del residuo NON è un guadagno di forza (nessuna
+affermazione su Elo o esiti di partita); il predittore qui è una
+simulazione OFFLINE, non è stato implementato nel motore.
+
+**File e sha256**: `risultati_03c.json` sha256
+`9969d137fa79b65acac031c1da99cd9c2c60835dd3d47bfb0f5c2f1cd0306915`;
+`risultati_03c.lock` sha256
+`33be2c9a6b98909209d132d8e4fd44ac8ec3bb74c55fd56b7ba57f4e564fe43e`.
+Prima esecuzione (con il bug del bootstrap) conservata per traccia in
+`_03c_run1_BUGGY_bootstrap\`, non riportata come esito.
+
+Nessuna modifica al motore proposta o applicata sulla base di questo
+risultato.
