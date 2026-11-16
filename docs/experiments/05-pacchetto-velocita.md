@@ -650,6 +650,52 @@ nell'Esperimento 04 -- stessa architettura (aarch64), stesso commit
 errore (diverso, per costruzione, dal sha256 della build x86-64 dello
 stesso commit usata in Fase 2 sul PC, `2ba13ca3...`).
 
+## Fase 2 su Oracle (2026-11-16): PACCHETTO ACCETTATO -- ablazioni in sospeso
+
+Bot fermato 06:39:25Z. Pre-controlli positivi (stessi del fermo
+dell'Esperimento 04, stesso giorno): `luna-bot` enabled, host key
+pulita, `hostname`=`luna-server`, `nproc`=4.
+
+**Correzione di portabilità trovata ed applicata**: `measure_speed_fase3.py`
+usava `ctypes.windll` (solo Windows) per il pin dei processi ai core;
+falliva su Linux. Corretto con `os.sched_setaffinity` quando
+disponibile (ramo Windows invariato); sha256 prima
+`0196be1feaa478d202350a66d27db05e9da2bf2ce36f33652270e1c4fb2e36d8`,
+dopo `6e85e98a579d0faf97d88e4a43fdfd6a4bc10a7e094965fced68d064eda76a7f`.
+
+**Gate ripetuti su Oracle** (nativo aarch64, 6 build: riferimento,
+copia, pacchetto, tre ablazioni -- sha256 già registrati sopra):
+`cargo test --release --workspace` verde per le 4 build con codice
+diverso (conteggi identici a x86-64: 43/46 per il pacchetto, 40/43
+per (i), 42/45 per (ii), 41/44 per (iii)). Nodi identici confermati
+(bench depth 18: 590.820/980.165 su tutte e 5 le build; 100 posizioni
+depth 14: **0 mismatch** su tutte e 4 le build contro il riferimento).
+
+**Misura del pacchetto** (5 giri, 100 posizioni, depth 14, Threads 1,
+Hash 64; CSV sha256
+`753012be71fea5783720d30c739d81502599b8638248e176fd41c15d58ab55a0`):
+
+- **Pacchetto**: G = **1,0436**, IC95% = **[1,0421; 1,0450]**.
+  Semi-larghezza ≈ 0,145%.
+- **Floor di rumore** (copia): G = 0,9999, IC95% = [0,9995; 1,0004].
+  **Semi-larghezza ≈ 0,045%.**
+
+**REQUISITO DI PRECISIONE SODDISFATTO** (0,045% << 1%). Carico: prima
+`0.49, 0.90, 1.02`, dopo `1.06, 1.06, 1.03`.
+
+**Applicazione della regola di decisione** (nessuna interpretazione
+oltre quanto pre-registrato): nodi identici ✓, G=1,0436 >= 1,02 ✓,
+limite inferiore IC95% = 1,0421 > 1,000 ✓ → **ACCETTATO**.
+
+Per la regola (sezione "Regola di decisione"): un pacchetto accettato
+richiede l'ablazione (le tre misure singole, stesso protocollo,
+contro lo stesso riferimento). **NON eseguite in questa sessione**:
+avrebbero richiesto ~3× il tempo appena impiegato (~21 minuti ciascuna),
+superando il tempo rimanente nel limite di fermo del bot dichiarato da
+Daniele (90 minuti totali) -- e la regola di Daniele impone di
+dirglielo PRIMA di eseguirle. Bot riavviato **07:30:33Z** (fermo
+totale: 06:39:25Z -> 07:30:33Z, **~51 minuti**, entro i 90).
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
