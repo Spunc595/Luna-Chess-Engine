@@ -498,6 +498,127 @@ DOPO un esito valido del pacchetto intero, che qui non c'è.
 File: `misura_pacchetto.csv` (grezzo, 1.500 righe, nessuna riga
 scartata). sha256 da registrare quando archiviato.
 
+## Emenda: piattaforma primaria della misura spostata su Oracle (2026-11-16, PREPARATA, NON eseguita)
+
+La macchina locale (PC, x86-64) non ha soddisfatto il requisito di
+precisione (semi-larghezza IC95% sulla copia identica ≈1,94%, sopra
+la soglia dell'1%) nel primo tentativo di Fase 2. Questa emenda
+sposta la piattaforma PRIMARIA della misura su Oracle (aarch64),
+dove il carico di fondo è controllabile (bot fermato, nessun altro
+processo pesante) in modo molto più affidabile che su un PC di
+lavoro condiviso con altre applicazioni.
+
+**Nessuna azione eseguita**: nessun comando su Oracle per questa
+emenda, nessun bot fermato, nessuna build aarch64 ancora fatta. In
+attesa del via di Daniele prima di procedere.
+
+### Pre-condizioni (da verificare PRIMA di fermare il bot, sola lettura)
+
+1. Connessione SSH con `-o StrictHostKeyChecking=yes` a `84.8.254.146`:
+   NESSUN avviso di chiave host (se c'è, fermarsi e riportare, come
+   nell'Esperimento 04 -- non riprovare altri indirizzi).
+2. `hostname` = `luna-server`, `nproc` = 4 (come verificato per
+   l'Esperimento 04 lo stesso giorno -- da riverificare qui, potrebbe
+   essere cambiato).
+3. `systemctl is-active luna-bot` (stato prima, per riportare
+   l'intervallo esatto di fermo).
+
+### Build aarch64 (da fare native su Oracle, non cross-compilate)
+
+Sei binari in totale, ciascuno da una `git archive` pulita + `cargo
+build --release` nativa su Oracle:
+
+- **riferimento**: `origin/main` (`80b1648`)
+- **copia**: copia byte-identica del riferimento (soglia di rumore)
+- **pacchetto**: `exp/05-pacchetto-velocita` HEAD (`f05dc2e` al momento
+  di scrivere questa emenda -- da riverificare il commit esatto al
+  momento dell'esecuzione)
+- **ablazione (i)**: `exp/05-ablazione-i` (`2da21d3`)
+- **ablazione (ii)**: `exp/05-ablazione-ii` (`a74c9dc`)
+- **ablazione (iii)**: `exp/05-ablazione-iii` (`0161ea3`)
+
+sha256 di tutti e sei registrati nel protocollo (nuovo commit) PRIMA
+di qualunque dato di tempo -- stessa disciplina già seguita sul PC.
+
+### Gate, ripetuto sulla stessa macchina
+
+`cargo test --release --workspace` per ciascuna delle 4 build con
+codice diverso dal riferimento (pacchetto, ablazione i/ii/iii) --
+verde atteso, già verificato su x86-64, ma da RIPETERE su aarch64 (un
+comportamento dipendente dall'architettura, per quanto improbabile
+vista la natura del codice, non si assume). Gate a nodi identici
+(bench depth 18 Threads 1, 100 posizioni depth 14) per ciascuna delle
+4 build contro il riferimento, sulla stessa macchina aarch64 -- i
+conteggi di nodi (590.820/980.165 e le 100 posizioni) devono
+risultare identici a quelli già osservati su x86-64 (i nodi non
+dipendono dall'architettura, solo dalla logica di ricerca); se NON
+risultassero identici, è una scoperta più grave di un semplice fallimento
+del gate e va fermata e riportata subito, non trattata come il solito
+"nodi diversi = regressione".
+
+### Misura, stesso protocollo di Fase 2
+
+`measure_speed_fase3.py`, 5 giri, 100 posizioni, depth 14, Threads 1,
+Hash 64, requisito di precisione ≤1% di semi-larghezza sulla copia
+identica (docs/METHOD.md §10.1b) -- stesso schema già scritto in
+questo protocollo. **Prima** il pacchetto intero contro il
+riferimento; **solo se** quell'esito è valido e decidibile per la
+regola emendata, le tre ablazioni (anche queste possono essere fatte
+in una sessione separata, bot riacceso fra le due, se Daniele
+preferisce non tenerlo fermo per tutta la sequenza -- vedi stima di
+durata sotto).
+
+### Stima di durata (approssimativa, NON misurata su questa macchina)
+
+Riferimento: sullo stesso protocollo (5 giri, 100 posizioni, 3 build)
+il PC locale ha impiegato 1.309,5s (~22 minuti) per un solo confronto
+(rif/pacchetto/copia). Oracle (Ampere Neoverse-N1) ha un NPS per core
+dello stesso ordine di grandezza osservato altrove in questo progetto
+(centinaia di migliaia), ma NON è stato misurato con questo identico
+protocollo -- la stima seguente ha quindi un margine di incertezza
+dichiarato di ±50%:
+
+- Build (6 binari nativi, ~1 minuto l'uno): **~6-10 minuti**.
+- Gate a nodi identici (4 build contro il riferimento): **~15-25
+  minuti**.
+- Misura del SOLO pacchetto (5 giri, 1 confronto): **~15-35 minuti**
+  (per analogia col PC; potrebbe differire per via della CPU diversa).
+- Misura delle 3 ablazioni (se fatte nella stessa sessione, 3
+  confronti aggiuntivi): **~45-105 minuti** aggiuntivi.
+
+**Totale fermo del bot**:
+- Se si misura SOLO il pacchetto in questa sessione (ablazioni
+  rimandate a una sessione separata, bot riacceso in mezzo): **~35-70
+  minuti**.
+- Se si misura tutto (pacchetto + 3 ablazioni) senza riaccendere il
+  bot in mezzo: **~80-175 minuti (~1h20-3h)**.
+
+Daniele decide quale delle due opzioni preferisce al momento del via.
+
+### Piano B: se Oracle non è disponibile o non risolve il problema
+
+Rimisurare sul PC locale (laptop/PC di lavoro), ma con il requisito
+di precisione RIMISURATO esplicitamente prima di fidarsi di un nuovo
+risultato: un dry-run con copia-vs-riferimento (senza il pacchetto)
+PRIMA della misura vera, per confermare che la semi-larghezza
+dell'IC95% sia effettivamente ≤1% in quelle condizioni (macchina più
+quieta, es. con alcune applicazioni chiuse col consenso di Daniele,
+o in un orario diverso) -- non si assume che chiudere qualche
+applicazione basti, si RIMISURA il rumore e si verifica.
+
+### Se il requisito di precisione non regge NEMMENO su Oracle o in Piano B
+
+Si scrive nell'Esito: **"Il pacchetto non è stato misurabile con la
+precisione richiesta dal protocollo, su nessuna delle piattaforme
+disponibili in questa sessione. Nessuna decisione (accettazione o
+scarto) viene presa sul numero di G, per nessuna delle misure
+tentate."** Si riportano TUTTI i tentativi (ciascuno con G, IC95%,
+semi-larghezza, piattaforma, carico di fondo dichiarato), SENZA
+sceglierne uno a posteriori come "quello buono". La decisione su come
+procedere (più giri, una macchina dedicata, allargare la soglia di
+precisione pre-registrata con una nuova pre-registrazione separata)
+spetta esplicitamente a Daniele, non viene presa qui.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
