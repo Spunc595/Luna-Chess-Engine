@@ -1043,6 +1043,48 @@ Si riportano sempre il numero di mosse e il numero di partite che
 entrano in ciascun conteggio (per blocco, per motore, e per il
 sottoinsieme filtrato nel blocco breve).
 
+### Esito dell'analisi del superamento (2026-11-16)
+
+**Blocco 1 (10+0,1, tutte le mosse, nessun filtro sull'orologio)**:
+300 partite, entrambi i motori con mosse in tutte le 300.
+
+| motore | mosse | frac >50ms | frac >100ms | p99 | massimo |
+|---|---|---|---|---|---|
+| pacchetto | 22.451 | 3,12% | 0,73% | 90,0ms | 499,6ms |
+| riferimento | 22.451 | 3,11% | 0,65% | 87,6ms | 799,6ms |
+
+Bootstrap a cluster per partita (n=300, 10.000 ricampionamenti, seed
+20261116): IC95% della differenza frac>50ms (pacchetto−riferimento) =
+**[−0,26%, +0,32%]** (include 0).
+
+Per la regola: l'IC95% include 0, **ma il 99° percentile è più alto
+nel pacchetto (90,0ms) che nel riferimento (87,6ms)**, una differenza
+di 2,4ms. La regola pre-registrata richiede ENTRAMBE le condizioni per
+scrivere "non sostenuto"; qui la seconda non è soddisfatta. **Si
+riporta senza ulteriori test, come richiesto dalla regola**: IC95%
+della frazione centrata su 0, ma p99 leggermente più alto nel
+pacchetto (90,0 vs 87,6ms, +2,4ms); il massimo assoluto va nella
+direzione opposta (pacchetto 499,6ms, riferimento 799,6ms — il
+riferimento ha il singolo superamento più grande registrato in questo
+blocco). Nessuna interpretazione di questi numeri oltre quanto
+riportato qui.
+
+**Blocco 2 (1+0,01, solo mosse con orologio ricostruito <1s)**: 200
+partite, entrambi i motori con mosse in tutte le 200.
+
+| motore | mosse | frac >50ms | frac >100ms | p99 | massimo |
+|---|---|---|---|---|---|
+| pacchetto | 14.805 | 0,04% | 0,01% | 10,0ms | 101,7ms |
+| riferimento | 14.812 | 0,01% | 0,00% | 10,0ms | 65,2ms |
+
+Bootstrap a cluster per partita (n=200, 10.000 ricampionamenti, seed
+20261123): IC95% della differenza frac>50ms (pacchetto−riferimento) =
+**[−0,01%, +0,08%]** (include 0).
+
+Per la regola: IC95% include 0 **e** il 99° percentile è identico
+(10,0ms per entrambi, non più alto nel pacchetto) → **sospetto
+meccanico NON SOSTENUTO** per il blocco a controllo breve.
+
 ---
 
 ## Esito
