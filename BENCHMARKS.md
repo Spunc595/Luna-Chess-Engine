@@ -1321,3 +1321,51 @@ to ship**: the non-regression gate (Tests 1/2) is passed, and Test 0 stands as t
 (+48.6 +/- 9.2, Threads=1, 10+0.1 -- see its own entry above for the artifact checks and the Elo-scale warning on
 the `UHO_4060_v4.epd` book). Test 2's slightly lower point estimate and wider CI (longer time control, fewer
 games, both reducing the sample's resolving power) are consistent with the other two, not a contradiction.
+
+
+## v4.2.1-prep: two non-functional changes, speed at node-identical search (2026-11-16)
+
+Two changes from `docs/experiments/05-pacchetto-velocita.md`, taken alone: (i) a hardware prefetch of the child's
+TT bucket in `esegui_mossa` (issued once the move's hash is final, overlapping its latency with the NNUE
+accumulator update that follows), and (iii) a generator producing only captures and promotions for `quiescence`,
+instead of generating all moves and filtering. Both are non-functional: node counts are identical to the
+reference on every gate run (bench depth 18, 1 thread: 590,820 / 980,165; 100 positions depth 14, no mismatch;
+the capture/promotion generator's output set and order verified equal to the old filter on 5,100 positions, seed
+20261116 -- see `docs/experiments/05-proposta-i-iii.md`).
+
+**A third change from the same experiment, a stop-guard in `quiescence` (ii), is deliberately NOT included here.**
+Its own stability check (two local match blocks, 10+0.1 and 1+0.01) found no crash and no illegal move, but the
+pre-registered time-loss criterion was itself found to be mis-specified after the fact (the reference binary
+also loses on time on that machine) and the follow-up per-move overshoot analysis left one block's result simply
+"to be reported, not resolved" (a marginal p99 difference with no statistical backing, see the experiment's own
+note on why that specific comparison was mal posto). (ii) stays a separate, open experiment on
+`exp/05-pacchetto-velocita`, to be redesigned, and is not part of this release candidate.
+
+**Speed, measured on Oracle (aarch64, Ampere Neoverse-N1), one thread, Hash 64MB of the bench harness -- NOT
+Threads=2/Hash=512MB as configured on the live bot**, protocol of `docs/METHOD.md` §10.1 (Latin-square rotation,
+precision requirement on the noise floor):
+
+| change | G (speed ratio, >1 = faster) | gain |
+|---|---|---|
+| (i) prefetch alone | 1.0374 | **+3.7%** |
+| (iii) targeted generator alone | 1.0063 | **+0.6%** |
+
+These are the two ablation measurements from the experiment's own Oracle session, each against the same
+reference build, each meeting the pre-registered precision requirement on its own. **The combined effect of (i)
+together with (iii) has not been measured as a combination**: 1.0374 x 1.0063 = 1.0458 is an arithmetic product
+of two separately-measured ratios, not a speed figure measured on a binary containing both changes at once --
+the package containing all three changes (including the now-excluded guard (ii)) WAS measured directly and gave
+G=1.0436, but that number is for a different binary (with (ii)) and is not substituted for a direct (i)+(iii)
+measurement, which does not exist yet.
+
+**Limits, explicit**:
+- Measured at one thread, Hash=64MB -- not at Threads=2/Hash=512MB, the bot's production configuration. The
+  effect at the bot's actual settings is not measured.
+- **No playing-strength gain is measured or claimed.** These are node-identical speed numbers (same search, same
+  moves, same result, less wall-clock time); no SPRT has been run on this combination. Faster search at a fixed
+  time control may or may not translate into Elo, and by how much, is not addressed here.
+- The speed figures are aarch64-only (Oracle); the x86-64 side of this candidate was checked for stability
+  (crash/illegal-move counts) and for compilation/tests, not for speed -- no x86-64 speed claim is made either.
+- `cargo check --target aarch64-unknown-linux-gnu` passing is a compilation check, not a run; no aarch64 binary
+  from this exact (i)+(iii)-only tree has been executed yet (see the binary-preparation section below for what
+  has and has not been built/run).
