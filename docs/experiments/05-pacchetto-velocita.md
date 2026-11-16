@@ -1069,6 +1069,22 @@ riferimento ha il singolo superamento più grande registrato in questo
 blocco). Nessuna interpretazione di questi numeri oltre quanto
 riportato qui.
 
+**Nota (richiesta da Daniele)**: il criterio sul p99 era un confronto
+puntuale, senza incertezza, su una quantità i cui ingressi (il tempo
+speso riportato nel commento PGN) sono arrotondati a risoluzione
+dell'ordine di ±50ms per mossa (vedi la validazione preliminare sopra:
+differenza media per mossa fino a ~27ms su base di partita). Un
+confronto punto-contro-punto senza intervallo non distingue una vera
+differenza da rumore di arrotondamento a questa scala — è un errore
+del protocollo, non del risultato: il risultato resta registrato
+com'è ("da riportare"), non viene riclassificato.
+
+**Esplorativo, SOLO come aggiunta, non cambia l'esito registrato
+sopra**: IC95% bootstrap a cluster per partita (n=300, 10.000
+ricampionamenti, seed **20261130**) della differenza di p99
+(pacchetto−riferimento) nel blocco 10+0,1: **[−3,20ms, +8,00ms]**
+(include 0).
+
 **Blocco 2 (1+0,01, solo mosse con orologio ricostruito <1s)**: 200
 partite, entrambi i motori con mosse in tutte le 200.
 

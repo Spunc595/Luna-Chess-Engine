@@ -133,3 +133,38 @@ if __name__ == "__main__":
                  10.0, 0.1, 0.05, None, 20261116)
     report_block("blocco 2 (1+0.01, mosse con orologio<1s)", "block2_1p001/match.pgn",
                  1.0, 0.01, 0.05, 1.0, 20261123)
+
+
+def p99_of(values):
+    if not values:
+        return None
+    s = sorted(values)
+    return s[int(0.99 * len(s)) - 1]
+
+
+def bootstrap_p99_diff(per_game, engine_a, engine_b, n_boot, seed):
+    rng = random.Random(seed)
+    n = len(per_game)
+    diffs = []
+    for _ in range(n_boot):
+        sample = [per_game[rng.randrange(n)] for _ in range(n)]
+        a_vals = []
+        b_vals = []
+        for g in sample:
+            a_vals.extend(g.get(engine_a, []))
+            b_vals.extend(g.get(engine_b, []))
+        pa = p99_of(a_vals)
+        pb = p99_of(b_vals)
+        if pa is None or pb is None:
+            continue
+        diffs.append(pa - pb)
+    diffs.sort()
+    lo = diffs[int(0.025 * len(diffs))]
+    hi = diffs[int(0.975 * len(diffs)) - 1]
+    return lo, hi, len(diffs)
+
+
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "--p99-boot-block1":
+    per_game = load_block("block1_10p01/match.pgn", 10.0, 0.1, 0.05, None)
+    lo, hi, n_eff = bootstrap_p99_diff(per_game, "pacchetto", "riferimento", 10000, 20261130)
+    print(f"ESPLORATIVO -- IC95% bootstrap (n={n_eff}, seed=20261130) differenza p99 (pacchetto-riferimento), blocco 10+0.1: [{lo*1000:.2f}ms, {hi*1000:.2f}ms]")
