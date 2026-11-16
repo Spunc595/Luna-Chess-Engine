@@ -696,6 +696,31 @@ Daniele (90 minuti totali) -- e la regola di Daniele impone di
 dirglielo PRIMA di eseguirle. Bot riavviato **07:30:33Z** (fermo
 totale: 06:39:25Z -> 07:30:33Z, **~51 minuti**, entro i 90).
 
+## Limiti espliciti dell'esito "ACCETTATO" (richiesti da Daniele, 2026-11-16)
+
+1. **La misura è a 1 thread, Hash 64MB (parametri del bench/della
+   misura di velocità, docs/METHOD.md), NON Threads=2/Hash=512MB come
+   configurato sul bot in produzione.** "ACCETTATO per regola" qui
+   significa: velocità a nodi identici su aarch64, un thread, con
+   quei parametri -- non è stato misurato, in questo esperimento,
+   l'effetto delle tre modifiche a Threads=2/Hash=512 (la
+   configurazione reale del bot).
+2. **La guardia di stop (modifica (ii)) è verificata dal suo test
+   unitario dedicato (`nessun_tt_store_dopo_uno_stop_nella_catena_di_catture`),
+   NON dall'identità dei nodi.** Il gate a nodi identici (bench +
+   100 posizioni, nessun limite di tempo/nodi) non esercita mai
+   `info.stopped`, quindi non può né confermare né confutare la
+   correttezza di quella guardia -- per quello serve il test dedicato,
+   non il gate di velocità.
+3. **Lo script di misura (`measure_speed_fase3.py`) è stato
+   modificato per funzionare su Linux** (il pin dei processi ai core
+   usava solo `ctypes.windll`, specifico di Windows): sha256 prima
+   `0196be1feaa478d202350a66d27db05e9da2bf2ce36f33652270e1c4fb2e36d8`,
+   dopo `6e85e98a579d0faf97d88e4a43fdfd6a4bc10a7e094965fced68d064eda76a7f`
+   (commit `1cf4363`). Stesso effetto sul ramo Windows (invariato),
+   stesso metodo statistico -- correzione di portabilità, non del
+   metodo.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
