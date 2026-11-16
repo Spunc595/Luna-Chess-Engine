@@ -858,6 +858,108 @@ né di forza):
 Nessuna interpretazione oltre questi numeri e la regola
 pre-registrata.
 
+**Nota (richiesta da Daniele dopo il risultato)**: il criterio 3
+("zero perdite a tempo del pacchetto oltre quelle del riferimento")
+era mal posto, perché il riferimento stesso perde a tempo su questa
+macchina (4 perdite nel blocco 10+0,1): un confronto 2 contro 0 non
+distingue nemmeno fra tassi uguali. Resta registrato come FALLITO per
+la regola pre-registrata nel blocco 1+0,01, ma il criterio stesso non
+era adatto a distinguere rumore da un vero eccesso.
+
+## Diagnosi delle perdite a tempo (richiesta da Daniele, 2026-11-16, solo analisi, nessuna nuova partita)
+
+**1. Ricostruzione per singola partita** (orologio = base + k·incremento
+− Σ tempi spesi dai commenti PGN, stesso metodo di ricostruzione
+usato nell'esperimento 04; "orologio prima dell'ultima mossa
+osservata" = orologio ricostruito dopo quella mossa + il tempo speso
+su quella mossa stessa; "allocazione formula" = `min(t/25 + 0,8·inc,
+t−overhead)`, overhead = 50ms, il default — non impostato esplicitamente
+in nessuno dei due blocchi, quindi identico per i due motori):
+
+| partita | blocco | lato che perde | orologio prima dell'ultima mossa osservata | allocazione formula | tempo speso osservato |
+|---|---|---|---|---|---|
+| 10 | 10+0,1 | pacchetto (Nero) | 0,150s | 0,086s | 0,150s |
+| 14 | 10+0,1 | pacchetto (Nero) | 0,210s | 0,088s | 0,190s |
+| 11 | 10+0,1 | riferimento (Nero) | 0,190s | 0,088s | 0,130s |
+| 13 | 10+0,1 | riferimento (Nero) | 0,100s | 0,050s | 0,130s |
+| 15 | 10+0,1 | riferimento (Nero) | 0,240s | 0,090s | 0,160s |
+| 16 | 10+0,1 | riferimento (Bianco) | 0,055s | 0,005s | 0,089s |
+| 134 | 1+0,01 | pacchetto (Nero) | 0,087s | 0,011s | 0,037s |
+| 151 | 1+0,01 | pacchetto (Bianco) | 0,083s | 0,011s | 0,011s |
+
+In **tutte e 8 le partite**, l'orologio ricostruito prima dell'ultima
+mossa osservata è già sotto 0,25s (sudden death, nessun `movestogo`,
+incremento 0,1s/0,01s): nessuna perdita a tempo avviene con l'orologio
+ancora alto. L'orologio ricostruito DOPO l'ultima mossa osservata
+(cioè prima della mossa che ha causato il forfeit, non registrata in
+PGN perché non completata in tempo) è compreso fra circa −0,03s e
++0,18s in tutti gli 8 casi (i valori negativi sono rumore di
+arrotondamento dei commenti PGN, non un orologio realmente negativo):
+tutte le perdite sono coerenti con un vero esaurimento del tempo a
+fine orologio, non con un salto anomalo.
+
+**2. Load e concentrazione temporale**: la load della macchina NON è
+stata misurata durante i due blocchi (a differenza delle sessioni
+Oracle, qui non è stato campionato nessun indicatore di carico) — non
+so se antivirus, aggiornamenti o browser girassero in quel momento:
+**non misurato, non noto**. Dai timestamp PGN (`GameStartTime`),
+confermato invece:
+- Blocco 1 (300 partite, 11:33:10 → 12:54:09, ~81 minuti): le 6
+  perdite a tempo + l'unico pareggio per timeout cadono TUTTE fra
+  11:35:27 e 11:52:56, cioè nei primi ~18 minuti (primo quarto circa
+  delle partite per numero); zero eventi di tempo nei restanti
+  ~63 minuti (oltre 200 partite).
+- Blocco 2 (200 partite, 12:55:33 → 13:01:18, ~5 minuti 45s): le 2
+  perdite a tempo cadono a 12:59:27 e 12:59:57, a circa il 68-77%
+  della durata del blocco, a 30 secondi l'una dall'altra.
+- In entrambi i blocchi gli eventi di tempo sono concentrati in
+  finestre brevi, non distribuiti uniformemente — compatibile con un
+  fattore transitorio di carico macchina, ma questo è una semplice
+  osservazione sui timestamp, NON una misura di carico: la causa resta
+  non nota.
+
+**3. Impostazioni cutechess**: sì, identiche per i due motori in
+entrambi i blocchi. `option.Threads=1 option.Hash=64` passati
+esplicitamente e identici per `pacchetto` e `riferimento`; `Move
+Overhead` non impostato in nessuno dei due casi, quindi entrambi sul
+default dichiarato dal motore (50ms, confermato dall'handshake UCI);
+nessuna affinità/pin di core impostata da cutechess-cli per nessuno
+dei due processi (il pin a core è usato solo in
+`measure_speed_fase3.py`, non in questi lanci); concurrency=2 per
+l'intero torneo (si applica allo stesso modo a entrambi i motori,
+non è un parametro per-motore); nessun `-timemargin` impostato (va al
+default di cutechess-cli, 0, identico per i due lati).
+
+**4. Proposta di test a tasso, SOLO per il controllo breve (PREPARATA,
+NON eseguita)**:
+- Confronto: `pacchetto` vs `riferimento` (stesso book, stesse
+  condizioni del blocco 2 qui eseguito: tc=1+0,01, Threads=1, Hash=64,
+  Move Overhead default). Eventuale confronto aggiuntivo
+  `solo-(ii)` (branch isolato `exp/05-ablazione-ii`) vs `riferimento`,
+  per isolare se l'eccesso osservato è legato proprio alla guardia
+  di stop o al pacchetto nel suo insieme — NON esegubile senza una
+  nuova build nativa aggiornata di quel branch, non fatta qui.
+- Criterio di decisione: test esatto di Fisher, **monolaterale**
+  (H1: tasso di perdita a tempo del motore in prova > tasso del
+  riferimento), su una tabella 2×2 (perdita a tempo sì/no × motore),
+  soglia pre-registrata α=0,05. Se p<0,05: NON accettare per questo
+  criterio, fermarsi e riportare (nessuna decisione ulteriore senza
+  rivedere il codice). Se p≥0,05: nessuna evidenza di un tasso
+  maggiore a questa dimensione campionaria; la differenza osservata,
+  se presente, si tratta come compatibile col rumore.
+- Dimensione campionaria (approssimazione normale alla binomiale,
+  standard per il dimensionamento, il test applicato resta quello
+  esatto di Fisher): per distinguere un tasso dello 0,5% da uno dello
+  0,1% (esempio di Daniele), monolaterale α=0,05:
+  - potenza 80%: **~2.308 partite per lato (~4.617 totali)**
+  - potenza 90%: **~3.198 partite per lato (~6.395 totali)**
+- Fattibilità in tempo: nel blocco 2 appena eseguito, 200 partite a
+  concurrency 2 hanno richiesto 344s di orologio reale (≈0,58
+  partite/secondo). Estrapolando allo stesso ritmo: ~4.617 partite
+  ≈ **2,2 ore**; ~6.395 partite ≈ **3,1 ore**. Entrambe fattibili in
+  una sessione, sulla stessa macchina locale, senza toccare Oracle o
+  il bot.
+
 ---
 
 ## Esito
