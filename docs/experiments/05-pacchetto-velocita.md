@@ -825,6 +825,39 @@ interpretazione del punteggio in questo test.
 run si ferma immediatamente, PGN e comando esatto vengono riportati a
 Daniele senza proseguire con il resto del blocco.
 
+## Esito della verifica di stabilità (2026-11-16)
+
+Eseguita su laptop locale (x86-64), bot non toccato. Binari: pacchetto
+sha256 `fea9a7b3316473072bae836f037deb4b92c90f8a93382de5cffa7cf5448c7ee1`,
+riferimento v4.2.0 sha256 `a1d967580285678eed4f97316f363f49316b6079da981d43b218bbeb279b2e37`
+(entrambi registrati prima di qualunque partita). Book
+`UHO_4060_v4.epd`, sha256 `3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca`
+(verificato identico alle copie usate per gli esperimenti 04/05 su
+Oracle). Threads=1, Hash=64 per entrambi i binari, concurrency=2.
+
+| blocco | tc | partite | crash | mosse illegali | perdite a tempo pacchetto | perdite a tempo riferimento | criterio 3 |
+|---|---|---|---|---|---|---|---|
+| 1 | 10+0,1 | 300 | 0 | 0 | 2 | 4 | soddisfatto (2 ≤ 4) |
+| 2 | 1+0,01 | 200 | 0 | 0 | 2 | 0 | **NON soddisfatto (2 > 0)** |
+
+Nessuna run è stata interrotta: in nessuno dei due blocchi è comparso
+un crash o una mossa illegale (unico motivo di stop immediato
+pre-registrato). Il criterio 3 (perdite a tempo del pacchetto non in
+eccesso rispetto al riferimento) è soddisfatto nel blocco 1 e **non
+soddisfatto nel blocco 2**: il pacchetto ha perso 2 volte per tempo
+contro 0 volte del riferimento, nel blocco a controllo molto breve
+(1+0,01).
+
+Punteggio, riportato solo come informazione (non criterio di decisione
+né di forza):
+- Blocco 1 (300 partite): pacchetto 83 - 71 - 146 (W-L-D),
+  differenza Elo 13,9 ± 28,2, LOS 83,3%, DrawRatio 48,7%.
+- Blocco 2 (200 partite): pacchetto 70 - 64 - 66 (W-L-D),
+  differenza Elo 10,4 ± 39,5, LOS 69,8%, DrawRatio 33,0%.
+
+Nessuna interpretazione oltre questi numeri e la regola
+pre-registrata.
+
 ---
 
 ## Esito
