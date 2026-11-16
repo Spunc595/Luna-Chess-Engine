@@ -619,6 +619,37 @@ procedere (più giri, una macchina dedicata, allargare la soglia di
 precisione pre-registrata con una nuova pre-registrazione separata)
 spetta esplicitamente a Daniele, non viene presa qui.
 
+## Esecuzione dell'emenda su Oracle (2026-11-16)
+
+Pre-controlli (sola lettura, PRIMA di fermare il bot): `systemctl
+is-enabled luna-bot` = `enabled`; connessione SSH con
+`StrictHostKeyChecking=yes` a `84.8.254.146` pulita (nessun avviso);
+`hostname` = `luna-server`; `nproc` = 4; bot `active` prima del fermo.
+
+**Bot fermato**: 06:39:25Z, load prima = `0.71, 1.08, 0.91`. Nessun
+processo residuo verificato.
+
+**Build native aarch64** (6 binari, da `git archive` di ciascun
+commit, trasferiti via `scp`, `cargo build --release` nativa su
+Oracle -- NON cross-compilate): tutte compilate senza errori
+(19-24s l'una). sha256 registrati PRIMA di qualunque dato:
+
+| build | commit | sha256 |
+|---|---|---|
+| riferimento | `origin/main` 80b1648 | `651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436` |
+| copia | (byte-identica al riferimento) | `651cf1a716c52b38010d0cf07d859f24e4b194574015f7f2d53a7bfd1231a436` |
+| pacchetto | `exp/05-pacchetto-velocita` f05dc2e/99a6065 | `475f5f4d733af274e0bbaf83acca61947aec5535b749a5763caf34f2cd5a6d15` |
+| ablazione (i) | `exp/05-ablazione-i` 2da21d3 | `9806193c649d3da40c8d658abc08637dd5bab7c37b767555422d947ce563b820` |
+| ablazione (ii) | `exp/05-ablazione-ii` a74c9dc | `deeba93505302590557c3492e52de545981d01e14b47354c5b021e8faeea311a` |
+| ablazione (iii) | `exp/05-ablazione-iii` 0161ea3 | `30fa0e18ff7bec3a41cca87ccf4e6c65ef2164857bddc3c8ed71b34c95c90af5` |
+
+Nota: il sha256 del riferimento qui (`651cf1a7...`) coincide con
+quello già registrato per la build di riferimento usata
+nell'Esperimento 04 -- stessa architettura (aarch64), stesso commit
+(`origin/main` 80b1648), stesso identico binario: coerente, non un
+errore (diverso, per costruzione, dal sha256 della build x86-64 dello
+stesso commit usata in Fase 2 sul PC, `2ba13ca3...`).
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
