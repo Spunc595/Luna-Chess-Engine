@@ -774,6 +774,57 @@ nodi identici, non forza; non si scrive "guadagno in partita".
 
 Da riempire dopo il commit di questo file: vedi report in chat.
 
+## Verifica di stabilità della guardia di stop (ii), locale x86-64 (PRE-REGISTRATO, 2026-11-16, prima di qualunque partita)
+
+Richiesta da Daniele dopo il risultato delle ablazioni. Macchina:
+laptop locale (NON Oracle, il bot non viene toccato). Scopo: stressare
+gli stop frequenti di `quiescence` (modifica (ii)) con un controllo di
+tempo molto breve, dove `info.stopped` si attiva molto più spesso che
+a profondità fissa.
+
+**Binari (hash da registrare qui prima di qualunque partita, non dopo):**
+- pacchetto (x86-64, stesso commit del pacchetto accettato su Oracle,
+  build nativa locale): sha256 da registrare al momento della build.
+- riferimento v4.2.0 (tag `v4.2.0`, build nativa locale, stesso
+  profilo `release`): sha256 da registrare al momento della build.
+
+**Condizioni:**
+- cutechess-cli (`C:/Users/danie/Desktop/TEST/cutechess-cli.exe`),
+  book `UHO_4060_v4.epd`, sha256 `3f499996ff0b674a04f85f2634811d102dd53b5115841e8f11d18e1f550ba2ca`
+  (verificato identico alle copie usate per gli esperimenti 04/05 su
+  Oracle: `lavoro/safety_match/UHO_4060_v4.epd` e
+  `lavoro/safety_match_42/UHO_4060_v4.epd`, stesso hash).
+- Threads=1, Hash=64 (entrambi i binari).
+- Due blocchi: **almeno 300 partite a 10+0,1** e **almeno 200 partite
+  a 1+0,01** (controllo molto breve, per stressare gli stop frequenti).
+- Macchina il più quieta possibile durante l'esecuzione. Il requisito
+  di precisione (±1%) di `docs/METHOD.md` §10.1 NON si applica a
+  questo test: non è una misura di velocità, è un test di
+  stabilità/correttezza.
+
+**Criteri pre-registrati (nessun altro criterio verrà introdotto dopo
+aver visto i dati):**
+1. **Zero crash** del binario del pacchetto (nessuna terminazione
+   anomala del processo motore, in nessuna delle partite dei due
+   blocchi).
+2. **Zero mosse illegali** giocate dal binario del pacchetto (rilevate
+   da cutechess-cli come "Illegal move" / partita terminata per questo
+   motivo).
+3. **Zero perdite a tempo del pacchetto IN ECCESSO rispetto al
+   binario di riferimento**: si confrontano i conteggi delle perdite a
+   tempo di ciascun binario nello stesso blocco (stesso numero di
+   partite per lato per via dell'alternanza colori di cutechess); il
+   pacchetto non deve avere un conteggio di perdite a tempo superiore
+   al riferimento, in nessuno dei due blocchi.
+
+**Il punteggio (W/D/L, Elo) viene riportato solo come informazione.
+NON è un criterio di decisione né una misura di forza** -- nessuna
+interpretazione del punteggio in questo test.
+
+**Se compare anche un solo crash o una sola mossa illegale**: la
+run si ferma immediatamente, PGN e comando esatto vengono riportati a
+Daniele senza proseguire con il resto del blocco.
+
 ---
 
 ## Esito
