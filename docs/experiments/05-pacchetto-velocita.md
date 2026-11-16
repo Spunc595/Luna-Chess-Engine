@@ -747,6 +747,29 @@ da rimisurare.
 confronto con G del pacchetto misurato direttamente = **1,0436**.
 Nessuna interpretazione oltre questo confronto numerico.
 
+### Esito per la regola emendata (2026-11-16)
+
+In termini percentuali: (i) +3,7%, (ii) +0,18%, (iii) +0,6%. Per la
+regola emendata (commit `02e6bce`, "misurare ciascuna delle tre
+modifiche separatamente"), tutte e tre le ablazioni soddisfano il
+requisito di precisione e nessuna presenta un limite inferiore IC95%
+≤ 1,000: tutte e tre passano.
+
+La differenza fra il prodotto delle tre G singole (1,0458) e la G del
+pacchetto misurata direttamente (1,0436) **non è spiegata**: gli IC95%
+qui riportati misurano solo il rumore interno a ciascuna sessione di
+misura, non la deriva fra sessioni diverse (il pacchetto è stato
+misurato in una sessione, le tre ablazioni in un'altra, stesso giorno,
+stessa macchina). La differenza osservata è coerente con quella deriva
+attesa fra sessioni. **Nessuna interpretazione di interazione** fra le
+tre modifiche viene tratta da questo confronto -- né a favore né
+contro.
+
+**Limiti invariati**: un thread, Hash 64MB (non la configurazione del
+bot in produzione), solo aarch64 (nessuna transferibilità a x86-64
+dichiarata da questa misura). Questi numeri descrivono velocità a
+nodi identici, non forza; non si scrive "guadagno in partita".
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
