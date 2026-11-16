@@ -52,6 +52,7 @@ import csv
 import ctypes
 import hashlib
 import re
+import os
 import subprocess
 import sys
 import time
@@ -62,6 +63,15 @@ PROCESS_QUERY_INFORMATION = 0x0400
 
 
 def pin_to_core(pid: int, core: int) -> None:
+    # CORREZIONE DI PORTABILITA' (2026-11-16, Esperimento 05, misura su
+    # Oracle aarch64/Linux): `ctypes.windll` esiste solo su Windows.
+    # Stesso EFFETTO (pin del processo a un core), non un cambiamento
+    # del metodo statistico: su Linux si usa `os.sched_setaffinity`,
+    # su Windows resta identico a prima (nessuna modifica al ramo
+    # Windows).
+    if hasattr(os, "sched_setaffinity"):
+        os.sched_setaffinity(pid, {core})
+        return
     mask = 1 << core
     handle = ctypes.windll.kernel32.OpenProcess(
         PROCESS_SET_INFORMATION | PROCESS_QUERY_INFORMATION, False, pid
