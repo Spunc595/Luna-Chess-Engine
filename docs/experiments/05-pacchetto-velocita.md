@@ -721,6 +721,32 @@ totale: 06:39:25Z -> 07:30:33Z, **~51 minuti**, entro i 90).
    stesso metodo statistico -- correzione di portabilità, non del
    metodo.
 
+## Ablazioni (2026-11-16, blocco unico su Oracle)
+
+Pre-controlli positivi (host key pulita, `hostname`=`luna-server`,
+`nproc`=4, `luna-bot` enabled/active). Binari (6, già costruiti e con
+sha256 già registrati sopra) riverificati identici prima del fermo.
+
+**Bot fermato: 07:53:05Z** (load prima: `0.13, 0.09, 0.27`). Tre
+misure eseguite in sequenza (stesso protocollo del pacchetto: 5 giri,
+100 posizioni, depth 14, Threads 1, Hash 64), nodi identici confermati
+(0 mismatch) per tutte e tre. **Bot riavviato: 08:57:21Z** (**~64
+minuti** di fermo totale, entro il tetto di 100), confermato online su
+Lichess e `systemctl is-active`. Load dopo: `0.91, 1.05, 1.07`.
+
+| ablazione | CSV sha256 | G | IC95% | semi-larghezza floor (copia) |
+|---|---|---|---|---|
+| (i) solo prefetch | `119c2002d414bdb9cd181cf9b3d1e598f406f242b8d7234ad12d4cc062666ffe` | 1,0374 | [1,0366; 1,0382] | 0,06% |
+| (ii) solo guardia stop | `372ed130602e73c13a44e4e4402ba9ba858de8920fedae5e1484e87e09f16f8d` | 1,0018 | [1,0012; 1,0023] | 0,045% |
+| (iii) solo generatore mirato | `c71575962a4484989bb16869b3dd008e5020794a2abbd5a82a826fb50fd1799e` | 1,0063 | [1,0056; 1,0071] | 0,065% |
+
+Requisito di precisione (≤1%) soddisfatto per tutte e tre -- nessuna
+da rimisurare.
+
+**Prodotto dei tre G**: 1,0374 × 1,0018 × 1,0063 = **1,0458**, a
+confronto con G del pacchetto misurato direttamente = **1,0436**.
+Nessuna interpretazione oltre questo confronto numerico.
+
 ## Hash del commit del protocollo
 
 Da riempire dopo il commit di questo file: vedi report in chat.
