@@ -960,6 +960,89 @@ NON eseguita)**:
   una sessione, sulla stessa macchina locale, senza toccare Oracle o
   il bot.
 
+## Analisi del superamento per mossa (PRE-REGISTRATA, 2026-11-16, prima di calcolare)
+
+Richiesta da Daniele dopo la diagnosi delle perdite a tempo: gli
+eventi erano raggruppati nel tempo (non indipendenti), quindi il test
+di Fisher sulle bandiere di forfeit non è valido così com'è e NON
+viene eseguito. Si analizza invece, dai dati PGN già raccolti (nessuna
+nuova partita), il superamento per singola mossa rispetto
+all'allocazione della formula.
+
+### Validazione preliminare della ricostruzione dell'orologio
+
+Prima di calcolare qualunque statistica: verifica aggregata (su
+TUTTE le 300 partite del blocco 1 e le 200 del blocco 2, non solo le
+8 con forfeit) confrontando `GameDuration` (intestazione PGN,
+risoluzione al secondo) con la somma dei tempi riportati dai due
+lati:
+- Blocco 1 (300 partite, 44.902 mosse): differenza
+  |GameDuration − Σtempi| mediana 0,260s, massima 1,213s, 99°
+  percentile 0,820s; differenza media PER MOSSA (|diff|/n_mosse per
+  partita) mediana 0,0017s, massima 0,0273s.
+- Blocco 2 (200 partite, 30.017 mosse): mediana 0,258s, massima
+  0,861s, 99° percentile 0,813s; per mossa: mediana 0,0014s, massima
+  0,0148s.
+
+Tutti i valori "per mossa" restano ben sotto gli 0,05s/mossa
+dichiarati, e le differenze aggregate sono coerenti con la sola
+risoluzione al secondo di `GameDuration` (nessuna evidenza di deriva
+sistematica oltre quella granularità). **Limite dichiarato**: questo
+è un controllo AGGREGATO per partita (media implicita su tutte le
+mosse di quella partita), non una verifica indipendente del tempo
+speso per OGNI singola mossa isolata — non è disponibile in questa
+sessione un log con marche temporali per mossa (nessun `-debug`
+attivo durante i lanci), quindi il commento PGN (tempo auto-riportato
+dal motore) resta l'unica fonte. Non si puo' quindi garantire che
+OGNI mossa individuale rispetti ±0,05s; si procede perché non c'è
+evidenza contraria a questa granularità, e lo si dichiara esplicitamente
+invece di darlo per assunto.
+
+### Definizione
+
+Per ogni mossa con commento di tempo nel PGN: `superamento = tempo
+speso (commento PGN) − tempo assegnato dalla formula`, dove "tempo
+assegnato" = `min(t_ricostruito/25 + 0,8·inc, t_ricostruito − 0,05)`
+(stessa formula di `compute_clock_movetime`, overhead=50ms, il
+default usato in entrambi i blocchi), e `t_ricostruito` è l'orologio
+PRIMA di quella mossa per quel lato (base + k·inc − Σ tempi delle
+mosse precedenti dello stesso lato, stesso metodo della diagnosi
+sopra).
+
+**Filtri**:
+- Blocco 1+0,01: solo mosse con `t_ricostruito < 1s`.
+- Blocco 10+0,1: TUTTE le mosse (nessun filtro sull'orologio).
+
+**Esclusioni**: l'ultima mossa (non registrata, perché non completata
+in tempo) di ogni partita terminata per forfeit non entra in nessun
+conteggio (non osservabile dal PGN).
+
+### Statistiche
+
+Per ciascun motore (pacchetto, riferimento) × blocco: frazione di
+mosse con superamento > 50ms, frazione con superamento > 100ms, 99°
+percentile del superamento, massimo del superamento.
+
+### Confronto e regola di decisione
+
+Bootstrap a cluster per PARTITA (si ricampionano le partite con
+reinserimento, non le singole mosse, per rispettare la correlazione
+entro partita), 10.000 ricampionamenti. Semi distinti per blocco,
+dichiarati ora: **20261116** per il blocco 10+0,1, **20261123** per il
+blocco 1+0,01. IC95% (percentile 2,5%–97,5%) della differenza
+"frazione con superamento >50ms (pacchetto) − frazione con
+superamento >50ms (riferimento)", per ciascun blocco separatamente.
+
+**Regola**: se l'IC95% della differenza include 0 E il 99° percentile
+del superamento non è peggiore (più alto) nel pacchetto rispetto al
+riferimento → si scrive "sospetto meccanico NON SOSTENUTO" (mai
+"escluso"). Altrimenti: si riporta il risultato senza eseguire altri
+test.
+
+Si riportano sempre il numero di mosse e il numero di partite che
+entrano in ciascun conteggio (per blocco, per motore, e per il
+sottoinsieme filtrato nel blocco breve).
+
 ---
 
 ## Esito
