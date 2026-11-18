@@ -296,9 +296,12 @@ C1).
 
 ## Hash dei binari
 
-- Build di riferimento (`rif`): da registrare al momento della
-  compilazione, PRIMA di qualunque dato (Passo 2, sotto).
-- Build nuova (`nuova`): idem.
+- Build di riferimento (`rif`, compilata da `release/v4.2.1-prep`
+  commit `1ae8ccf`, condizione `> 500` ancora presente): sha256
+  `16b43cd80c117c39843090eb8757edc5c7eb098fcfd605e7dbadab8c3d516436`.
+- Build nuova (`nuova`, compilata da `exp/06-tempo-limite-morbido`
+  commit `94c82a2`, condizione rimossa): sha256
+  `367cf46ae418963814c8956254d852dbcbedba3bdd0589414abd1cadbc8fa0e6`.
 
 Entrambe dallo stesso identico albero (`exp/06-tempo-limite-morbido`),
 differendo SOLO per la riga dichiarata in "Cambiamento esatto" (`rif`
@@ -359,9 +362,8 @@ rischio di falso positivo cumulato andrebbe riconsiderato allora.
 
 ## Hash del commit del protocollo
 
-Da riempire dopo il commit di questo file (PRIMA di guardare qualunque
-risultato, inclusi i gate offline del Passo 2): vedi il messaggio di
-commit e `git rev-parse HEAD`.
+`1615143b2b2e176a833c383b32b86f988a599bab` (commit del solo protocollo,
+PRIMA di qualunque codice o gate del Passo 2).
 
 ## Disturbo
 
@@ -372,6 +374,27 @@ osservazione previste per l'aggiornamento v4.2.1 (osservazione già
 chiusa in anticipo da Daniele a 4/10 — vedi sopra) — in ogni caso
 successivo a quella decisione, non implicito in essa. Nessuna partita
 SPRT viene lanciata in questa fase di sola preparazione.
+
+---
+
+## Gate offline eseguiti (Passo 2, 2026-11-18) — NESSUN SPRT
+
+- Test unitario `soft_limit_di` (commit `94c82a2`): **PASS** —
+  50→30, 100→60, 500→300, 501→300, 1000→600 ms, esattamente come
+  dichiarato.
+- Bench nodi a profondità fissa (depth 18, Threads 1): **590.820 /
+  980.165**, identici su `rif` e `nuova` — come atteso, il soft limit
+  non entra in gioco senza un limite di tempo.
+- 100 posizioni a profondità 14: **0 mismatch** (nodi identici
+  rif/nuova su tutte le posizioni/giri misurati), confermando che
+  nessun'altra cosa è cambiata.
+- `cargo check --target aarch64-unknown-linux-gnu --release`: compila
+  senza errori (nessuna esecuzione, nessun accesso a Oracle).
+
+**Nessuna partita SPRT è stata giocata.** Questa sezione chiude il
+Passo 2 (preparazione); resta in attesa del "via" di Daniele su quale
+elo1 (3 o 5) e per fermare il bot su Oracle prima di qualunque dato
+SPRT.
 
 ---
 
