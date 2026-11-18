@@ -1,0 +1,26 @@
+# Esperimento 06 -- unit systemd REALE (scritta, NON installata/abilitata
+# da questa preparazione). Da installare in /etc/systemd/system/exp06-sprt.service
+# solo dopo il "via" esplicito di Daniele, con:
+#   sudo cp exp06-sprt.service.example /etc/systemd/system/exp06-sprt.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl start exp06-sprt.service
+#
+# Restart=on-failure: un crash VERO del driver (eccezione non gestita,
+# connessione SSH persa non conta perche' systemd non e' una shell) fa
+# ripartire il processo, che riprende dallo stato salvato (mai da zero).
+# Un'uscita 0 del driver significa "concluso regolarmente" e il driver
+# stesso disabilita questa unit, quindi non viene rilanciato inutilmente.
+[Unit]
+Description=Esperimento 06 -- SPRT limite morbido di tempo (fermo continuo)
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/exp06_sprt
+ExecStart=/usr/bin/python3 /home/ubuntu/exp06_sprt/scripts/exp06_driver.py /home/ubuntu/exp06_sprt/scripts/exp06_config.json
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

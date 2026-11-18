@@ -403,8 +403,115 @@ SPRT viene lanciata in questa fase di sola preparazione.
   senza errori (nessuna esecuzione, nessun accesso a Oracle).
 
 **Nessuna partita SPRT è stata giocata.** Questa sezione chiude il
-Passo 2 (preparazione); resta in attesa del "via" di Daniele su quale
-elo1 (3 o 5) e per fermare il bot su Oracle prima di qualunque dato
+Passo 2 (preparazione).
+
+## Esecuzione su Oracle: progetto, orchestrazione, prova a secco (2026-11-18)
+
+Decisioni di Daniele (2026-11-18, PRIMA di ogni dato): elo1=5, tetto
+20.000 partite, modalità **fermo continuo**. Script in `scripts/`:
+
+- `scripts/exp06_llr.py` — reimplementazione esatta di
+  `Sprt::status()` in `cutechess-cli` 1.5.1
+  (`projects/lib/src/sprt.cpp`, letto sul server): regolarizzazione
+  di Jeffreys (Dirichlet 0,5/0,5/0,5), BayesElo/drawElo stimati fuori
+  campione, LLR pesato su vittorie/pareggi/sconfitte, confini
+  `ln(beta/(1-alpha))`/`ln((1-beta)/alpha)`. Verificata contro i
+  numeri già pubblicati nel protocollo C1 (drawElo≈132,9 con lo
+  stesso campione pilota 64/64/73 — coincide).
+- `scripts/exp06_parse_block.py` — W/D/L di "nuova" da un PGN di
+  blocco, più rilevamento di terminazioni anomale (mossa illegale,
+  crash, stallo, disconnessione, abbandono — qualunque di queste è
+  condizione di stop) e conteggio perdite a tempo (informativo).
+- `scripts/exp06_driver.py` — orchestrazione: verifica "nessuna
+  partita in corso" (processo motore via `/proc`, più lo stato
+  online/playing dell'account Lichess) prima di fermare il bot;
+  esegue blocchi di `rounds_per_block` tornate con
+  `-openings ... order=sequential start=N policy=round` (N avanza
+  esattamente del numero di tornate consumate ad ogni blocco, MAI
+  ripetendo un'apertura — il libro UHO ha 241.670 posizioni,
+  ampiamente sufficienti per 10.000 tornate); calcola l'LLR
+  CUMULATIVO su tutti i blocchi con `exp06_llr.py` (l'opzione interna
+  `-sprt` di `cutechess-cli` NON viene usata come criterio reale,
+  perché è per-processo e si azzererebbe ad ogni blocco); salva lo
+  stato (JSON, scrittura atomica) dopo ogni blocco; su crash/mossa
+  illegale si ferma subito; a fine corsa (tetto, decisione LLR, o
+  anomalia) riavvia il bot, verifica `is-active` e lo stato Lichess,
+  e disabilita il proprio servizio.
+- `scripts/exp06_config.example.json` — configurazione (percorsi,
+  tc=10+0,1, Hash=64, Threads=1, concurrency=2, rounds_per_block=250,
+  cap_games=20000, elo0=0/elo1=5/alpha=beta=0,05) — da copiare come
+  `exp06_config.json` con i percorsi reali PRIMA del via.
+- `scripts/exp06-sprt.service.example` — unit systemd (`Type=simple`,
+  `Restart=on-failure`, `RestartSec=30`) — **scritta, NON installata
+  né abilitata**. Il "timer/avvio schedulato" richiesto è
+  l'indipendenza da una shell interattiva (sopravvive a una
+  disconnessione SSH), non una ricorrenza: la modalità è fermo
+  continuo, non a blocchi notturni.
+
+**Concurrency**: 2 (come C1), non propongo 3 — Oracle ha 4 vCPU; con
+concurrency=2 restano 2 vCPU libere per il sistema e per eventuali
+controlli di Daniele durante la corsa, a fronte di un guadagno di
+tempo totale che a 3 vs 2 sarebbe solo ~33% (vedi tabella ore sopra),
+non abbastanza da giustificare meno margine su una corsa di giorni.
+
+### Prova a secco (unità finta `fake-bot.service`, MAI toccato `luna-bot`)
+
+Eseguita su Oracle con un bot finto (`sleep infinity`) e un
+`cutechess-cli` finto (PGN sintetici, pareggi al 36,5% come nel
+pilota C1, un'anomalia iniettata di proposito in un blocco). **Tre
+bug reali trovati e corretti prima di qualunque uso vero**:
+
+1. Un bot attivo durante una ripresa veniva segnalato come anomalia
+   anche quando il bot non era MAI stato fermato con successo (un
+   tentativo precedente scaduto sull'attesa "nessuna partita in
+   corso" aveva già scritto lo stato) — causava un loop di riavvii
+   falliti. Corretto: l'anomalia scatta solo se lo stato dice
+   esplicitamente che il bot era stato fermato con successo
+   (`bot_stopped_at` impostato).
+2. Il controllo "processo motore in corso" lanciava `pgrep -f
+   '<pattern>'` via shell, e la shell invocante aveva il pattern
+   stesso nella propria riga di comando — auto-match. Corretto:
+   scansione diretta di `/proc` in Python, nessun subprocess con il
+   pattern come argomento.
+3. Lo stato veniva segnato `finished: true` PRIMA di confermare il
+   riavvio del bot: un crash del driver in quella finestra avrebbe
+   fatto sì che una ripresa successiva vedesse "già concluso" e non
+   riavviasse mai il bot. Corretto: `finished` diventa `true` solo
+   dopo il riavvio confermato; se il riavvio fallisce o il processo
+   muore prima, una ripresa salta il ciclo a blocchi (la decisione è
+   già salvata) e ritenta SOLO il riavvio.
+
+Dopo le correzioni, verificato con successo:
+- Corsa completa fino al tetto (60 partite finte): bot finto fermato,
+  6 blocchi eseguiti, LLR cumulativo ricalcolato ad ogni blocco,
+  tetto raggiunto, bot finto riavviato e confermato attivo, servizio
+  disabilitato, stato finale `finished:true`.
+- Ripresa dopo un arresto brusco (`SIGKILL`) a metà blocco (blocco 3,
+  nessuna decisione ancora presa): la ripresa riparte esattamente dal
+  blocco 3 (`start=16`), nessuna apertura ripetuta, nessuna partita
+  persa — confermato dal log.
+- Ripresa con decisione già presa ma riavvio del bot non confermato
+  (simulato a mano, bug 3 sopra): la ripresa salta il ciclo a
+  blocchi, riavvia subito il bot finto, lo confermo `is-active`, poi
+  segna `finished:true`.
+- Un'anomalia sintetica iniettata (disconnessione del motore "nuova")
+  ha fermato correttamente l'esecuzione, riavviato il bot finto,
+  senza proseguire oltre.
+
+**`luna-bot` reale non è mai stato toccato**: PID (`93921`) e sha256
+del binario in servizio
+(`4b4c28b67ff7d7d782fd92e40f4e322c3dfd1fef621682b95d3f3e8c80388e19`)
+riverificati identici prima, durante e dopo l'intera prova. Le due
+unità finte (`fake-bot.service`, `exp06-sprt-dryrun.service`) e la
+directory di scratch sul server sono state rimosse a fine prova.
+
+### Stato
+
+In attesa del "via" ESPLICITO di Daniele per installare/abilitare
+`exp06-sprt.service` (il vero avvio, dopo aver compilato
+`exp06_config.json` con i percorsi reali e i due binari già costruiti
+nel Passo 2) e fermare `luna-bot`. Nessuna partita SPRT reale è stata
+giocata.
 SPRT.
 
 ---
