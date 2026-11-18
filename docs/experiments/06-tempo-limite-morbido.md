@@ -257,7 +257,7 @@ esperimento specifico.
 | elo1 | E[N] | ore totali (seriale, 32,14s/partita) | ore con concurrency=2 | ore con concurrency=3 |
 |---|---|---|---|---|
 | **3** | ≈45.060 | ≈402 h (16,8 giorni) | ≈201 h (8,4 giorni) | ≈134 h (5,6 giorni) |
-| **5** | ≈16.270 | ≈145 h (6,0 giorni) | ≈73 h (3,0 giorni) | ≈48 h (2,0 giorni) |
+| **5** | ≈16.250 | ≈145 h (6,0 giorni) | ≈73 h (3,0 giorni) | ≈48 h (2,0 giorni) |
 
 **Non scelgo io fra le due**: Daniele decide elo1 PRIMA di qualunque
 dato, in base a questa tabella. Oracle ha 4 vCPU — concurrency=3
