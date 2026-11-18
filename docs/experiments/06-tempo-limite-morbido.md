@@ -505,13 +505,99 @@ riverificati identici prima, durante e dopo l'intera prova. Le due
 unità finte (`fake-bot.service`, `exp06-sprt-dryrun.service`) e la
 directory di scratch sul server sono state rimosse a fine prova.
 
+## Condizioni A-E richieste da Daniele prima del via (2026-11-18)
+
+**A. Binari aarch64 (non x86-64)**: gli hash del Passo 2
+(`16b43cd8...`/`367cf46a...`) erano x86-64 del laptop, segnalato da
+Daniele come proprio errore. Compilati su Oracle, in una directory
+nuova e separata (`~/exp06_build/`, mai usata prima, binario in
+servizio non toccato), da `git archive` dei commit `1ae8ccf`
+(`rif`, albero di `release/v4.2.1-prep`) e `fd0af90` (`nuova`, stesso
+sorgente del commit `94c82a2` del Passo 2 — nessuna riga di
+`search.rs` è cambiata da allora, solo documentazione). Hash
+dell'archivio verificati identici prima/dopo il trasferimento.
+
+| | x86-64 (Passo 2, laptop) | aarch64 (Oracle, questa verifica) |
+|---|---|---|
+| `rif` | `16b43cd80c117c39843090eb8757edc5c7eb098fcfd605e7dbadab8c3d516436` | `4b4c28b67ff7d7d782fd92e40f4e322c3dfd1fef621682b95d3f3e8c80388e19` |
+| `nuova` | `367cf46ae418963814c8956254d852dbcbedba3bdd0589414abd1cadbc8fa0e6` | `afedf120da267976faa7def6db232541ceebfcac2965b6f65825f0c61191588b` |
+
+Nota: l'hash aarch64 di `rif` coincide esattamente con quello già
+costruito per `release/v4.2.1-prep` nella preparazione precedente
+(stesso commit, stessa macchina, stesso toolchain) — build
+riproducibile su questa piattaforma, a differenza del caso Windows/PDB
+già documentato altrove.
+
+Gate rieseguiti su Oracle con questi binari aarch64:
+- Test unitario `soft_limit_di`: **PASS**.
+- Bench nodi depth 18/Threads 1: **590.820 / 980.165**, identici.
+- 100 posizioni depth 14: **0 mismatch**, 100/100. CSV sha256
+  `2f493be1a6da4be9a2619385597acbf61f992ff58392eeebb50cd1d45b03b46a`.
+
+**La corsa reale userà gli hash aarch64 sopra**, non quelli x86-64 del
+Passo 2 (che restano solo come verifica di nodi-identici sul laptop,
+non eseguibili su Oracle).
+
+**B. Resilienza a un riavvio di Oracle durante la misura**: con
+`luna-bot.service` "enabled" (come di default), un riavvio del server
+a metà esperimento lo avrebbe fatto ripartire da solo, in conflitto
+con il fermo deciso per la misura. Corretto: `stop_bot()` ora fa
+`systemctl stop` **e `systemctl disable`**; `restart_bot()` fa
+`systemctl enable` **e `systemctl start`**. Verificato (senza un vero
+riavvio, con un'unità finta usa-e-getta `fake-bot2.service`): dopo
+`stop_bot()`, `systemctl is-enabled` → `disabled` (il symlink in
+`multi-user.target.wants/` è rimosso: un riavvio reale NON farebbe
+ripartire il servizio); dopo `restart_bot()`, `is-active`/`is-enabled`
+→ `active`/`enabled` (stato normale ripristinato). Il comportamento
+risultante: se Oracle si riavvia a metà misura, `luna-bot` resta
+fermo (disabilitato) e NON riparte da solo; `exp06-sprt.service`
+(abilitato) riparte da solo al boot e riprende dallo stato salvato
+(verificato nella prova a secco precedente), senza mai vedere il bot
+"tornato attivo da solo" e quindi senza falsi allarmi.
+
+**C. Tetto di TEMPO massimo**: `max_duration_hours = 240` (10 giorni),
+proposto da me (non misurato, scelta di margine): la stima del tetto
+di 20.000 partite è ≈89h con concurrency=2 nella tabella sopra; 240h
+lascia ampio margine (≈2,7x) per un passo reale più lento del
+previsto su aarch64, senza lasciare la misura potenzialmente
+indefinita. Controllato ad ogni blocco (confronto con
+`bot_stopped_at`): al raggiungimento, stessa procedura di arresto e
+riavvio del tetto di partite (`decision = "TimeCapReached"`).
+
+**D. Comando di stato, sola lettura**: `scripts/exp06_status.py
+<config.json>` — legge `state.json` e, se presente, il PGN parziale
+del blocco in corso; non modifica nulla. Esempio di output (dati di
+prova, non dalla corsa reale):
+
+```
+=== Esperimento 06 -- stato (sola lettura) ===
+ora attuale (UTC):                  2026-11-18T12:40:42.208880+00:00
+ultimo aggiornamento stato:          2026-11-18T12:40:41.427565+00:00  (1s fa)
+concluso:                            False
+decisione:                           None
+anomalia:                            None
+blocco attuale:                      42
+partite giocate (blocchi completi):  5500  (tetto 20000)
+W/D/L di 'nuova':                    +1890 =1765 -1845
+perdite a tempo (informativo):       2
+LLR cumulativo:                      0.1147  (confini +/-2.9444) -> Continue
+bot fermato alle:                    2026-11-17T10:00:00+00:00  (da 26.7h)
+tetto di tempo:                      240h  (213.3h rimanenti)
+passo misurato:                      206.2 partite/ora
+stima fine (al tetto partite, salvo decisione LLR prima): 2026-11-21T11:00:44+00:00  (~70.3h da ora)
+```
+
+**E. SSH/host key**: connessione ripetuta con
+`-o StrictHostKeyChecking=yes -o BatchMode=yes`, accettata senza
+prompt (chiave già fidata). `known_hosts` ultima modifica
+**2026-10-09**, prima di questa sessione — non toccato.
+
 ### Stato
 
-In attesa del "via" ESPLICITO di Daniele per installare/abilitare
-`exp06-sprt.service` (il vero avvio, dopo aver compilato
-`exp06_config.json` con i percorsi reali e i due binari già costruiti
-nel Passo 2) e fermare `luna-bot`. Nessuna partita SPRT reale è stata
-giocata.
+Punti A-E tutti verdi. In attesa del via per installare
+`exp06-sprt.service`, verificare "nessuna partita in corso", fermare
+`luna-bot` e avviare la misura reale (elo1=5, tetto 20.000 o 240h,
+concurrency 2, Threads=1, Hash=64, binari aarch64 sopra).
 SPRT.
 
 ---

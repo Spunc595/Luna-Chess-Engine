@@ -10,6 +10,7 @@
   "concurrency": 2,
   "rounds_per_block": 250,
   "cap_games": 20000,
+  "max_duration_hours": 240,
   "elo0": 0,
   "elo1": 5,
   "alpha": 0.05,

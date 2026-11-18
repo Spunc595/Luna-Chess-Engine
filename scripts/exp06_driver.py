@@ -135,21 +135,30 @@ def wait_no_game_in_progress(cfg, max_wait_s):
 
 
 def stop_bot(cfg):
+    # systemctl DISABLE, non solo stop: luna-bot.service e' "enabled" di
+    # default, quindi un riavvio di Oracle durante la misura lo farebbe
+    # ripartire da solo a meta' esperimento se restasse "enabled" -- lo
+    # disabilitiamo qui e lo riabilitiamo in restart_bot(), cosi' un
+    # riavvio del server nel mezzo lascia il bot fermo (e questo driver,
+    # anche lui abilitato, riprende da solo dallo stato salvato non appena
+    # Oracle torna su, senza mai vedere il bot "tornato attivo da solo").
     if is_bot_active(cfg):
         log(f"fermo {cfg['bot_service']}...")
         sh(f"{cfg['sudo_prefix']} systemctl stop {cfg['bot_service']}")
+    sh(f"{cfg['sudo_prefix']} systemctl disable {cfg['bot_service']}")
     if is_bot_active(cfg):
         raise RuntimeError(f"{cfg['bot_service']} ancora active dopo systemctl stop")
-    log(f"{cfg['bot_service']} fermato (is-active != active confermato)")
+    log(f"{cfg['bot_service']} fermato e disabilitato (sopravvive a un riavvio di Oracle)")
 
 
 def restart_bot(cfg):
-    log(f"riavvio {cfg['bot_service']}...")
+    log(f"riabilito e riavvio {cfg['bot_service']}...")
+    sh(f"{cfg['sudo_prefix']} systemctl enable {cfg['bot_service']}")
     sh(f"{cfg['sudo_prefix']} systemctl start {cfg['bot_service']}")
     time.sleep(3)
     if not is_bot_active(cfg):
         raise RuntimeError(f"{cfg['bot_service']} non e' active dopo systemctl start")
-    log(f"{cfg['bot_service']} is-active=active confermato")
+    log(f"{cfg['bot_service']} is-active=active, is-enabled confermati")
     play = lichess_playing(cfg["lichess_username"])
     log(f"stato Lichess dopo il riavvio: {play!r} (None = API non raggiungibile, non un fallimento)")
 
@@ -255,6 +264,13 @@ def main():
     already_decided = state["decision"] is not None or state["anomaly"] is not None
 
     while not already_decided:
+        if state.get("bot_stopped_at"):
+            elapsed_h = ((datetime.datetime.now(datetime.timezone.utc) -
+                          datetime.datetime.fromisoformat(state["bot_stopped_at"])).total_seconds() / 3600.0)
+            if elapsed_h >= cfg["max_duration_hours"]:
+                log(f"tetto di TEMPO raggiunto: {elapsed_h:.1f}h >= {cfg['max_duration_hours']}h.")
+                state["decision"] = "TimeCapReached"
+                break
         if state["next_opening_start"] - 1 >= cap_rounds:
             log(f"tetto di {cfg['cap_games']} partite raggiunto.")
             state["decision"] = "CapReached"
