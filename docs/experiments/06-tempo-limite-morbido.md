@@ -418,6 +418,17 @@ Decisioni di Daniele (2026-11-18, PRIMA di ogni dato): elo1=5, tetto
   `ln(beta/(1-alpha))`/`ln((1-beta)/alpha)`. Verificata contro i
   numeri già pubblicati nel protocollo C1 (drawElo≈132,9 con lo
   stesso campione pilota 64/64/73 — coincide).
+
+  **Nota (correzione di Daniele, 2026-11-18)**: con 0 partite reali
+  l'LLR non è esattamente 0 (es. `-0,0002` osservato all'avvio della
+  corsa) — non per arrotondamento in doppia precisione (che sarebbe
+  dell'ordine di 1e-16), ma per effetto dei 1,5 pseudo-conteggi di
+  Jeffreys (0,5 per ciascuna classe vittoria/pareggio/sconfitta):
+  quel punteggio implicito (0,5) sta leggermente SOTTO il punto medio
+  fra H0 (`s0=0,5000`) ed H1 (`s1≈0,5072`), quindi
+  `LLR ≈ 1,5×(s1−s0)×(0,5−(s0+s1)/2)/Var ≈ -0,00023` — piccolo ma non
+  nullo, un artefatto della regolarizzazione a campione vuoto, non un
+  bug.
 - `scripts/exp06_parse_block.py` — W/D/L di "nuova" da un PGN di
   blocco, più rilevamento di terminazioni anomale (mossa illegale,
   crash, stallo, disconnessione, abbandono — qualunque di queste è
