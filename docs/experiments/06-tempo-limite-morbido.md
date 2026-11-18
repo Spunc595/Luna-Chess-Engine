@@ -264,21 +264,32 @@ dato, in base a questa tabella. Oracle ha 4 vCPU — concurrency=3
 lascia una CPU per il sistema/altri processi, concurrency=2 è lo
 stesso valore già usato in C1.
 
-## Limiti SPRT
+## Limiti SPRT (DECISO da Daniele, 2026-11-18, PRIMA di ogni dato)
 
 - elo0 = 0
-- elo1 = **da scegliere da Daniele: 3 oppure 5** (vedi tabella sopra)
+- elo1 = **5** (Daniele ha scelto l'alternativa più larga, non la più
+  stretta elo1=3 — riuso diretto della stessa finestra di C1)
 - alpha = 0.05 (default di progetto, `BENCHMARKS.md:827`)
 - beta = 0.05 (default di progetto, `BENCHMARKS.md:827`)
+- **tetto di partite: 20.000** (Daniele, 2026-11-18 — più alto della
+  stima del caso peggiore ≈16.250 con `d=0,365`, per una probabilità
+  ragionevole di risoluzione anche nel caso peggiore; stesso criterio
+  già usato per il tetto di C1, 16.000, ~1,2x la stima peggiore di
+  allora)
+- **modalità di esecuzione: fermo continuo** (Daniele, 2026-11-18 — il
+  bot Lichess resta fermo ininterrottamente dall'avvio dell'SPRT fino
+  al raggiungimento del tetto, a una decisione dell'LLR, o a
+  un'anomalia; NON "a blocchi notturni" — nessuna finestra ricorrente,
+  nessun riavvio del bot a metà misura salvo anomalia. "Blocchi" nel
+  resto di questo documento si riferisce SOLO alla segmentazione
+  interna della partita cutechess per checkpoint/ripresa — vedi
+  "Esecuzione su Oracle" sotto — non a finestre separate in cui il bot
+  torna online)
 
-Motivazione: stessa finestra di C1 per elo1=5 (riuso diretto, nessuna
-nuova scelta se Daniele preferisce quella). elo1=3 è un'alternativa
-più stretta, proposta perché l'effetto atteso per QUESTO cambiamento
-(un risparmio di tempo solo nell'intervallo 100-500ms di allocazione,
-quindi attivo solo in una parte delle mosse di una partita 10+0,1) è
-plausibilmente piccolo — se risultasse sotto elo1=5, una finestra più
-stretta (elo1=3) sarebbe comunque in grado di distinguerlo, al prezzo
-di quasi 3 volte le partite.
+A 20.000 partite, 32,14s/partita, concurrency=2: **≈178 ore (≈7,4
+giorni) seriali equivalenti**, effettive **≈89 ore (≈3,7 giorni)** con
+concurrency=2 — più del caso peggiore (≈73h) perché il tetto (20.000)
+è più alto della stima del caso peggiore (≈16.250).
 
 ## Controllo del tempo
 
