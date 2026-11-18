@@ -43,7 +43,7 @@ fn main() {
         let legali = board.genera_mosse_legali(&z);
         let m = *legali.iter().find(|m| m.to_uci() == mv)
             .unwrap_or_else(|| panic!("mossa {} non legale in {}", mv, board.to_fen()));
-        board.esegui_mossa(&m, &z, Some(&net));
+        board.esegui_mossa(&m, &z, Some(&net), None);
         assert_consistent(&net, &board, &format!("dopo {} (score {} cp)", mv, {
             let white_to_move = board.turno == luna::board::Colore::Bianco;
             net.evaluate_from_accumulator(&board.nnue_acc, white_to_move, &board)

@@ -89,7 +89,7 @@ fn play_and_check(net: &LunaNNUE, board: &mut Scacchiera, z: &ZobristKeys, uci_m
     let legali = board.genera_mosse_legali(z);
     let m = *legali.iter().find(|m| m.to_uci() == uci_move)
         .unwrap_or_else(|| panic!("mossa {} non legale in {}", uci_move, board.to_fen()));
-    let applied = board.esegui_mossa(&m, z, Some(net));
+    let applied = board.esegui_mossa(&m, z, Some(net), None);
     assert!(applied, "la mossa {} avrebbe dovuto essere applicabile", uci_move);
     assert_acc_consistent(net, board, &format!("dopo {}", uci_move));
 }
@@ -108,7 +108,7 @@ fn incremental_matches_full_refresh_quiet_and_capture() {
         let legali = board.genera_mosse_legali(&z);
         let m = *legali.iter().find(|m| m.to_uci() == mv)
             .unwrap_or_else(|| panic!("mossa {} non legale in {}", mv, board.to_fen()));
-        assert!(board.esegui_mossa(&m, &z, Some(net)));
+        assert!(board.esegui_mossa(&m, &z, Some(net), None));
         assert_acc_consistent(net, &board, &format!("dopo {}", mv));
         undo_stack.push(m);
     }

@@ -1428,7 +1428,7 @@ mod avx2_vs_scalar_real_position_tests {
                     break; // checkmate or stalemate: start a fresh game below
                 }
                 let mv = choose_move(&legal, &mut rng_state);
-                let played = board.esegui_mossa(&mv, z, Some(net));
+                let played = board.esegui_mossa(&mv, z, Some(net), None);
                 assert!(played, "genera_mosse_legali produced a move esegui_mossa rejected: {}", mv.to_uci());
                 positions.push(board.clone());
                 if positions.len() >= min_positions {

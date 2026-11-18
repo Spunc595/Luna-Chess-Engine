@@ -390,6 +390,90 @@ pub fn genera_mosse(s: &Scacchiera) -> MoveList {
     mosse
 }
 
+/// Only captures and promotions (including non-capturing promotions:
+/// `m.is_promozione()` is true for a plain push to the last rank too,
+/// see `MoveFlag::is_promotion`), for `quiescence`'s move loop. Same
+/// SET and same RELATIVE ORDER as
+/// `genera_mosse(s).retain(|m| m.is_cattura() || m.is_promozione())`
+/// (verified by `test_genera_mosse_catture_promozioni_equivalente` on
+/// a sample of positions) -- built by skipping the quiet-move branches
+/// of `genera_mosse` inline instead of generating them and filtering
+/// afterward. No castling (never a capture or a promotion, already
+/// excluded by the filter above, so `genera_arrocco` is never called
+/// here either).
+pub fn genera_mosse_catture_promozioni(s: &Scacchiera) -> MoveList {
+    let mut mosse = MoveList::new();
+    let us = s.turno;
+    let them = us.opposto();
+
+    let our_pieces = s.colori[us.indice()];
+    let their_pieces = s.colori[them.indice()];
+    let all_pieces = our_pieces | their_pieces;
+
+    // --- PAWNS ---
+    let pawns = s.pezzi[Pezzo::Pedone.indice()] & our_pieces;
+    let (_start_rank, prom_rank) = if us == Colore::Bianco { (1, 7) } else { (6, 0) };
+
+    let mut temp_pawns = pawns;
+    while temp_pawns != 0 {
+        let sq = temp_pawns.trailing_zeros() as usize;
+        temp_pawns &= temp_pawns - 1;
+
+        // Non-capturing promotion push only (the plain one-step and
+        // double push are always quiet, never on `prom_rank`): same
+        // condition `genera_mosse` uses before calling `add_pawn_move`,
+        // but only the promotion branch of that helper is reachable
+        // here.
+        let to_sq = if us == Colore::Bianco { sq + 8 } else { sq - 8 };
+        if to_sq < 64 && (all_pieces & (1 << to_sq)) == 0 && to_sq / 8 == prom_rank {
+            for p in [Pezzo::Regina, Pezzo::Torre, Pezzo::Alfiere, Pezzo::Cavallo] {
+                mosse.push(Mossa::new(sq, to_sq, MoveFlag::Promotion, Some(p)));
+            }
+        }
+
+        let attacks = crate::attacks::pawn_attacks(sq, us);
+        let mut victims = attacks & their_pieces;
+        while victims != 0 {
+            let v_sq = victims.trailing_zeros() as usize;
+            victims &= victims - 1;
+            add_capture_move(sq, v_sq, prom_rank, &mut mosse);
+        }
+
+        if let Some(ep_sq) = s.ep_square {
+            if (attacks & (1 << ep_sq)) != 0 {
+                 mosse.push(Mossa::new(sq, ep_sq, MoveFlag::EnPassant, None));
+            }
+        }
+    }
+
+    // --- KNIGHTS, BISHOPS, ROOKS, QUEEN, KING: captures only ---
+    for p_type in [Pezzo::Cavallo, Pezzo::Alfiere, Pezzo::Torre, Pezzo::Regina, Pezzo::Re] {
+        let mut pieces = s.pezzi[p_type.indice()] & our_pieces;
+        while pieces != 0 {
+            let sq = pieces.trailing_zeros() as usize;
+            pieces &= pieces - 1;
+
+            let attacks = match p_type {
+                Pezzo::Cavallo => crate::attacks::knight_attacks(sq),
+                Pezzo::Alfiere => crate::attacks::bishop_attacks(sq, all_pieces),
+                Pezzo::Torre => crate::attacks::rook_attacks(sq, all_pieces),
+                Pezzo::Regina => crate::attacks::queen_attacks(sq, all_pieces),
+                Pezzo::Re => crate::attacks::king_attacks(sq),
+                _ => 0,
+            };
+
+            let mut captures = attacks & their_pieces;
+            while captures != 0 {
+                let to = captures.trailing_zeros() as usize;
+                captures &= captures - 1;
+                mosse.push(Mossa::new(sq, to, MoveFlag::Capture, None));
+            }
+        }
+    }
+
+    mosse
+}
+
 fn genera_arrocco(s: &Scacchiera, mosse: &mut MoveList, all: u64) {
     let us = s.turno;
     if s.in_scacco() { return; }
@@ -702,5 +786,45 @@ mod movelist_tests {
         assert_eq!(list.len(), 0);
         assert_eq!(list.iter().count(), 0);
         assert_eq!(list.into_iter().count(), 0);
+    }
+
+    /// Esperimento 05, modifica (iii): `genera_mosse_catture_promozioni`
+    /// deve produrre lo STESSO insieme di mosse, nello STESSO ordine
+    /// relativo, di `genera_mosse(s).retain(|m| m.is_cattura() ||
+    /// m.is_promozione())` -- su un campione di posizioni che copre
+    /// catture semplici, promozioni (con e senza cattura), presa al
+    /// varco, e una posizione senza nessuna cattura/promozione
+    /// disponibile (lista vuota in entrambi i casi).
+    #[test]
+    fn genera_mosse_catture_promozioni_equivalente_a_filtro() {
+        let z = ZobristKeys::default();
+        let fens = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 5",
+            "r3k3/1P6/8/8/8/8/6p1/4K2R w K - 0 1",
+            "rnbqkbnr/ppp1p1pp/8/3pPp2/8/8/PPPP1PPP/RNBQKBNR w KQkq f6 0 3",
+            "8/8/3k4/3p4/4P3/3K4/8/8 w - - 0 1",
+        ];
+        for fen in fens {
+            let board = Scacchiera::from_fen(fen, &z);
+            let mut atteso = genera_mosse(&board);
+            atteso.retain(|m| m.is_cattura() || m.is_promozione());
+            let atteso: Vec<(usize, usize, MoveFlag, Option<Pezzo>)> = atteso
+                .iter()
+                .map(|m| (m.da(), m.a(), m.move_flag(), m.pezzo_promosso()))
+                .collect();
+
+            let mirato = genera_mosse_catture_promozioni(&board);
+            let mirato: Vec<(usize, usize, MoveFlag, Option<Pezzo>)> = mirato
+                .iter()
+                .map(|m| (m.da(), m.a(), m.move_flag(), m.pezzo_promosso()))
+                .collect();
+
+            assert_eq!(
+                mirato, atteso,
+                "insieme/ordine diverso su FEN {}: mirato={:?} atteso={:?}",
+                fen, mirato, atteso
+            );
+        }
     }
 }
