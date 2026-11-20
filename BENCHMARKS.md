@@ -1369,3 +1369,44 @@ measurement, which does not exist yet.
 - `cargo check --target aarch64-unknown-linux-gnu` passing is a compilation check, not a run; no aarch64 binary
   from this exact (i)+(iii)-only tree has been executed yet (see the binary-preparation section below for what
   has and has not been built/run).
+
+
+## Esperimento 06: soft time limit always 60%, no exception below 500ms -- SPRT result (2026-11-20)
+
+`SearchInfo::new` (`search.rs`) used to set the soft time limit to the full allocation (no early-stop margin)
+whenever `time_limit <= 500` ms, and to 60% of the allocation otherwise. That threshold traced back to the very
+first upload of this codebase (2026-07-06), before any measurement discipline existed on this project, and was
+never tested or justified anywhere (see `docs/experiments/06-tempo-limite-morbido.md`, Passo 0). This change
+removes the exception: the soft limit is always 60% of the allocation, extracted into a pure, directly tested
+function (`soft_limit_di`). Non-functional at fixed depth (node counts identical to the reference on every gate:
+bench depth 18, 1 thread, 590,820 / 980,165; 100 positions depth 14, 0 mismatch) -- the change only matters under
+a real clock, which is exactly what the SPRT below measures.
+
+**SPRT result: `AcceptH1`.** `elo0=0 elo1=5 alpha=beta=0.05`, tc=10+0.1, Threads=1, Hash=64MB, concurrency=2,
+`UHO_4060_v4.epd`, aarch64 (Oracle), reference binary = v4.2.1 (i+iii), i.e. `release/v4.2.1-prep` -- NOT the full
+(i+ii+iii) package from `docs/experiments/05-pacchetto-velocita.md` (guard (ii) stays excluded, see that
+experiment's own entry above). LLR cumulative over 13 blocks (6,500 games, pre-registered block/opening-sequence
+design, no opening repeated across blocks): **3.4244**, crossing the upper bound **+2.9444**. W/D/L of "nuova":
++1826 =3022 -1652. Full data (per-block W/D/L and draw rate, PGN archive sha256, binary hashes used throughout):
+`docs/experiments/06-tempo-limite-morbido.md`, section "Esito".
+
+**Exploratory post-hoc Elo estimate (NOT a decision criterion -- the SPRT decision above is already final)**: an
+SPRT that stops as soon as the LLR crosses the upper bound tends to overestimate the true point effect (it stops
+precisely when the observed sample happens to be most favorable). With that caveat stated up front: (a) classical
+trinomial formula, `s=0.513385` -> **+9.3 Elo**, 95% CI (normal approximation on `s`) **[+3.1, +15.5]**; (b)
+bootstrap by opening PAIR (cluster = pair, same FEN played with both colors; all 3,250 pairs had exactly 2 games,
+10,000 resamples, seed 20261201): median **+9.3**, 95% CI **[+4.0, +14.4]** (tighter than the classical estimate,
+as expected from a color-balanced pairing). Neither interval should be read as "the" Elo gain.
+
+**Limits, explicit**:
+- The test measures a regime where **every move has an allocation <=500ms** (tc=10+0.1, Threads=1, Hash=64,
+  aarch64) -- that is exactly, and only, where the removed condition used to change behavior.
+- On the live bot (Threads=2, Hash=512MB), the modification only affects moves whose allocation under that
+  configuration is also <=500ms. **The real in-game gain on the bot is not measured here and may be smaller**
+  than either the SPRT's elo1 threshold or the exploratory point estimate above.
+- **No judgment is made on long time controls**: where the allocation is well above 500ms, the removed condition
+  never changed anything (`soft_limit_di` already returned the same 60% either way), so no behavior changes there
+  at all.
+- **`AcceptH1` means "the true effect is at least elo1=5 Elo, at the chosen alpha/beta=0.05 confidence level" --
+  not "+5 Elo" and not "+9 Elo".** The SPRT does not estimate a point value; it decides whether an effect crosses
+  a pre-registered threshold.

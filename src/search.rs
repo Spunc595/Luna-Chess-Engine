@@ -272,6 +272,14 @@ pub struct SearchInfo {
     pub stop_signal: Arc<AtomicBool>,
 }
 
+/// The soft limit is always 60% of the allocation, with no exception for
+/// small budgets (Esperimento 06: the `> 500` guard this replaced had no
+/// measured basis -- see docs/experiments/06-tempo-limite-morbido.md).
+#[inline(always)]
+fn soft_limit_di(time_limit: u128) -> u128 {
+    time_limit * 60 / 100
+}
+
 impl SearchInfo {
     #[inline(always)]
     fn publish_nodes(&self) {
@@ -294,7 +302,7 @@ impl SearchInfo {
     }
 
     pub fn new(time_limit: u128, depth_limit: i32) -> Self {
-        let soft = if time_limit > 500 { time_limit * 60 / 100 } else { time_limit };
+        let soft = soft_limit_di(time_limit);
         SearchInfo {
             start_time: Instant::now(),
             hard_limit: time_limit,
@@ -1141,6 +1149,22 @@ fn quiescence(
     let flag = if alpha > original_alpha { Bound::Exact } else { Bound::Alpha };
     tt.store(board.hash, 0, ply, alpha, flag, best_move);
     alpha
+}
+
+#[cfg(test)]
+mod soft_limit_tests {
+    use super::soft_limit_di;
+
+    // Esperimento 06: always 60%, no exception below 500ms. 501*60/100=300
+    // by integer truncation (not 300.6), same as 500*60/100.
+    #[test]
+    fn always_sixty_percent_no_exception_below_500ms() {
+        assert_eq!(soft_limit_di(50), 30);
+        assert_eq!(soft_limit_di(100), 60);
+        assert_eq!(soft_limit_di(500), 300);
+        assert_eq!(soft_limit_di(501), 300);
+        assert_eq!(soft_limit_di(1000), 600);
+    }
 }
 
 #[cfg(test)]
