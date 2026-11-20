@@ -605,25 +605,125 @@ prompt (chiave già fidata). `known_hosts` ultima modifica
 
 ### Stato
 
-Punti A-E tutti verdi. In attesa del via per installare
-`exp06-sprt.service`, verificare "nessuna partita in corso", fermare
-`luna-bot` e avviare la misura reale (elo1=5, tetto 20.000 o 240h,
-concurrency 2, Threads=1, Hash=64, binari aarch64 sopra).
-SPRT.
+Punti A-E tutti verdi. Il via è stato dato il 2026-11-18: misura reale
+eseguita (vedi "Esito" sotto). Merge in `main`, tag, release e
+aggiornamento del bot restano in attesa di un ulteriore via esplicito
+di Daniele.
 
 ---
 
 ## Esito
 
-(Da compilare dopo l'eventuale lancio dell'SPRT, in un commit
-successivo. Non eseguito in questa fase: solo Passo 0 + Passo 1
-[questo protocollo] + Passo 2 [implementazione e gate offline, nessun
-SPRT].)
+Misura reale eseguita su Oracle, 2026-11-18T12:52:52Z →
+2026-11-19T13:59:27Z (~25h, fermo continuo), binari aarch64: `rif`
+sha256 `4b4c28b67ff7d7d782fd92e40f4e322c3dfd1fef621682b95d3f3e8c80388e19`,
+`nuova` sha256 `afedf120da267976faa7def6db232541ceebfcac2965b6f65825f0c61191588b`.
+Confermati identici dal file su disco (mtime 12:47:01Z, mai più
+scritto) e dai processi in esecuzione (`/proc/<pid>/exe`, controllato
+a campione durante la corsa) — non monitorato partita per partita per
+tutte le 25h, ma nessuna anomalia o cambiamento osservato in nessuno
+dei controlli fatti. Archivio completo (PGN dei 13 blocchi +
+`state.json` + config) sha256
+`fda2c3d986ca8be860336733cf301c44ccc7232fc5c341242817a8d8551f5e9a`,
+copiato in locale e verificato identico.
 
 ### Cosa è stato provato
 
+Rimossa la condizione `time_limit > 500` in `SearchInfo::new`
+(`soft_limit_di`, sempre 60% dell'allocazione). SPRT elo0=0/elo1=5,
+alpha=beta=0,05, tc=10+0,1, Threads=1, Hash=64, concurrency=2,
+`UHO_4060_v4.epd`, aperture sequenziali non sovrapposte (nessuna
+ripetuta), confronto `nuova` (modificata) vs `rif` (`release/v4.2.1-prep`,
+cioè v4.2.1: (i) prefetch + (iii) generatore mirato, SENZA la guardia
+(ii), che resta esclusa — vedi esperimento 05).
+
 ### Risultati misurati
 
-### Esito (positivo / negativo / non concludente) e perché, se noto
+- **13 blocchi completi, 6.500 partite** (tetto 20.000 non raggiunto,
+  tetto di tempo 240h non raggiunto — la decisione LLR è arrivata
+  prima di entrambi).
+- **LLR cumulativo finale: 3,4244**, confine superiore `+2,9444` →
+  **`AcceptH1`**.
+- **W/D/L di "nuova": +1826 =3022 -1652** (su 6.500).
+- **Perdite a tempo: 0** in tutti i 13 blocchi, per entrambi i motori
+  (nessuna etichetta di terminazione contenente "time" in nessun PGN
+  o log). **Crash/mosse illegali: 0** — tutte le 6.500 partite si sono
+  concluse per `[Termination "adjudication"]` (patta o resa per
+  adjudication), nessun'altra etichetta presente. Nessuna anomalia
+  rilevata dal driver in tutta la corsa.
+- **Tasso di patte e W/D/L per blocco** (500 partite/blocco, per
+  verificare la plausibilità della stabilità fra blocchi):
+
+| blocco | nuova +W | =D | -L | tasso patte |
+|---|---|---|---|---|
+| 0 | 150 | 221 | 129 | 0,442 |
+| 1 | 136 | 223 | 141 | 0,446 |
+| 2 | 140 | 242 | 118 | 0,484 |
+| 3 | 146 | 226 | 128 | 0,452 |
+| 4 | 143 | 213 | 144 | 0,426 |
+| 5 | 130 | 243 | 127 | 0,486 |
+| 6 | 141 | 233 | 126 | 0,466 |
+| 7 | 147 | 225 | 128 | 0,450 |
+| 8 | 136 | 243 | 121 | 0,486 |
+| 9 | 138 | 236 | 126 | 0,472 |
+| 10 | 138 | 238 | 124 | 0,476 |
+| 11 | 138 | 242 | 120 | 0,484 |
+| 12 | 143 | 237 | 120 | 0,474 |
+
+  Il tasso di patte oscilla fra 0,426 e 0,486 senza un trend
+  direzionale evidente (i blocchi 0-4 non sono sistematicamente
+  diversi dai blocchi 8-12); il vantaggio di "nuova" (W-L positivo in
+  12 blocchi su 13, negativo solo nel blocco 4) è coerente con un
+  effetto stabile nel tempo, non concentrato in pochi blocchi
+  anomali — nessuna verifica statistica formale di omogeneità fatta,
+  solo ispezione visiva come richiesto.
+
+**Stima ESPLORATIVA dell'Elo, POST HOC — etichettata come tale, NON un
+criterio di decisione (l'SPRT è già concluso con `AcceptH1`)**:
+
+- **(a) Formula trinomiale classica**: `s=0,513385` →
+  **Elo = +9,30**, IC95% (normale su `s`, poi trasformato) =
+  **[+3,13; +15,49]**.
+- **(b) Bootstrap per COPPIE di aperture** (cluster = coppia, stesso
+  FEN, i due colori — verificato: tutte le 3.250 aperture distinte
+  hanno esattamente 2 partite, nessuna orfana), 10.000 ricampionamenti,
+  seme `20261201`: mediana **+9,30**, **IC95% = [+4,01; +14,39]** (più
+  stretto del classico, come atteso da un disegno a colori
+  bilanciati).
+- **Dichiarazione richiesta**: un SPRT che si ferma non appena l'LLR
+  incrocia il confine superiore tende a sovrastimare l'effetto vero
+  puntuale (si ferma proprio nei momenti in cui il campione osservato
+  è più favorevole) — queste due stime sono post-hoc, esplorative, e
+  **non vanno usate come criterio** né al posto della decisione SPRT
+  già presa.
+
+### Esito: POSITIVO (AcceptH1)
+
+### Limiti dichiarati
+
+- Il test misura un regime in cui **ogni mossa ha allocazione <=500ms**
+  (tc=10+0,1, Threads=1, Hash=64, aarch64). Sul bot in servizio (che
+  usa Threads=2/Hash=512) la modifica agisce **solo sulle mosse con
+  allocazione <=500ms** di quella configurazione: il guadagno reale in
+  partita sul bot **non è misurato qui** e può essere minore di quanto
+  stimato sopra.
+- **Nessun giudizio sui controlli lunghi** (dove l'allocazione per
+  mossa supera quasi sempre i 500ms): la condizione rimossa non
+  cambiava comunque nulla in quel regime (vedi "Cambiamento esatto").
+- **`AcceptH1` significa "l'effetto vero è probabilmente >= 5 Elo, al
+  livello di confidenza scelto (alpha=beta=0,05)"**, non "+5 Elo" né
+  "+9 Elo" né il valore esplorativo sopra: l'SPRT non stima un valore
+  puntuale, decide solo se l'effetto supera una soglia.
+- Il riferimento (`rif`) era **v4.2.1 (i+iii)**, cioè `release/v4.2.1-prep`
+  — non v4.2.0 e non il pacchetto completo (i+ii+iii) dell'esperimento
+  05 (la guardia (ii) resta esclusa, separatamente).
 
 ### Cosa abbiamo imparato (anche se negativo)
+
+Oltre al verdetto: il tasso di patte per blocco (0,426-0,486, media
+vicina a 0,46) è coerente con il resto del progetto a questo tc/libro,
+e la stabilità del vantaggio di "nuova" su quasi tutti i blocchi è un
+dato a favore della robustezza del risultato oltre al solo LLR
+cumulativo. Zero perdite a tempo su 6.500 partite in entrambi i motori
+è anche un'informazione positiva sulla correttezza generale del time
+management in questo regime, non solo sulla modifica specifica.
