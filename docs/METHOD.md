@@ -486,7 +486,7 @@ caso). Non si cambia strumento durante un esperimento già lanciato.
 
 ---
 
-## 10. Lezioni dai primi tre esperimenti (aggiornato 2026-11-15)
+## 10. Lezioni dai primi sei esperimenti (aggiornato 2026-11-20)
 
 Valgono per gli esperimenti 01 (SEE calcolata una volta in qsearch) e 02
 (LMR calibrata sulla history, K=250); i dati stanno nei protocolli
@@ -621,6 +621,56 @@ pre-generazione ha inoltre mostrato che l'hash registrato del binario era
 diventato obsoleto dopo due commit di codice: build pulita, prove rifatte
 sul binario che genera i dati. Indicazione: registrare l'hash dopo ogni
 modifica del codice e rifare le prove di equivalenza prima di generare.
+
+### 10.13 Un criterio su un percentile, senza incertezza, su input arrotondati è mal posto (esperimento 05)
+Il criterio 3 della verifica di stabilità della guardia (ii) confrontava
+il 99° percentile del superamento per mossa punto a punto, su tempi
+arrotondati a ±50ms dal log di cutechess, senza nessuna stima
+dell'incertezza. Il blocco 10+0,1 ha dato "p99 pacchetto +2,4ms",
+letteralmente peggiore per la regola scritta — ma un confronto
+esplorativo con bootstrap per partita (IC95% della differenza) ha dato
+un intervallo che include 0. Indicazione: un criterio su un singolo
+percentile stimato da pochi dati arrotondati, senza un confronto
+sull'incertezza, può dare un verdetto che la regola letterale impone di
+registrare ma che un'analisi più attenta non sostiene — dichiararlo
+come "mal posto" (errore di protocollo) è diverso da riclassificare il
+risultato dopo averlo visto.
+
+### 10.14 Un criterio "zero oltre il riferimento" non distingue tassi piccoli (esperimento 05)
+La verifica di stabilità della guardia (ii) usava "zero perdite a tempo
+del pacchetto in eccesso rispetto al riferimento" come criterio di
+arresto. Il riferimento stesso ha perso 4 partite a tempo su un blocco
+(10+0,1): un confronto 2-contro-0 (o anche 2-contro-4) su un numero
+piccolo di eventi non distingue nemmeno due tassi uguali. Indicazione:
+un criterio "zero in eccesso" ha senso solo se il riferimento stesso ha
+un tasso osservato di zero sullo stesso campione; altrimenti serve un
+test di tasso con una dimensione campionaria calcolata PRIMA, non un
+confronto di conteggi grezzi.
+
+### 10.15 "Nessuna partita in corso" va verificato prima di fermare un binario in servizio, non assunto
+Il piano di aggiornamento del bot per v4.2.1 (2026-11-18) non includeva
+un controllo esplicito "nessuna partita in corso" prima di fermare il
+servizio. Per puro caso una partita (`U6b3MrRi`) era effettivamente in
+corso al momento dello stop — ripresa correttamente al riavvio, senza
+perdita a tempo né mossa illegale, ma non verificato PRIMA di agire.
+Daniele l'ha segnalato come errore proprio del piano. Indicazione: ogni
+piano che ferma un binario in servizio deve includere un controllo
+esplicito (processo motore e/o stato "playing" dell'account) come
+PRECONDIZIONE scritta, non solo come osservazione a posteriori sui log
+— implementato poi come primo passo automatico nell'esperimento 06
+(`exp06_driver.py`, attesa con tetto massimo, mai un fermo forzato).
+
+### 10.16 L'hash giusto è quello della piattaforma su cui si esegue, non quello più comodo da citare
+Nel preparare l'esecuzione reale dell'esperimento 06 su Oracle
+(aarch64), gli hash dei binari riportati inizialmente a Daniele erano
+quelli delle build x86-64 fatte sul laptop per i gate locali — non gli
+hash aarch64 effettivamente usati dalla corsa. Daniele l'ha segnalato
+come proprio errore nel messaggio, ma l'errore di fondo è generale: un
+hash ha senso solo abbinato alla piattaforma/esecuzione a cui si
+riferisce, e va sempre dichiarato quale dei due (o più) binari citati è
+quello che la corsa REALMENTE esegue — verificabile, come fatto poi,
+leggendo l'hash direttamente dal binario del processo in esecuzione
+(`/proc/<pid>/exe`), non solo dal file su disco.
 
 ---
 
